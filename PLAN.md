@@ -411,6 +411,33 @@ Der Windows-/macOS-Ablauf bleibt fachlich gleich: Beide verwenden dieselben Bran
 
 Zu Beginn ist eine kleine gemeinsame Übung sinnvoll: Beide laden das Repository herunter, ändern jeweils eine kleine Datei, erstellen Commits und führen einen Branch über einen Pull Request zusammen. Danach kann derselbe Ablauf für den Plugin-Code verwendet werden.
 
+### Zusammenarbeit zweier realer Personen mit getrennten Copilot-Sessions
+
+Beide Personen starten vom selben **GitHub-Ausgangsbranch** (in der Regel
+`main`). Jede Person arbeitet anschließend in einem eigenen Branch und einem
+eigenen lokalen Arbeitsordner. Die Aufgaben werden vorher klar aufgeteilt:
+Zum Beispiel bearbeitet eine Person die Datenpipeline und die andere die
+Benutzerführung und Ausgabe. Beide stimmen außerdem ab, welche Dateien und
+Schnittstellen jeweils in ihrem Aufgabenbereich liegen. Dieselbe Datei darf
+nicht gleichzeitig in beiden Arbeitsordnern bearbeitet werden.
+
+Lokale Änderungen in einer Copilot-Session sind für die andere Person
+unsichtbar. Erst nach `git commit` und `git push` sind sie im gemeinsamen
+GitHub-Repository verfügbar. Vor dem Teilen müssen die Änderungen daher
+geprüft, committed und auf den eigenen Remote-Branch gepusht werden. Der
+Pull Request ist die formale Übergabe: Die andere Person prüft diesen Branch,
+gibt Rückmeldung und übernimmt ihn erst nach der Zustimmung.
+
+`git pull` lädt ausschließlich bereits gepushte Änderungen des aktuell
+ausgewählten Remote-Branches. Ungespeicherte oder nur lokal committed
+Änderungen in der anderen Copilot-Session werden dadurch nicht übertragen.
+Niemand arbeitet direkt auf `main`; Änderungen gelangen ausschließlich über
+geprüfte Pull Requests in den gemeinsamen Ausgangsbranch.
+
+Der aktuelle gemeinsame Stand ist **bereit für Commit und Push**. Ein Push
+wird an dieser Stelle ausdrücklich noch nicht ausgeführt und erst nach
+Bestätigung vorgenommen.
+
 ### Konfliktvermeidung und Vorgehen bei Konflikten
 
 - Vor dem Bearbeiten absprechen, welche Person welche Dateien und
