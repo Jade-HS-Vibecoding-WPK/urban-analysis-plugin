@@ -77,3 +77,48 @@ def test_import_requires_valid_geopackage_and_project_setup(tmp_path):
             study_area_wkt="POLYGON ((0 0, 1 0, 1 1, 0 0))",
             buffer_meters=-1,
         )
+
+
+def test_maps_denial_tower_fields_to_common_schema(tmp_path):
+    path = tmp_path / "denial.gpkg"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER
+            );
+            INSERT INTO gpkg_spatial_ref_sys VALUES
+                ('WGS 84 / UTM zone 32N', 25832, 'EPSG', 25832);
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT,
+                srs_id INTEGER
+            );
+            INSERT INTO gpkg_geometry_columns VALUES
+                ('towers', 'wkt_geom', 'POINT', 25832);
+            CREATE TABLE towers (
+                fid INTEGER PRIMARY KEY, objid TEXT, ken TEXT, ken__bez TEXT,
+                bwf TEXT, bwf__bez TEXT, untermerkmal TEXT, wkt_geom TEXT
+            );
+            INSERT INTO towers VALUES
+                (1, 'DENIAL1100003tFJ', '51001', 'Turm', '1002',
+                 'Kirchturm, Glockenturm', 'xxx', 'POINT (0 0)');
+            """
+        )
+
+    result = GeoPackageImporter().import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    )
+
+    mapping = {
+        suggestion.source_field: suggestion.target_field
+        for suggestion in result.attribute_suggestions
+    }
+    assert mapping["ken__bez"] == "object_type"
+    assert mapping["bwf__bez"] == "category"
+    assert mapping["untermerkmal"] == "status"
+    assert result.harmonized_records[0].attributes["object_type"] == "Turm"
+    assert result.harmonized_records[0].attributes["category"] == "Kirchturm, Glockenturm"
+    assert result.harmonized_records[0].attributes["status"] == "xxx"

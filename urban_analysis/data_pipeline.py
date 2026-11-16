@@ -25,9 +25,24 @@ from .contracts import (
 
 TARGET_FIELDS = ("source_name", "object_type", "category", "status", "area_m2", "year", "source")
 TARGET_FIELD_ALIASES: Mapping[str, Tuple[str, ...]] = {
-    "object_type": ("object_type", "objecttype", "type", "typ", "haltestellenart"),
-    "category": ("category", "categorie", "kategorie", "art", "klasse", "nutzung"),
-    "status": ("status", "zustand", "state"),
+    "object_type": (
+        "object_type",
+        "objecttype",
+        "type",
+        "typ",
+        "haltestellenart",
+        "ken__bez",
+    ),
+    "category": (
+        "category",
+        "categorie",
+        "kategorie",
+        "art",
+        "klasse",
+        "nutzung",
+        "bwf__bez",
+    ),
+    "status": ("status", "zustand", "state", "untermerkmal"),
     "area_m2": ("area_m2", "area", "fläche", "flaeche", "shape_area"),
     "year": ("year", "jahr", "baujahr"),
     "source": ("source", "quelle", "data_source"),
@@ -340,7 +355,11 @@ class GeoPackageImporter:
         seen: set[Tuple[Any, ...]] = set()
         records: List[HarmonizedRecord] = []
         geometry_column = next(
-            (field for field in layer.fields if _normalized(field) in {"geom", "geometry", "thegeom"}),
+            (
+                field
+                for field in layer.fields
+                if _normalized(field) in {"geom", "geometry", "thegeom", "wktgeom"}
+            ),
             None,
         )
         row_id_column = next(
