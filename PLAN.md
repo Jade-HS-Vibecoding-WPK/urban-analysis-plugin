@@ -4,6 +4,8 @@
 
 Das Plugin soll Urban-Design-Studierende bei der Analyse von Projektgebieten unterstützen. Es soll einen nachvollziehbaren Workflow anbieten, in dem Daten aus mehreren Quellen verarbeitet und anschließend für städtebauliche Fragestellungen ausgewertet werden.
 
+Der Pilot bezieht sich auf den Stadtteil **Donnerschwee in Oldenburg**. Der fachliche Schwerpunkt liegt auf **Mobilität und ÖPNV-Erreichbarkeit**.
+
 Der vorgesehene Gesamtworkflow lautet:
 
 **Daten laden → prüfen → bereinigen → harmonisieren → analysieren → visualisieren**
@@ -22,16 +24,17 @@ Die erste Version soll bewusst klein und belastbar bleiben:
 - Rohdaten werden nicht überschrieben; bereinigte Kopien werden erzeugt.
 - Die Verarbeitung erzeugt einen Ergebnisordner oder eine Ergebnisgruppe im QGIS-Projekt.
 - Es gibt einen Prüfbericht mit Warnungen, behobenen Problemen und dokumentierten Änderungen.
-- Zunächst werden nur zwei oder drei Analysebausteine umgesetzt.
-- Ergebnisse bestehen aus Karten, Kennwerten und einfachen Diagrammen.
+- Die erste Analyse betrachtet die ÖPNV-Erreichbarkeit anhand von Haltestellen und Einzugsbereichen.
+- Im MVP werden dafür einfache **300-m-Luftlinienpuffer** um Haltestellen erzeugt.
+- Ergebnisse bestehen zunächst aus einer Karte und den dazugehörigen Kennwerten.
 
-Nicht Teil des ersten MVP sind die automatische Datensuche, eine umfangreiche automatische Fehlerkorrektur und frei konfigurierbare Gestaltung. Diese Funktionen sind mögliche Ausbaustufen, sobald der manuelle Workflow stabil ist.
+Nicht Teil des ersten MVP sind die automatische Datensuche, eine umfangreiche automatische Fehlerkorrektur, die Erreichbarkeit entlang des tatsächlichen Fußwegenetzes und frei konfigurierbare Gestaltung. Die Nutzung des Fußwegenetzes ist eine spätere Erweiterung. Zunächst werden ausschließlich frei verfügbare Daten von **OpenStreetMap** verwendet.
 
 ## 3. Fachlicher und technischer Workflow
 
 ### 3.1 Daten laden
 
-In der ersten Version werden vorhandene Layer manuell in QGIS geladen und im Plugin ausgewählt. Für jede Datenquelle wird dokumentiert:
+In der ersten Version werden vorhandene Layer manuell in **QGIS 3.44** geladen und im Plugin ausgewählt. Die erste Datenquelle ist **OpenStreetMap**. Für jede Datenquelle wird dokumentiert:
 
 | Punkt | Zu dokumentieren |
 | --- | --- |
@@ -42,7 +45,7 @@ In der ersten Version werden vorhandene Layer manuell in QGIS geladen und im Plu
 | Zielschema | standardisierte Feldnamen und Datentypen |
 | Quelle und Lizenz | Herkunft der Daten und Nutzungsbedingungen |
 
-Automatische Datenabfragen aus vorher festgelegten Quellen werden erst ergänzt, wenn der manuelle Ablauf zuverlässig funktioniert. Quellen sollen dann versioniert, nachvollziehbar und ausfalltolerant sein.
+Automatische Datenabfragen aus weiteren vorher festgelegten Quellen werden erst ergänzt, wenn der manuelle Ablauf zuverlässig funktioniert. Quellen sollen dann versioniert, nachvollziehbar und ausfalltolerant sein.
 
 ### 3.2 Daten prüfen
 
@@ -106,13 +109,18 @@ Jede Analyse soll möglichst als eigener QGIS-Processing-Algorithmus umgesetzt w
 - eine sinnvolle Standarddarstellung,
 - eine kurze Interpretation.
 
-Als mögliche Themen wurden genannt:
+Die erste Analyse im Pilot ist die **ÖPNV-Erreichbarkeit in Donnerschwee**:
 
-- **Mobilität:** Erreichbarkeit, Haltestelleneinzugsbereiche, Wegenetz und Wegedichte.
-- **Klima:** Grünflächenanteil, Versiegelung, Verschattung oder Hitzeindikatoren.
-- **Stadtstruktur:** Gebäudedichte, Nutzungsverteilung sowie Block- und Parzellenstruktur.
+- Haltestellen aus OpenStreetMap werden als Eingabedaten verwendet.
+- Für jede Haltestelle wird ein 300-m-Luftlinienpuffer erzeugt.
+- Die Überlagerung der Puffer mit den verfügbaren Daten wird als Karte visualisiert und mit Kennwerten beschrieben.
 
-Die konkrete Auswahl und Reihenfolge ist noch offen und wird im Pilotumfang festgelegt.
+Eine Erreichbarkeitsberechnung entlang des tatsächlichen Fußwegenetzes gehört nicht zum MVP und wird erst später geprüft.
+
+#### Spätere Erweiterungen
+
+- **Fußwegenetz:** Eine spätere Erweiterung kann die Erreichbarkeit entlang des tatsächlichen Fußwegenetzes prüfen.
+- **ÖV-Erschließungsqualität:** Eine spätere Erweiterung kann bewerten, wie gut das Untersuchungsgebiet durch den öffentlichen Verkehr erschlossen ist. Dafür könnten beispielsweise Haltestellen, Linienangebot, Bedienhäufigkeit und/oder Einzugsbereiche berücksichtigt werden. Die genaue Methodik ist eine noch gemeinsam festzulegende fachliche Entscheidung.
 
 ### 3.6 Visualisieren
 
@@ -128,10 +136,12 @@ Zuerst werden verständliche Standardstile verwendet. Später können folgende E
 
 Die technische Basis ist:
 
-- **QGIS** als Arbeitsumgebung,
+- **QGIS 3.44** als gemeinsame Zielumgebung,
 - **Python** als Programmiersprache,
 - **PyQGIS** für die Arbeit mit QGIS-Projekten, Layern und Geometrien,
 - das **QGIS Processing Framework** für wiederverwendbare Verarbeitungsschritte und eigene Algorithmen.
+
+Eine Person arbeitet mit Microsoft Windows, die andere mit macOS. Beide verwenden QGIS 3.44 und stimmen Erweiterungen, Projektstruktur und Testdaten ab. Datei- und Ordnerpfade werden im Plan und in der Implementierung plattformneutral behandelt; hardcodierte Windows- oder macOS-Pfade werden vermieden.
 
 Die erste technische Version soll:
 
@@ -147,14 +157,14 @@ Die Architektur soll Rohdaten, bereinigte Daten und Analyseergebnisse strikt tre
 
 ### Phase 0 – Scope und Beispieldaten
 
-- Ein konkretes Testgebiet auswählen.
-- Beispieldaten sammeln.
-- Zwei bis drei typische Nutzungsszenarien beziehungsweise Analysefragen formulieren.
-- Einen begrenzten Pilotumfang festlegen.
+- Das bestätigte Testgebiet ist der Stadtteil Donnerschwee in Oldenburg.
+- OpenStreetMap als erste frei verfügbare Datenquelle festlegen.
+- Den Pilotumfang auf Mobilität und ÖPNV-Erreichbarkeit begrenzen.
+- Drei konkrete Analysefragen für den Piloten formulieren; diese sind noch offen.
 
 ### Phase 1 – Fachlichen Fokus und Datenkonzept festlegen
 
-- Pilot-Schwerpunkt und Maßstab bestimmen.
+- Die erste Analyse als ÖPNV-Erreichbarkeit über Haltestellen und 300-m-Luftlinienpuffer festlegen.
 - Benötigte Datensätze festlegen.
 - Datenquellen, Geometrietypen, CRS, Attribute, erwartete Fehler sowie Lizenzen dokumentieren.
 - Zielschema und erste Mapping-Regeln definieren.
@@ -208,13 +218,13 @@ Die Architektur soll Rohdaten, bereinigte Daten und Analyseergebnisse strikt tre
 
 Die folgenden Punkte sind ausdrücklich noch nicht entschieden und dürfen im Plan nicht vorweggenommen werden:
 
-- **Testgebiet:** Welche Stadt und welches Quartier werden untersucht? Welcher Untersuchungsmaßstab gilt?
-- **Pilot-Schwerpunkt:** Beginnt der Pilot mit Mobilität, Klima oder Stadtstruktur?
-- **Drei Analysefragen:** Welche drei konkreten städtebaulichen Fragen soll das Plugin im Pilot beantworten?
+- **Drei Analysefragen:** Welche drei konkreten städtebaulichen Fragen soll die ÖPNV-Erreichbarkeitsanalyse in Donnerschwee beantworten?
 
-Erst nach diesen Entscheidungen können die benötigten Datensätze, Zielschema, Prüfregeln und gewünschten Ausgaben verbindlich festgelegt werden. Bis dahin bleibt ein konkretes Quartier mit einer ersten Mobilitätsanalyse lediglich eine vorgeschlagene Arbeitsannahme und keine getroffene Entscheidung.
+Bestätigt sind das Testgebiet Donnerschwee in Oldenburg, der Pilot-Schwerpunkt Mobilität und ÖPNV sowie die erste Analyse mit 300-m-Luftlinienpuffern um OpenStreetMap-Haltestellen. Die Erreichbarkeit entlang des tatsächlichen Fußwegenetzes bleibt eine spätere Erweiterung. Bei Unsicherheiten wird vor einer Entscheidung zuerst nachgefragt; offene Punkte werden nicht stillschweigend festgelegt.
 
 ## 7. Rollen im Zweierteam
+
+Die Rollen werden unabhängig vom Betriebssystem verteilt. Eine Person arbeitet mit Microsoft Windows, die andere mit macOS; beide arbeiten am gleichen fachlichen Ablauf und prüfen gegenseitig die Ergebnisse.
 
 ### Person A – Plugin und Nutzeroberfläche
 
@@ -257,11 +267,11 @@ GitHub ist das gemeinsame Repository. Jede Person arbeitet zunächst in einer ei
 
 ### Empfohlener Ablauf
 
-1. Vor einer neuen Aufgabe den aktuellen Stand holen:
+1. Beide verwenden QGIS 3.44 und holen vor einer neuen Aufgabe den aktuellen Stand:
 
    ```bash
    git switch main
-   git pull
+   git pull origin main
    ```
 
 2. Einen eigenen Branch für die Aufgabe erstellen:
@@ -285,11 +295,13 @@ GitHub ist das gemeinsame Repository. Jede Person arbeitet zunächst in einer ei
 
 5. Einen Pull Request erstellen. Die andere Person prüft den Code, schreibt bei Bedarf Kommentare und übernimmt den Branch nach der Zustimmung in `main`.
 
+Der Windows-/macOS-Ablauf bleibt fachlich gleich: Beide verwenden dieselben Branch- und Commit-Regeln, dieselben relativen Projektpfade und dieselben Testdaten. Lokale Pfade werden nicht in den Code geschrieben. Wenn sich ein Schritt unter Windows und macOS unterschiedlich verhält, wird das Problem dokumentiert und zuerst gemeinsam geklärt, bevor eine technische Entscheidung getroffen wird.
+
 Zu Beginn ist eine kleine gemeinsame Übung sinnvoll: Beide laden das Repository herunter, ändern jeweils eine kleine Datei, erstellen Commits und führen einen Branch über einen Pull Request zusammen. Danach kann derselbe Ablauf für den Plugin-Code verwendet werden.
 
 Um Merge-Konflikte zu vermeiden, sollten beide nicht dauerhaft dieselben Dateien ändern, vor neuen Aufgaben den aktuellen Stand von `main` holen, kleine Änderungen machen und absprechen, wer welchen Bereich bearbeitet. Wenn Git einen Konflikt nicht automatisch lösen kann, besprecht ihr die betroffene Stelle, entscheidet euch gemeinsam für die richtige Variante, bereinigt die Datei und bestätigt die Lösung.
 
-Für den Einstieg können GitHub Desktop oder die Git-Funktionen in Visual Studio Code genutzt werden. Benötigt werden GitHub-Konten, Git, ein Editor, QGIS und die Python-Umgebung.
+Für den Einstieg können GitHub Desktop unter Windows oder die Git-Funktionen in Visual Studio Code auf beiden Systemen genutzt werden. Benötigt werden GitHub-Konten, Git, ein Editor, QGIS 3.44 und die jeweilige Python-Umgebung. QGIS-Version, verwendete Plugins und Testdaten werden vor gemeinsamen Tests abgeglichen.
 
 ## 9. Tests und Qualitätssicherung
 
@@ -323,15 +335,12 @@ Vor einem Merge sollte die jeweils andere Person die Änderung prüfen. Die fach
 
 ## 11. Nächste Schritte
 
-1. **Testgebiet auswählen** – Stadt, Quartier und Untersuchungsmaßstab entscheiden.
-2. **Pilot-Schwerpunkt festlegen** – Mobilität, Klima oder Stadtstruktur auswählen.
-3. **Drei Analysefragen formulieren** – konkrete Fragen festlegen, die der Pilot beantworten soll.
-4. Die dafür notwendigen Datensätze sammeln.
-5. Eine Tabelle mit Datenquellen, Attributen, CRS, erwarteten Fehlern, Zielschema und Lizenz erstellen.
-6. Die kleinste durchgängige Funktion festlegen und umsetzen:
+1. **Drei Analysefragen formulieren** – konkrete Fragen festlegen, die die ÖPNV-Erreichbarkeitsanalyse in Donnerschwee beantworten soll.
+2. Die dafür notwendigen OpenStreetMap-Datensätze sammeln.
+3. Eine Tabelle mit Datenquellen, Attributen, CRS, erwarteten Fehlern, Zielschema und Lizenz erstellen.
+4. Die kleinste durchgängige Funktion festlegen und umsetzen:
 
    **Layer laden → prüfen → bereinigen → harmonisieren → eine Karte erzeugen**
 
-7. Die Aufgaben im Zweierteam aufteilen und einen gemeinsamen ersten Git- und GitHub-Übungsablauf durchführen.
-8. Erst danach die Plugin-Struktur und die ersten Processing-Algorithmen weiter ausbauen.
-
+5. Die Aufgaben im Zweierteam zwischen Windows und macOS aufteilen und einen gemeinsamen ersten Git- und GitHub-Übungsablauf durchführen.
+6. Erst danach die Plugin-Struktur und den Processing-Algorithmus für die 300-m-Luftlinienpuffer weiter ausbauen.
