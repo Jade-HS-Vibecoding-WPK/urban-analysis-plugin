@@ -3,6 +3,8 @@
 from qgis.PyQt.QtWidgets import QAction
 
 from .contracts import PipelineResult
+from .guided_dialog import show_guided_dialog
+from .outputs import export_selected_outputs
 from .user_guidance import GuidedWorkflow, OutputPlan
 
 
@@ -62,15 +64,24 @@ class UrbanAnalysisPlugin:
         """Return the contract-backed plan for the selected outputs."""
         return self._require_workflow().output_plan()
 
+    def export_outputs(self, *, layer_objects=None, geopackage_path=None, pdf_path=None):
+        """Execute selected QGIS and optional file outputs."""
+        workflow = self._require_workflow()
+        return export_selected_outputs(
+            self.iface,
+            workflow.output_plan(),
+            workflow.result.selected_layers(),
+            layer_objects=layer_objects,
+            geopackage_path=geopackage_path,
+            pdf_path=pdf_path,
+        )
+
     def _show_workflow_status(self):
         """Report whether a contract-backed workflow has been started."""
-        message = (
-            "Workflow bereit: "
-            + self.workflow.current_step
-            if self.workflow is not None
-            else "PipelineResult für den Workflowstart erforderlich."
-        )
-        self.iface.messageBar().pushInfo(
-            "Urban Analysis",
-            message,
-        )
+        if self.workflow is None:
+            self.iface.messageBar().pushInfo(
+                "Urban Analysis",
+                "PipelineResult für den Workflowstart erforderlich.",
+            )
+            return
+        show_guided_dialog(self)
