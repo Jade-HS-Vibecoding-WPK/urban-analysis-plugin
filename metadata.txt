@@ -1,0 +1,15 @@
+[general]
+name=Urban Analysis Plugin
+qgisMinimumVersion=3.44
+description=Shared foundation for the urban analysis MVP workflow.
+version=0.1.0
+author=Urban Analysis Team
+email=
+about=Provides the common contract and entry point for the urban analysis plugin.
+repository=
+tracker=
+category=Analysis
+experimental=True
+deprecated=False
+tags=urban analysis,geopackage,cartography
+hasProcessingProvider=False
