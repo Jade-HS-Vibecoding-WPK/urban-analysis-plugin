@@ -77,6 +77,7 @@ class PipelineResult:
     issues: List[ValidationIssue] = field(default_factory=list)
     selected_topic: Optional[str] = None
     output: OutputSelection = field(default_factory=OutputSelection)
+    harmonized_records: List[object] = field(default_factory=list)
 
     def visible_issues(self) -> List[ValidationIssue]:
         """Return issues that must be shown before processing continues."""
