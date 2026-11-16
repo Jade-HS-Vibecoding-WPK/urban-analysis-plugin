@@ -4,7 +4,8 @@
 
 Das Plugin soll Urban-Design-Studierende bei der Analyse von Projektgebieten unterstützen. Es soll einen nachvollziehbaren Workflow anbieten, in dem Daten aus mehreren Quellen verarbeitet und anschließend für städtebauliche Fragestellungen ausgewertet werden.
 
-Der Pilot bezieht sich auf den Stadtteil **Donnerschwee in Oldenburg**. Der fachliche Schwerpunkt liegt auf **Mobilität und ÖPNV-Erreichbarkeit**.
+Der Pilot bezieht sich auf den Stadtteil **Donnerschwee in Oldenburg**. Das
+Kartenthema des MVP ist zunächst die **Siedlungsstruktur**.
 
 Der vorgesehene Gesamtworkflow lautet:
 
@@ -14,27 +15,54 @@ Dabei sollen Rohdaten unverändert bleiben. Bereinigte Daten und Analyseergebnis
 
 ## 2. MVP
 
-Die erste Version soll bewusst klein und belastbar bleiben:
+Die erste Version soll bewusst klein und belastbar bleiben. Der verbindliche
+MVP-Ablauf besteht aus diesen neun Schritten:
 
-- Nutzerinnen und Nutzer laden die Daten selbst in QGIS.
-- Das Plugin kann vorhandene Layer auswählen und verarbeiten.
-- Koordinatensysteme werden erkannt und vereinheitlicht.
-- Geometriefehler, Duplikate, fehlende Werte und widersprüchliche Attribute werden erkannt und markiert.
-- Attribute werden in ein vorher festgelegtes Zielschema überführt.
-- Rohdaten werden nicht überschrieben; bereinigte Kopien werden erzeugt.
-- Die Verarbeitung erzeugt einen Ergebnisordner oder eine Ergebnisgruppe im QGIS-Projekt.
-- Es gibt einen Prüfbericht mit Warnungen, behobenen Problemen und dokumentierten Änderungen.
-- Die erste Analyse betrachtet die ÖPNV-Erreichbarkeit anhand von Haltestellen und Einzugsbereichen.
-- Im MVP werden dafür einfache **300-m-Luftlinienpuffer** um Haltestellen erzeugt.
-- Ergebnisse bestehen zunächst aus einer Karte und den dazugehörigen Kennwerten.
+1. **CRS festlegen:** Das Projekt-CRS ist vorausgewählt und kann manuell
+   geändert werden.
+2. **Untersuchungsgebiet festlegen:** Ein Polygon wird im Projekt ausgewählt
+   oder gezeichnet.
+3. **Lokale Daten laden:** GeoPackage-Dateien werden geladen und mit einem
+   Standardpuffer von **500 m** räumlich auf das Untersuchungsgebiet begrenzt.
+   Der Nutzer kann diesen Wert ändern.
+4. **Layer prüfen:** Alle geladenen Layer werden auf CRS, Geometrien,
+   Pflichtfelder, fehlende Werte und grundlegende Konsistenz geprüft.
+5. **Attribute zuordnen:** Das Plugin schlägt Zuordnungen automatisch vor;
+   Nutzerinnen und Nutzer können diese Zuordnungen bestätigen oder ändern.
+6. **Dopplungen und Harmonisierung prüfen:** Exakte Dopplungen werden
+   automatisch entfernt. Unsichere Fälle bei IDs sowie Geometrien und
+   Attributen werden angezeigt und müssen bestätigt werden.
+7. **Kartenthema wählen:** Das Plugin schlägt **Siedlungsstruktur** und
+   passende Layer wie Gebäude, Straßen, Nutzungsflächen und Grünflächen aus
+   Layernamen, Attributen, Geometrietypen und Werten vor. Die Vorschläge sind
+   nicht fest vorgegeben: Fehlende oder anders benannte Layer können bestätigt
+   oder geändert werden und werden nachvollziehbar gewarnt.
+8. **Ausgabe wählen:** QGIS-Layer sind verpflichtend. Eine bereinigte
+   GeoPackage-Datei und ein PDF sind optionale Ausgaben.
+9. **Verarbeitung starten:** Die Verarbeitung erzeugt die gewählten Ausgaben
+   und eine Zusammenfassung mit Warnungen, Änderungen und offenen Problemen.
 
-Nicht Teil des ersten MVP sind die automatische Datensuche, eine umfangreiche automatische Fehlerkorrektur, die Erreichbarkeit entlang des tatsächlichen Fußwegenetzes und frei konfigurierbare Gestaltung. Die Nutzung des Fußwegenetzes ist eine spätere Erweiterung. Zunächst werden ausschließlich frei verfügbare Daten von **OpenStreetMap** verwendet.
+Externe Open-Source-Datenquellen, automatische Datenabfragen, weitere
+Dateiformate und zusätzliche Kartenthemen sind ausdrücklich spätere
+Erweiterungen. Rohdaten werden nicht überschrieben; bereinigte Kopien und
+Ergebnislayer werden getrennt erzeugt.
 
 ## 3. Fachlicher und technischer Workflow
 
-### 3.1 Daten laden
+### 3.1 CRS und Untersuchungsgebiet
 
-In der ersten Version werden vorhandene Layer manuell in **QGIS 3.44** geladen und im Plugin ausgewählt. Die erste Datenquelle ist **OpenStreetMap**. Für jede Datenquelle wird dokumentiert:
+Beim Start ist das Projekt-CRS vorausgewählt. Die Nutzerin oder der Nutzer kann
+es manuell ändern. Danach wird das Untersuchungsgebiet als Polygon ausgewählt
+oder festgelegt. CRS und Polygon werden als Teil des Verarbeitungslaufs
+protokolliert.
+
+### 3.2 Lokale Daten laden und räumlich begrenzen
+
+Im MVP werden lokale **GeoPackage-Dateien** geladen. Ein Standardpuffer von
+**500 m** begrenzt die Daten räumlich um das Untersuchungsgebiet; der Nutzer
+kann ihn ändern. Externe
+Open-Source-Datenquellen und weitere Dateiformate werden erst später ergänzt.
+Für jede Datenquelle wird dokumentiert:
 
 | Punkt | Zu dokumentieren |
 | --- | --- |
@@ -47,7 +75,7 @@ In der ersten Version werden vorhandene Layer manuell in **QGIS 3.44** geladen u
 
 Automatische Datenabfragen aus weiteren vorher festgelegten Quellen werden erst ergänzt, wenn der manuelle Ablauf zuverlässig funktioniert. Quellen sollen dann versioniert, nachvollziehbar und ausfalltolerant sein.
 
-### 3.2 Daten prüfen
+### 3.3 Daten und Layer prüfen
 
 Das Plugin prüft unter anderem:
 
@@ -60,19 +88,15 @@ Das Plugin prüft unter anderem:
 
 Jede Prüfung soll ihre Warnungen und Ergebnisse im Prüfprotokoll festhalten. Das Plugin soll keine unsicheren Korrekturen stillschweigend durchführen.
 
-### 3.3 Daten bereinigen
+### 3.4 Attribute zuordnen und harmonisieren
 
-Automatisch sicher behebbare Fehler können korrigiert werden. Unsichere Fälle werden markiert, damit sie geprüft werden können. Änderungen sollen in einer Liste mit Warnungen und behobenen Problemen nachvollziehbar bleiben.
-
-Die Rohdaten bleiben erhalten. Bereinigte Daten werden als neue Layer erzeugt, damit der Ausgangszustand jederzeit wiederhergestellt und verglichen werden kann.
-
-### 3.4 Daten harmonisieren
-
-Für jede unterstützte Datenart wird ein gemeinsames Zielschema definiert. Dazu gehören:
+Das Plugin schlägt Attributzuordnungen automatisch vor. Die Nutzerin oder der
+Nutzer bestätigt diese Vorschläge oder ändert sie vor dem Start. Für jede
+unterstützte Datenart wird ein gemeinsames Zielschema definiert. Dazu gehören:
 
 - standardisierte Feldnamen,
 - Datentypen,
-- Kategorien,
+- vorgeschlagene Kategorien und ihre nutzerbestätigten Zuordnungen,
 - Einheiten.
 
 Ein mögliches Zielschema aus dem fachlichen Konzept ist:
@@ -95,8 +119,36 @@ Die Überführung der Quellattribute wird über Mapping-Regeln dokumentiert, zum
 ```
 
 Die Mapping-Regeln sollen später möglichst in Konfigurationsdateien oder einer einfachen Mapping-Tabelle verwaltet werden und nicht ausschließlich im Code stehen.
+Kategorien werden nicht vorausgesetzt, sondern aus Layernamen, Attributen,
+Geometrietypen und Werten vorgeschlagen. Die Datenquelle bleibt als
+editierbares Feld unter Nutzerkontrolle.
 
-### 3.5 Analysieren
+### 3.5 Dopplungen und Konsistenz prüfen
+
+IDs sowie Geometrien und Attribute werden auf Dopplungen, Widersprüche und
+inkonsistente Inhalte geprüft. Exakte Dopplungen werden automatisch entfernt.
+Unsichere Fälle werden angezeigt und erst nach Bestätigung bereinigt. Die
+Rohdaten bleiben erhalten; jede Änderung wird in der Zusammenfassung
+ausgewiesen.
+
+### 3.6 Kartenthema und Ausgabe
+
+Im MVP schlägt das Plugin das Kartenthema **Siedlungsstruktur** sowie passende
+Layer aus Layernamen, Attributen, Geometrietypen und Werten vor. Gebäude,
+Straßen, Nutzungsflächen und Grünflächen sind fachliche Zielkategorien, aber
+keine starren Pflichtlayer. Nutzerinnen und Nutzer bestätigen oder ändern die
+Vorschläge. Fehlende Kategorien können bewusst bestätigt werden, erzeugen aber
+eine sichtbare Warnung.
+
+QGIS-Layer sind die verpflichtende Ausgabe. Optional können eine bereinigte
+GeoPackage-Datei und ein PDF erzeugt werden. Das PDF enthält mindestens eine
+Karte des Untersuchungsgebiets mit dem gewählten Puffer und einer Legende.
+Die Datenquelle ist ein editierbares, vom Nutzer kontrollierbares Feld und
+wird im PDF sowie in den Ergebnismetadaten ausgegeben. Der Lauf endet mit
+einer Zusammenfassung der verarbeiteten Layer, Warnungen, Änderungen und
+offenen Probleme.
+
+### 3.7 Analysieren und visualisieren
 
 Jede Analyse soll möglichst als eigener QGIS-Processing-Algorithmus umgesetzt werden. Sie definiert:
 
@@ -109,20 +161,20 @@ Jede Analyse soll möglichst als eigener QGIS-Processing-Algorithmus umgesetzt w
 - eine sinnvolle Standarddarstellung,
 - eine kurze Interpretation.
 
-Die erste Analyse im Pilot ist die **ÖPNV-Erreichbarkeit in Donnerschwee**:
-
-- Haltestellen aus OpenStreetMap werden als Eingabedaten verwendet.
-- Für jede Haltestelle wird ein 300-m-Luftlinienpuffer erzeugt.
-- Die Überlagerung der Puffer mit den verfügbaren Daten wird als Karte visualisiert und mit Kennwerten beschrieben.
-
-Eine Erreichbarkeitsberechnung entlang des tatsächlichen Fußwegenetzes gehört nicht zum MVP und wird erst später geprüft.
+Die erste Darstellung im Pilot ist die **Siedlungsstruktur in Donnerschwee**.
+Weitere Analysen, darunter ÖPNV-Erreichbarkeit, können auf dem stabilen
+Datenvertrag aufbauen und werden erst danach ergänzt.
 
 #### Spätere Erweiterungen
 
-- **Fußwegenetz:** Eine spätere Erweiterung kann die Erreichbarkeit entlang des tatsächlichen Fußwegenetzes prüfen.
-- **ÖV-Erschließungsqualität:** Eine spätere Erweiterung kann bewerten, wie gut das Untersuchungsgebiet durch den öffentlichen Verkehr erschlossen ist. Dafür könnten beispielsweise Haltestellen, Linienangebot, Bedienhäufigkeit und/oder Einzugsbereiche berücksichtigt werden. Die genaue Methodik ist eine noch gemeinsam festzulegende fachliche Entscheidung.
+- **Externe Open-Source-Datenquellen:** Automatische Abfragen und
+  Quellenverwaltung werden erst nach dem lokalen GeoPackage-MVP geprüft.
+- **Weitere Formate:** Zusätzliche Eingabe- und Ausgabeformate werden später
+  ergänzt.
+- **ÖPNV und Fußwegenetz:** Erreichbarkeitsanalysen und Netzberechnungen sind
+  spätere fachliche Erweiterungen.
 
-### 3.6 Visualisieren
+### 3.8 Visualisieren
 
 Zuerst werden verständliche Standardstile verwendet. Später können folgende Erweiterungen hinzukommen:
 
@@ -143,105 +195,139 @@ Die technische Basis ist:
 
 Eine Person arbeitet mit Microsoft Windows, die andere mit macOS. Beide verwenden QGIS 3.44 und stimmen Erweiterungen, Projektstruktur und Testdaten ab. Datei- und Ordnerpfade werden im Plan und in der Implementierung plattformneutral behandelt; hardcodierte Windows- oder macOS-Pfade werden vermieden.
 
-Die erste technische Version soll:
-
-1. das Plugin öffnen,
-2. vorhandene Layer auswählen lassen,
-3. eine Verarbeitung starten,
-4. einen Ergebnisordner oder eine Ergebnisgruppe im QGIS-Projekt erzeugen,
-5. einen Prüfbericht ausgeben.
+Die erste technische Version soll den vollständigen MVP-Ablauf von der
+CRS-Auswahl bis zur Zusammenfassung abbilden. Die UI verwendet dafür
+einheitliche, fachlich verständliche Begriffe: **Projekt-CRS**,
+**Untersuchungsgebiet**, **Daten laden**, **Layer prüfen**,
+**Attributzuordnung**, **Harmonisierung**, **Kartenthema**, **Ausgabe** und
+**Verarbeitung starten**.
 
 Die Architektur soll Rohdaten, bereinigte Daten und Analyseergebnisse strikt trennen. Verarbeitungsschritte werden protokolliert und Analysebausteine modular aufgebaut, damit später weitere Themen ergänzt werden können.
 
+Die gemeinsame Basis liegt in diesen Dateien:
+
+- `metadata.txt` und `urban_analysis/__init__.py` bilden die minimale
+  installierbare QGIS-Plugin-Struktur.
+- `urban_analysis/urban_analysis_plugin.py` registriert zunächst nur den
+  gemeinsamen Menüeintrag und einen sichtbaren Hinweis, dass die MVP-Features
+  noch nicht implementiert sind.
+- `urban_analysis/contracts.py` definiert den gemeinsamen Datenvertrag:
+  Projekt-CRS, Untersuchungsgebiet, 500-m-Standardpuffer, Layerbeschreibungen,
+  sichtbare Attributvorschläge, Prüfhinweise, ausgewähltes Kartenthema,
+  kontrollierte Datenquelle und Ausgaben.
+- `urban_analysis/ui_contract.py` definiert die gemeinsame Reihenfolge der
+  UI-Schritte, Beschriftungen und dynamischen Themenvorschläge.
+- `tests/test_contracts.py` prüft die unveränderliche Basis des Vertrags.
+
+Die Datenpipeline liefert später ein `PipelineResult` mit `layers`,
+`attribute_suggestions`, `issues`, `selected_topic` und `output` an die
+Benutzerführung. Die Benutzerführung zeigt Vorschläge und Prüfhinweise vor
+der Verarbeitung und verwendet danach ausschließlich die bestätigten
+Ergebnis-Layer. Diese gemeinsame Basis enthält noch keine vollständige
+Datenpipeline, Kartenansicht oder PDF-Erzeugung.
+
 ## 5. Entwicklungsphasen
 
-### Phase 0 – Scope und Beispieldaten
+### Phase 0 – Gemeinsame Vorbereitung
 
-- Das bestätigte Testgebiet ist der Stadtteil Donnerschwee in Oldenburg.
-- OpenStreetMap als erste frei verfügbare Datenquelle festlegen.
-- Den Pilotumfang auf Mobilität und ÖPNV-Erreichbarkeit begrenzen.
-- Drei konkrete Analysefragen für den Piloten formulieren; diese sind noch offen.
+- Minimale QGIS-Plugin-Struktur mit Menü, Dialog und testbarem Einstiegspunkt
+  anlegen.
+- Datenvertrag festlegen: CRS, Untersuchungsgebiet, Puffer, Layernamen,
+  Pflichtfelder, IDs, Zielschema, Warnungen und Ausgabeobjekte.
+- UI-Namenskonventionen aus Abschnitt 4 verbindlich übernehmen.
+- Eine kleine lokale GeoPackage-Testdatei und einen reproduzierbaren
+  End-to-End-Test bereitstellen.
 
-### Phase 1 – Fachlichen Fokus und Datenkonzept festlegen
+### Phase 1 – Arbeitsstränge parallel umsetzen
 
-- Die erste Analyse als ÖPNV-Erreichbarkeit über Haltestellen und 300-m-Luftlinienpuffer festlegen.
-- Benötigte Datensätze festlegen.
-- Datenquellen, Geometrietypen, CRS, Attribute, erwartete Fehler sowie Lizenzen dokumentieren.
-- Zielschema und erste Mapping-Regeln definieren.
-- Festlegen, welche Entscheidungen das Plugin automatisiert und welche es nur vorschlägt.
+**Arbeitsstrang A – Datenpipeline und Import**
 
-### Phase 2 – Technischer Prototyp
+- GeoPackage-Dateien laden und räumlich mit dem änderbaren Standardpuffer von
+  500 m begrenzen.
+- CRS und Untersuchungsgebiet verarbeiten.
+- Layer-, Geometrie- und Konsistenzprüfungen umsetzen.
+- Attributzuordnung vorschlagen und bestätigte Änderungen übernehmen.
+- Kategorien aus Layernamen, Attributen, Geometrietypen und Werten vorschlagen.
+- Exakte Dopplungen automatisch entfernen und unsichere Fälle zur Bestätigung
+  anzeigen.
 
-- Plugin-Menü und einfachen Dialog erstellen.
-- Layer-Auswahl und Parameterübergabe umsetzen.
-- Processing-Anbindung herstellen.
-- Ergebnisordner oder Ergebnisgruppe im QGIS-Projekt erzeugen.
-- Ersten Prüfbericht ausgeben.
+**Arbeitsstrang B – Benutzerführung und Ausgabe**
 
-### Phase 3 – Datenprüfung und Bereinigung
+- Dialogschritte und verständliche Status-/Warnmeldungen umsetzen.
+- Kartenthema Siedlungsstruktur mit dynamischen Vorschlägen und bewusster
+  Bestätigung fehlender Kategorien abbilden.
+- QGIS-Layer, optionales GeoPackage und optionales PDF mit Karte, Puffer und
+  Legende ausgeben.
+- Editierbare Datenquelle in Formular, Ergebnismetadaten und PDF anbieten.
+- Zusammenfassung und Ergebnisdarstellung integrieren.
 
-- CRS erkennen und vereinheitlichen.
-- Geometriefehler prüfen.
-- Duplikate erkennen.
-- Fehlende und widersprüchliche Attribute markieren.
-- Bereinigte Kopien statt Überschreiben der Rohdaten erzeugen.
-- Prüfprotokoll mit Warnungen und behobenen Problemen erstellen.
+### Phase 2 – Integration und MVP-Test
 
-### Phase 4 – Attribut- und Datenharmonisierung
-
-- Zielschema je Datenart umsetzen.
-- Mapping-Regeln anwenden und dokumentieren.
-- Unterschiedliche Kategorien, Datentypen und Einheiten vereinheitlichen.
-- Konfigurierbare Mapping-Tabelle oder Konfigurationsdatei vorbereiten.
-
-### Phase 5 – Erste Analysebausteine
-
-- Mit einem Thema und einem vollständigen End-to-End-Workflow beginnen.
-- Danach weitere Analysebausteine ergänzen.
-- Jede Analyse als möglichst eigenständigen Processing-Algorithmus umsetzen.
-- Karten, Kennwerte und einfache Diagramme erzeugen.
-
-### Phase 6 – Gestaltung und Ausgabe
-
-- Standardstile verbessern.
-- Farbpaletten und Darstellungsregeln auswählbar machen.
-- Karten-, Tabellen- und Diagrammexport ergänzen.
-
-### Phase 7 – Automatische Datenquellen
-
-- Festgelegte Datenquellen anbinden.
-- Quellen- und Lizenzverwaltung ergänzen.
-- Datenquellen versionieren und Ausfälle berücksichtigen.
-- Die automatische Suche nicht als Ersatz für die manuelle Datenprüfung behandeln.
+- Beide Arbeitsstränge über den Datenvertrag verbinden.
+- Zuerst A integrieren, anschließend B auf den echten Pipeline-Ergebnissen
+  testen.
+- Den vollständigen Ablauf mit der gemeinsamen GeoPackage-Testdatei prüfen.
+- Erst nach erfolgreichem End-to-End-Test weitere Kartenthemen, externe
+  Open-Source-Datenquellen oder zusätzliche Formate planen.
 
 ## 6. Offene Entscheidungen
 
-Die folgenden Punkte sind ausdrücklich noch nicht entschieden und dürfen im Plan nicht vorweggenommen werden:
+Vor dem Start müssen noch festgelegt werden:
 
-- **Drei Analysefragen:** Welche drei konkreten städtebaulichen Fragen soll die ÖPNV-Erreichbarkeitsanalyse in Donnerschwee beantworten?
+- konkretes Untersuchungsgebiet-Polygon und Beispiel-GeoPackage,
+- genaue Testdaten und die zulässige Einheit für den änderbaren 500-m-Puffer,
+- Details des Zielschemas je vorgeschlagener Kategorie,
+- Schwelle, ab der ein Fall als unsichere Dopplung angezeigt wird,
+- Details des PDF-Layouts über Karte, Puffer, Legende und Datenquelle,
+- gemeinsamer Integrationspunkt und Abnahmekriterien.
 
-Bestätigt sind das Testgebiet Donnerschwee in Oldenburg, der Pilot-Schwerpunkt Mobilität und ÖPNV sowie die erste Analyse mit 300-m-Luftlinienpuffern um OpenStreetMap-Haltestellen. Die Erreichbarkeit entlang des tatsächlichen Fußwegenetzes bleibt eine spätere Erweiterung. Bei Unsicherheiten wird vor einer Entscheidung zuerst nachgefragt; offene Punkte werden nicht stillschweigend festgelegt.
+Externe Open-Source-Datenquellen, weitere Formate und zusätzliche
+Kartenthemen bleiben spätere Erweiterungen.
 
 ## 7. Rollen im Zweierteam
 
 Die Rollen werden unabhängig vom Betriebssystem verteilt. Eine Person arbeitet mit Microsoft Windows, die andere mit macOS; beide arbeiten am gleichen fachlichen Ablauf und prüfen gegenseitig die Ergebnisse.
 
-### Person A – Plugin und Nutzeroberfläche
+### Gemeinsame Vorbereitung
 
-- Dialoge und Nutzerführung,
-- Layer- und Parameterauswahl,
-- Ergebnisdarstellung,
-- Processing-Anbindung,
-- Kartenstile und Exporte.
+Beide Personen legen zuerst die minimale Plugin-Struktur, den Datenvertrag,
+die UI-Namenskonventionen, Testdaten und die Abnahmekriterien gemeinsam fest.
+Danach arbeitet jede Person in einer eigenen Copilot-Session, einem eigenen
+Arbeitsordner und einem eigenen Branch.
 
-### Person B – Daten und Analysen
+### Arbeitsstrang A – Datenpipeline und Import
 
-- Datenmodell,
-- CRS- und Geometrieprüfung,
-- Duplikat- und Fehlererkennung,
-- Attribut-Mapping,
-- Analysealgorithmen,
-- Testdatensätze.
+Branch: `feature/datenpipeline`
+
+Verantwortlich sind CRS, Untersuchungsgebiet, GeoPackage-Import, räumliche
+Pufferung, Layer- und Geometrieprüfung, Attributmapping, Duplikaterkennung und
+Harmonisierung. Änderungen erfolgen möglichst in Daten-/Processing-Modulen,
+Datenvertragsdefinitionen und zugehörigen Tests.
+
+### Arbeitsstrang B – Benutzerführung und Ausgabe
+
+Branch: `feature/benutzerfuehrung`
+
+Verantwortlich sind Dialogschritte, Karten- und Warnmeldungen, das Kartenthema
+Siedlungsstruktur, QGIS-Ausgabe sowie optionale GeoPackage- und PDF-Ausgabe.
+Änderungen erfolgen möglichst in UI-, Darstellungs- und Exportmodulen sowie
+zugehörigen Tests.
+
+### Gemeinsame Schnittstelle
+
+Arbeitsstrang A liefert an B ein versioniertes Verarbeitungsergebnis mit:
+
+- Projekt-CRS und Untersuchungsgebiet,
+- verarbeiteten Layern und ihren standardisierten Namen,
+- Pflichtfeld-/Attributmapping,
+- Warnungen und Prüfstatus,
+- Duplikat- und Harmonisierungsergebnissen,
+- der vom Nutzer bestätigten oder geänderten Datenquelle,
+- auswählbaren QGIS-Layern und optionalen Exportdaten.
+
+B darf diese Daten nur über den vereinbarten Vertrag verwenden. Änderungen am
+Datenvertrag werden von beiden abgestimmt und zuerst in einem gemeinsamen
+Integrations-Commit dokumentiert.
 
 Gemeinsam entscheidet ihr über:
 
@@ -265,41 +351,107 @@ GitHub ist das gemeinsame Repository. Jede Person arbeitet zunächst in einer ei
 - **Pull Request:** Vorschlag, einen Branch zu prüfen und anschließend in `main` zu übernehmen.
 - **Merge:** Zusammenführen des geprüften Branches mit `main`.
 
-### Empfohlener Ablauf
+### Empfohlener Ablauf für zwei parallele Copilot-Sessions
 
-1. Beide verwenden QGIS 3.44 und holen vor einer neuen Aufgabe den aktuellen Stand:
+Jede Person arbeitet in einem **eigenen lokalen Arbeitsordner** und in einem
+**eigenen Branch**. Die beiden Copilot-Sessions dürfen nicht denselben
+Arbeitsordner gleichzeitig verändern. Eine Datei, die gerade von einer Person
+bearbeitet wird, wird nicht gleichzeitig von der anderen Person geändert.
+
+1. Vor dem Start den eigenen Arbeitsordner öffnen und den aktuellen Stand holen:
 
    ```bash
    git switch main
    git pull origin main
    ```
 
-2. Einen eigenen Branch für die Aufgabe erstellen:
+2. Einen eigenen Aufgaben-Branch erstellen oder auswählen:
 
    ```bash
-   git switch -c feature/data-cleaning
+   git switch -c feature/datenpipeline
    ```
+
+   Für die Benutzerführung wird entsprechend `feature/benutzerfuehrung`
+   verwendet.
 
 3. Kleine, klar abgegrenzte Änderungen umsetzen und regelmäßig committen:
 
    ```bash
    git add .
-   git commit -m "Add duplicate feature detection"
+   git commit -m "Implement data pipeline step"
    ```
 
 4. Den Branch zu GitHub hochladen:
 
    ```bash
-   git push -u origin feature/data-cleaning
+   git push -u origin feature/datenpipeline
    ```
 
-5. Einen Pull Request erstellen. Die andere Person prüft den Code, schreibt bei Bedarf Kommentare und übernimmt den Branch nach der Zustimmung in `main`.
+   Für die Benutzerführung wird der eigene Branch-Name eingesetzt.
+
+5. Einen Pull Request erstellen. Die andere Person prüft den Code, schreibt bei
+   Bedarf Kommentare und übernimmt den Branch nach der Zustimmung in `main`.
+
+6. Vor dem Weiterarbeiten `main` aktualisieren und den eigenen Branch
+   gegebenenfalls mit dem neuen Stand abgleichen:
+
+   ```bash
+   git switch main
+   git pull origin main
+   git switch feature/datenpipeline
+   git merge main
+   ```
+
+   Ein `git pull` aktualisiert immer nur den **aktuell ausgewählten Branch**
+   und nicht automatisch alle anderen Branches. Die Auswahl des
+   Aufgabenbereichs erfolgt daher über den Branch und die dazugehörige
+   Copilot-Session, nicht über `git pull`.
 
 Der Windows-/macOS-Ablauf bleibt fachlich gleich: Beide verwenden dieselben Branch- und Commit-Regeln, dieselben relativen Projektpfade und dieselben Testdaten. Lokale Pfade werden nicht in den Code geschrieben. Wenn sich ein Schritt unter Windows und macOS unterschiedlich verhält, wird das Problem dokumentiert und zuerst gemeinsam geklärt, bevor eine technische Entscheidung getroffen wird.
 
 Zu Beginn ist eine kleine gemeinsame Übung sinnvoll: Beide laden das Repository herunter, ändern jeweils eine kleine Datei, erstellen Commits und führen einen Branch über einen Pull Request zusammen. Danach kann derselbe Ablauf für den Plugin-Code verwendet werden.
 
-Um Merge-Konflikte zu vermeiden, sollten beide nicht dauerhaft dieselben Dateien ändern, vor neuen Aufgaben den aktuellen Stand von `main` holen, kleine Änderungen machen und absprechen, wer welchen Bereich bearbeitet. Wenn Git einen Konflikt nicht automatisch lösen kann, besprecht ihr die betroffene Stelle, entscheidet euch gemeinsam für die richtige Variante, bereinigt die Datei und bestätigt die Lösung.
+### Konfliktvermeidung und Vorgehen bei Konflikten
+
+- Vor dem Bearbeiten absprechen, welche Person welche Dateien und
+  Schnittstellen besitzt.
+- Gemeinsame Dateien wie `PLAN.md`, zentrale Plugin-Einstiegspunkte und
+  Konfigurationsdateien nicht gleichzeitig bearbeiten.
+- Kleine Commits erstellen und Pull Requests möglichst früh öffnen.
+- Vor einem Pull Request den eigenen Branch mit dem aktuellen `main` abgleichen.
+- Bei einem Konflikt nicht einfach eine Seite überschreiben: Die betroffene
+  Datei gemeinsam prüfen, die fachlich richtige Variante auswählen, die
+  Konfliktmarkierungen entfernen, testen und anschließend committen.
+- Wenn die richtige Lösung unklar ist, den Konflikt stoppen und zuerst im
+  Team entscheiden. Ein Konflikt darf nicht durch stillschweigendes Weglassen
+  von Änderungen „gelöst“ werden.
+
+### Integration und Reihenfolge
+
+- Die gemeinsame Vorbereitung wird zuerst abgeschlossen, damit beide auf
+  derselben Plugin-Struktur und demselben Datenvertrag arbeiten.
+- Arbeitsstrang A wird zuerst integriert, weil B dessen standardisierte Layer,
+  Warnungen und Ausgabeobjekte benötigt.
+- Danach wird Arbeitsstrang B integriert und mit den echten Ergebnissen aus A
+  getestet.
+- Änderungen am Datenvertrag, an zentralen Einstiegspunkten oder an gemeinsam
+  genutzten Konfigurationsdateien werden nicht parallel vorgenommen.
+- Jede Person bearbeitet nur die vereinbarten Dateien ihres Arbeitsstrangs.
+  Gemeinsame Dateien werden in einem kurzen Integrationsschritt gemeinsam
+  geändert.
+
+### Vor dem Start gemeinsam festlegen
+
+- genaue Anforderungen und ein kleines überprüfbares Ziel je Aufgabenbereich,
+- welche Dateien und Ordner zu Datenpipeline beziehungsweise Benutzerführung
+  gehören,
+- gemeinsame Schnittstellen zwischen beiden Bereichen, zum Beispiel die
+  erwarteten Layer und Parameter,
+- gemeinsame Testdaten und ein reproduzierbarer Testablauf,
+- der Integrationspunkt, an dem zuerst `feature/datenpipeline` und danach
+  `feature/benutzerfuehrung` zusammengeführt und gemeinsam getestet werden,
+- wer den Pull Request prüft und wer die Integration nach der Freigabe
+  durchführt.
 
 Für den Einstieg können GitHub Desktop unter Windows oder die Git-Funktionen in Visual Studio Code auf beiden Systemen genutzt werden. Benötigt werden GitHub-Konten, Git, ein Editor, QGIS 3.44 und die jeweilige Python-Umgebung. QGIS-Version, verwendete Plugins und Testdaten werden vor gemeinsamen Tests abgeglichen.
 
@@ -307,16 +459,64 @@ Für den Einstieg können GitHub Desktop unter Windows oder die Git-Funktionen i
 
 Tests begleiten jede Phase und werden von beiden gemeinsam durchgeführt:
 
-- Testfälle für CRS-Erkennung und -Vereinheitlichung,
-- Tests für gültige und ungültige Geometrien,
-- Tests für Duplikate,
-- Tests für fehlende Werte,
-- Tests für widersprüchliche Kategorien,
-- Tests für Mapping-Regeln und Zielschema,
-- Prüfung, dass Rohdaten nicht überschrieben werden,
-- Prüfung des Prüfprotokolls mit Warnungen und behobenen Problemen,
-- Prüfung, dass Processing-Algorithmen die erwarteten Layer, Kennwerte und Diagramme erzeugen,
-- Tests mit realistischen Fehlerfällen in einem kleinen realen Testgebiet.
+- **Arbeitsstrang A:** Tests für CRS, Polygon und Puffer, GeoPackage-Import,
+  gültige/ungültige Geometrien, Pflichtfelder, Attributmapping, IDs,
+  Duplikate, Harmonisierung und unveränderte Rohdaten.
+- **Arbeitsstrang B:** Tests für Dialogreihenfolge, Status- und Warnmeldungen,
+  dynamische Kategorien, bewusst bestätigte fehlende Kategorien, QGIS-Layer
+  sowie optionale GeoPackage- und PDF-Ausgabe mit Karte, Puffer, Legende und
+  editierbarer Datenquelle.
+- **Integration:** Ein End-to-End-Test mit der gemeinsamen GeoPackage-Datei
+  prüft alle neun MVP-Schritte und die Zusammenfassung.
+
+### Bestätigtes MVP-Abnahmekriterium
+
+Der MVP ist fachlich abnahmefähig, wenn dieser Ablauf in genau dieser
+Reihenfolge funktioniert:
+
+1. Eine lokale GeoPackage-Datei laden.
+2. Das CRS wählen; das Projekt-CRS ist vorausgewählt und kann manuell geändert
+   werden.
+3. Das Untersuchungsgebiet als Polygon und den Standardpuffer von 500 m
+   festlegen; der Puffer ist änderbar.
+4. Die Daten und Kategorien analysieren.
+5. Attribute zuordnen sowie Dopplungen und Harmonisierung prüfen.
+6. Das Kartenthema aus den erkannten Kategorien auswählen.
+7. Nur die zum gewählten Thema passenden Ergebnis-Layer in QGIS anzeigen.
+
+Alle Eingangslayer bleiben zunächst verfügbar und werden nicht ausgeblendet
+oder gelöscht. Erst nach der Themenwahl zeigt das Plugin die passenden
+Ergebnis-Layer an; nicht ausgewählte oder nicht passende Layer bleiben als
+Eingangsdaten erhalten und werden bei Bedarf durch Warnungen erläutert.
+
+### Zweites bestätigtes MVP-Abnahmekriterium: Nutzerkontrolle
+
+Automatische Kategorie- und Attributvorschläge werden immer vor der
+Verarbeitung angezeigt. Die Nutzerin oder der Nutzer kann jeden Vorschlag
+bestätigen, ändern oder ergänzen. Keine automatische Zuordnung gilt ohne
+sichtbare Nutzerkontrolle als endgültig.
+
+### Drittes bestätigtes MVP-Abnahmekriterium: Datenqualität
+
+Exakte Dopplungen werden automatisch entfernt. Unsichere Dopplungen erscheinen
+in einer nachvollziehbaren Prüfliste und müssen von der Nutzerin oder dem
+Nutzer bestätigt werden. Die getroffene Entscheidung und die verwendete
+Prüfregel werden im Ergebnis dokumentiert und bleiben nachvollziehbar.
+
+### Viertes bestätigtes MVP-Abnahmekriterium: Ausgaben
+
+Die bestätigten thematischen Ergebnis-Layer werden in QGIS geladen. Optional
+kann eine bereinigte GeoPackage-Datei gespeichert werden. Optional kann ein
+PDF mit einer Karte des Untersuchungsgebiets, dem gewählten Puffer, einer
+Legende und der vom Nutzer kontrollierbaren und änderbaren Datenquelle
+erzeugt werden.
+
+### Fünftes bestätigtes MVP-Abnahmekriterium: Warnungen
+
+Fehlende oder nicht eindeutig zuordenbare Kategorien werden deutlich
+angezeigt. Die Nutzerin oder der Nutzer kann bewusst fortfahren. Das Ergebnis
+wird dann sichtbar als unvollständig markiert, und die Warnung bleibt in der
+Zusammenfassung nachvollziehbar.
 
 Vor einem Merge sollte die jeweils andere Person die Änderung prüfen. Die fachliche Prüfung ist genauso wichtig wie die technische Prüfung: Die Ergebnisse müssen für die gewählten städtebaulichen Fragen sinnvoll sein.
 
@@ -335,12 +535,13 @@ Vor einem Merge sollte die jeweils andere Person die Änderung prüfen. Die fach
 
 ## 11. Nächste Schritte
 
-1. **Drei Analysefragen formulieren** – konkrete Fragen festlegen, die die ÖPNV-Erreichbarkeitsanalyse in Donnerschwee beantworten soll.
-2. Die dafür notwendigen OpenStreetMap-Datensätze sammeln.
-3. Eine Tabelle mit Datenquellen, Attributen, CRS, erwarteten Fehlern, Zielschema und Lizenz erstellen.
-4. Die kleinste durchgängige Funktion festlegen und umsetzen:
-
-   **Layer laden → prüfen → bereinigen → harmonisieren → eine Karte erzeugen**
-
-5. Die Aufgaben im Zweierteam zwischen Windows und macOS aufteilen und einen gemeinsamen ersten Git- und GitHub-Übungsablauf durchführen.
-6. Erst danach die Plugin-Struktur und den Processing-Algorithmus für die 300-m-Luftlinienpuffer weiter ausbauen.
+1. Gemeinsame Vorbereitung mit minimaler Plugin-Struktur, Datenvertrag,
+   UI-Namenskonventionen, Test-GeoPackage und Abnahmekriterien abschließen.
+2. `feature/datenpipeline` für Import, CRS, Puffer, Prüfungen, Mapping und
+   Harmonisierung umsetzen und separat testen.
+3. `feature/benutzerfuehrung` für Dialog, Kartenthema und Ausgaben auf dem
+   vereinbarten Vertrag umsetzen und separat testen.
+4. Zuerst die Datenpipeline, danach die Benutzerführung integrieren und den
+   vollständigen Neun-Schritte-MVP gemeinsam abnehmen.
+5. Erst nach dieser Abnahme externe Open-Source-Datenquellen, weitere Formate
+   oder zusätzliche Kartenthemen planen.
