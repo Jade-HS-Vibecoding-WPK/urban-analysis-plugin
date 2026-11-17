@@ -6,6 +6,7 @@ import pytest
 from urban_analysis.data_pipeline import (
     GeoPackageImportError,
     GeoPackageImporter,
+    apply_data_source,
     merge_confirmed_duplicates,
 )
 
@@ -454,3 +455,55 @@ def test_reads_wal_mode_geopackage_with_unsaved_changes_and_no_shared_memory_fil
 
     assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 5, 8]
     assert path.read_bytes() == original
+
+
+def test_source_name_is_only_the_file_name_and_source_stays_empty(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+
+    result = import_houses(path)
+
+    assert result.layers[0].source_name == "houses.gpkg"
+    assert {record.attributes["source_name"] for record in result.harmonized_records} == {"houses.gpkg"}
+    assert {record.attributes["source"] for record in result.harmonized_records} == {None}
+    hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
+    assert hint.severity == "warning"
+    assert "gebaeude" in hint.message
+    assert str(tmp_path) not in hint.message
+
+
+def test_source_column_in_data_is_used_and_no_hint_is_shown(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE gebaeude ADD COLUMN quelle TEXT")
+        connection.execute("UPDATE gebaeude SET quelle = 'ALKIS, LGLN 2025'")
+
+    result = import_houses(path)
+
+    assert {record.attributes["source"] for record in result.harmonized_records} == {"ALKIS, LGLN 2025"}
+    assert "missing-data-source" not in {issue.code for issue in result.issues}
+
+
+def test_apply_data_source_fills_only_empty_sources(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    records = import_houses(path).harmonized_records
+    records[0] = records[0].__class__(
+        layer_id=records[0].layer_id,
+        source_row_id=records[0].source_row_id,
+        attributes={**records[0].attributes, "source": "aus den Daten"},
+        geometry=records[0].geometry,
+        duplicate_group=records[0].duplicate_group,
+    )
+
+    filled = apply_data_source(records, "  ALKIS, LGLN 2025 ")
+
+    assert [record.attributes["source"] for record in filled] == [
+        "aus den Daten",
+        "ALKIS, LGLN 2025",
+        "ALKIS, LGLN 2025",
+    ]
+    assert records[1].attributes["source"] is None
+    with pytest.raises(ValueError):
+        apply_data_source(records, "   ")
