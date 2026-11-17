@@ -467,7 +467,7 @@ def test_source_name_is_only_the_file_name_and_source_stays_empty(tmp_path):
     assert {record.attributes["source"] for record in result.harmonized_records} == {None}
     hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
     assert hint.severity == "warning"
-    assert "gebaeude" in hint.message
+    assert hint.message.startswith("Für keinen Layer gibt es eine Angabe zur Datenquelle.")
     assert str(tmp_path) not in hint.message
 
 
@@ -645,3 +645,31 @@ def test_without_alkis_profile_only_the_layer_name_decides(tmp_path):
     hint = next(issue for issue in result.issues if issue.code == "missing-category")
     assert "bodenschaetzung" in hint.message
     assert all(record.attributes["object_detail"] is None for record in result.harmonized_records)
+
+
+def test_data_source_hint_names_only_the_layers_without_source(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE gebaeude ADD COLUMN quelle TEXT")
+        connection.execute("UPDATE gebaeude SET quelle = 'ALKIS, LGLN 2025'")
+
+    result = import_alkis(path)
+
+    hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
+    assert hint.message.startswith("Für die Layer nutzung, bodenschaetzung gibt es keine Angabe")
+
+
+def test_uncertain_duplicate_hint_skips_key_column_when_readable_twin_differs(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE gebaeude ADD COLUMN gfk TEXT")
+        connection.execute("UPDATE gebaeude SET gfk = CAST(fid AS TEXT), gfk__bez = 'Funktion ' || fid")
+
+    result = import_houses(path)
+
+    uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
+    assert "Gebäudefunktion (gfk__bez)" in uncertain.message
+    assert "(gfk)" not in uncertain.message
+    assert "Schlüssel)" not in uncertain.message

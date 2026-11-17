@@ -293,13 +293,18 @@ class GeoPackageImporter:
             )
 
         if layers_without_source:
+            layers_with_rows = [layer.table_name for layer in layers if layer.rows]
+            if layers_without_source == layers_with_rows:
+                missing_text = "Für keinen Layer gibt es eine Angabe zur Datenquelle."
+            else:
+                missing_text = (
+                    f"Für die Layer {', '.join(layers_without_source)} gibt es keine Angabe "
+                    "zur Datenquelle."
+                )
             issues.append(
                 ValidationIssue(
                     code="missing-data-source",
-                    message=(
-                        f"Für die Layer {', '.join(layers_without_source)} gibt es keine Angabe zur "
-                        "Datenquelle. Bitte im Schritt „Ausgabe“ eine Datenquelle eintragen."
-                    ),
+                    message=f"{missing_text} Bitte im Schritt „Ausgabe“ eine Datenquelle eintragen.",
                     severity="warning",
                     rule="Datenquelle",
                 )
@@ -730,7 +735,13 @@ class GeoPackageImporter:
                     differing_fields[field] = differing_fields.get(field, 0) + 1
 
         row_count = sum(len(positions) for positions in groups)
-        top_fields = sorted(differing_fields, key=lambda field: (-differing_fields[field], field))[:3]
+        # A key column such as "tn" and its readable twin "tn__bez" carry the
+        # same information; only the readable one is shown.
+        shown_fields = {
+            field: count for field, count in differing_fields.items()
+            if field + "__bez" not in differing_fields
+        }
+        top_fields = sorted(shown_fields, key=lambda field: (-shown_fields[field], field))[:3]
         issues.append(
             ValidationIssue(
                 code="uncertain-duplicate",
