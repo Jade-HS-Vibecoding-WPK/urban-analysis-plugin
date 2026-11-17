@@ -8,7 +8,6 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
-import random
 from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
@@ -30,20 +29,9 @@ from .study_area import (
     study_area_from_layer,
 )
 from .theme import (
-    LAMP_FILES,
-    LAMP_SIZE_PX,
-    WIRE_CELL_PX,
-    WIRE_COLORS,
-    WIRE_PATTERN,
-    WIRE_ROWS,
-    icon_path,
-    lit_columns,
     load_fonts,
     panel_stylesheet,
     set_role,
-    spawn_sparks,
-    step_sparks,
-    wire_cells,
 )
 from .ui_contract import UI_LABELS
 from .user_guidance import (
@@ -101,9 +89,6 @@ LAST_FOLDER_SETTING = "urban_analysis/last_geopackage_folder"
 ARROW_CLOSED = "▸"
 ARROW_OPEN = "▾"
 PANEL_ANIMATION_MS = 180
-BUSY_TICK_MS = 60
-WIRE_SPARK_SPACE_PX = 14  # room above the wire for rising sparks
-PROGRESS_MARGIN_PX = 10
 RESET_TOOLTIP = "Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
 RESET_QUESTION = (
     "Alles auf Anfang zurücksetzen?\n\n"
@@ -345,15 +330,6 @@ def import_error_text(file_name, error, full_path=None):
     )
 
 
-def lamp_state(step_index, current_index):
-    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'."""
-    if step_index < current_index:
-        return "on"
-    if step_index == current_index:
-        return "dim"
-    return "off"
-
-
 def pipeline_reports_progress(importer):
     """True if ``import_file`` accepts a ``progress`` callback (fraction 0..1).
 
@@ -486,7 +462,7 @@ def _create_dock(plugin):
     from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
 
     from .ui.widgets.pixel_button import PixelButton
-    from qgis.PyQt.QtGui import QColor, QIcon, QPainter
+    from .ui.widgets.pixel_scene import PixelScene
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
@@ -528,77 +504,6 @@ def _create_dock(plugin):
             self.widgets = {}
             self.builder(self)
 
-    class WireBar(QWidget):
-        """Busy bar as an own pixel wire that lights up with the real progress.
-
-        Dark red = not loaded yet, bright red = loaded. Sparks rise at the
-        progress front while a step runs.
-        """
-
-        def __init__(self):
-            super().__init__()
-            self._value = 0
-            self._maximum = 100
-            self.sparks = []
-            self.rng = random.Random(7)
-            self.setFixedHeight(WIRE_ROWS * WIRE_CELL_PX + WIRE_SPARK_SPACE_PX)
-
-        # QProgressBar-like interface used by the dock and tests
-        def setValue(self, value):
-            self._value = max(0, min(int(value), self._maximum))
-            self.update()
-
-        def value(self):
-            return self._value
-
-        def maximum(self):
-            return self._maximum
-
-        def reset(self):
-            self._value = 0
-            self.sparks = []
-            self.update()
-
-        def _columns(self):
-            return max(self.width() // WIRE_CELL_PX, 1)
-
-        def _top(self):
-            return self.height() - WIRE_ROWS * WIRE_CELL_PX
-
-        def tick(self):
-            """Move sparks and create new ones at the front of the lit wire."""
-            self.sparks = step_sparks(self.sparks)
-            lit = lit_columns(self._value, self._maximum, self._columns())
-            if lit > 0:
-                front = lit - 1
-                row = WIRE_PATTERN[front % len(WIRE_PATTERN)]
-                self.sparks += spawn_sparks(
-                    front * WIRE_CELL_PX + WIRE_CELL_PX / 2,
-                    self._top() + row * WIRE_CELL_PX,
-                    self.rng,
-                )
-            self.update()
-
-        def paintEvent(self, _event):
-            painter = QPainter(self)
-            columns = self._columns()
-            lit = lit_columns(self._value, self._maximum, columns)
-            top = self._top()
-            colors = {key: QColor(value) for key, value in WIRE_COLORS.items()}
-            for x, y in wire_cells(columns):
-                if x < lit:
-                    color = colors["on_light"] if (x + y) % 5 == 0 else colors["on"]
-                else:
-                    color = colors["off_edge"] if (x + y) % 4 == 0 else colors["off"]
-                painter.fillRect(x * WIRE_CELL_PX, top + y * WIRE_CELL_PX,
-                                 WIRE_CELL_PX, WIRE_CELL_PX, color)
-            for x, y, _vx, _vy, life, max_life in self.sparks:
-                spark = QColor(WIRE_COLORS["spark"])
-                spark.setAlpha(int(255 * life / max_life))
-                size = 2 if life < max_life / 2 else 3
-                painter.fillRect(int(x), int(y), size, size, spark)
-            painter.end()
-
     class GuidedDock(QgsDockWidget):
         """Side panel that walks through the nine MVP steps."""
 
@@ -614,7 +519,7 @@ def _create_dock(plugin):
             self.import_task = None  # running background import (step 3)
             self.closing = False
             self.next_message = None  # info shown after the next page change
-            self.all_done = False  # all lamps on after "Verarbeitung starten"
+            self.all_done = False  # fish at the end after "Verarbeitung starten"
             self.last_reports = None  # result of the last processing run (step 9)
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -641,37 +546,16 @@ def _create_dock(plugin):
             header.addLayout(counter_row)
             header.addWidget(self.step_label)
 
-            # Overall progress: one lamp per step up to the map
-            # (off = open, dim = current step, on = done).
-            self.lamp_pixmaps = {
-                state: QIcon(icon_path(name)).pixmap(LAMP_SIZE_PX, LAMP_SIZE_PX)
-                for state, name in LAMP_FILES.items()
-            }
-            self.step_lamps = []
-            progress_row = QHBoxLayout()
-            progress_row.setContentsMargins(0, PROGRESS_MARGIN_PX, 0, PROGRESS_MARGIN_PX)
-            progress_row.setSpacing(6)
-            for index, step in enumerate(MVP_UI_STEPS):
-                lamp = QLabel()
-                lamp.setFixedSize(LAMP_SIZE_PX, LAMP_SIZE_PX)
-                lamp.setToolTip(f"{index + 1}. {step}")
-                lamp.setPixmap(self.lamp_pixmaps["off"])
-                progress_row.addWidget(lamp)
-                self.step_lamps.append(lamp)
-            progress_row.addStretch()
+            # Fishing scene: the step fish shows the overall progress, the
+            # rabbit's float follows the real progress while data loads.
+            self.scene = PixelScene(total_steps=len(MVP_UI_STEPS))
 
-            # Busy bar for long steps: a pixel wire that lights up with the
-            # real progress; sparks rise at the progress front.
+            # Text line for long steps ("Lade … 40 %") below the scene.
             self.busy_label = QLabel()
             self.busy_label.setWordWrap(True)
             set_role(self.busy_label, "status")
-            self.busy_bar = WireBar()
             self.busy_text = ""
-            self.busy_timer = QTimer(self)
-            self.busy_timer.setInterval(BUSY_TICK_MS)
-            self.busy_timer.timeout.connect(self._advance_busy)
             self.busy_label.hide()
-            self.busy_bar.hide()
 
             # Only the current page is visible. A plain box layout (instead of
             # QStackedWidget) gives wrapped texts their full height.
@@ -715,10 +599,9 @@ def _create_dock(plugin):
             buttons.addStretch()
             buttons.addWidget(self.primary_button)
 
+            layout.addWidget(self.scene)
             layout.addLayout(header)
-            layout.addLayout(progress_row)
             layout.addWidget(self.busy_label)
-            layout.addWidget(self.busy_bar)
             layout.addWidget(scroll, 1)
             layout.addWidget(self.message_scroll)
             layout.addLayout(buttons)
@@ -758,7 +641,8 @@ def _create_dock(plugin):
             self.step_counter.setText(step_counter_text(index))
             self.step_label.setText(MVP_UI_STEPS[index])
             self.step_label.setToolTip(progress_text(index))
-            self.update_lamps()
+            self.scene.setToolTip(progress_text(index))
+            self.update_progress()
             self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
@@ -803,18 +687,14 @@ def _create_dock(plugin):
             self.message.clear()
             self.message_scroll.hide()
 
-        def update_lamps(self):
-            """Lamps before the current step are on, the current one glows.
-
-            After a successful processing run all lamps are on.
-            """
-            current = len(self.step_lamps) if self.all_done else self.current
-            for index, lamp in enumerate(self.step_lamps):
-                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current)])
+        def update_progress(self):
+            """The step fish swims to the current step (after a successful
+            processing run to the last one, with all step marks lit)."""
+            self.scene.set_step(len(MVP_UI_STEPS) if self.all_done else self.current)
 
         def mark_all_done(self):
             self.all_done = True
-            self.update_lamps()
+            self.update_progress()
 
         def fit_wrapped_labels(self):
             """Give every wrapped text its full height at the current width.
@@ -847,36 +727,30 @@ def _create_dock(plugin):
             return super().eventFilter(watched, event)
 
         def set_busy(self, text):
-            """Show the busy bar and lock the panel while a step runs."""
+            """The rabbit casts; lock the panel while a step runs."""
             self.busy_text = text
-            self.busy_bar.reset()
             self.busy_label.setText(busy_label_text(text, None))
             self.busy_label.show()
-            self.busy_bar.show()
-            self.busy_timer.start()
+            self.scene.start_loading()
             self.primary_button.setEnabled(False)
             self.back_button.setEnabled(False)
             self.reset_button.setEnabled(False)
             self.stack.setEnabled(False)
 
         def set_busy_progress(self, percent):
-            """Real progress from the background task (0-100)."""
-            self.busy_bar.setValue(int(percent))
+            """Real progress from the background task (0-100): the float moves."""
+            self.scene.set_progress(percent)
             self.busy_label.setText(busy_label_text(self.busy_text, percent))
 
-        def clear_busy(self):
-            self.busy_timer.stop()
-            self.busy_bar.reset()
+        def clear_busy(self, outcome="cancel"):
+            """Unlock the panel.  ``outcome``: 'done' (line breaks, rabbit
+            casts again), 'error' (float twitches, '…' bubble) or 'cancel'."""
+            {"done": self.scene.finish, "error": self.scene.fail}.get(outcome, self.scene.cancel)()
             self.busy_label.hide()
-            self.busy_bar.hide()
             self.stack.setEnabled(True)
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
             self.reset_button.setEnabled(True)
-
-        def _advance_busy(self):
-            # Sparks rise at the front of the lit wire.
-            self.busy_bar.tick()
 
         def ask_reset(self):
             """Ask, then reset the whole plugin to step 1 without data."""
@@ -949,7 +823,7 @@ def _create_dock(plugin):
             if self.import_task is not None:
                 self.import_task.cancel()
                 self.import_task = None
-            self.busy_timer.stop()
+            self.scene.stop()
             self.stop_drawing()
 
     dock = GuidedDock()
@@ -1330,16 +1204,18 @@ def _create_dock(plugin):
             if dock.closing:
                 return
             try:
-                dock.clear_busy()
                 if exception is not None:
+                    dock.clear_busy("error")
                     if isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
                         dock.show_message(import_error_text(path.name, exception, path))
                     else:
                         dock.show_unexpected_error(UI_LABELS["load_data"], exception)
                     return
                 if result is None:
+                    dock.clear_busy("cancel")
                     dock.show_message("Das Laden wurde abgebrochen.", kind="info")
                     return
+                dock.clear_busy("done")
                 plugin.start_workflow(result)
                 dock.show_page(3)
                 dock.show_message(

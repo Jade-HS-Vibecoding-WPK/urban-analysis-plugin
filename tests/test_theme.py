@@ -6,27 +6,18 @@ from pathlib import Path
 
 import pytest
 
-import random
-
 from urban_analysis.theme import (
     BODY_FONTS,
     CHECK_ICON_FILE,
     COLORS,
     HEADING_FONTS,
-    LAMP_FILES,
     RADIO_FILES,
     RADIUS_PX,
     ROLES,
     choose_family,
-    WIRE_PATTERN,
-    WIRE_ROWS,
     icon_path,
-    lit_columns,
     panel_stylesheet,
     set_role,
-    spawn_sparks,
-    step_sparks,
-    wire_cells,
 )
 
 
@@ -100,47 +91,6 @@ def test_every_role_used_in_the_stylesheet_is_known():
 def test_unknown_role_is_rejected():
     with pytest.raises(ValueError, match="Unbekannte Stilrolle"):
         set_role(object(), "rainbow")
-
-
-def test_three_own_pixel_lamps_for_the_step_progress():
-    assert set(LAMP_FILES) == {"off", "dim", "on"}
-    fills = {}
-    for state, name in LAMP_FILES.items():
-        root = ET.parse(Path(icon_path(name))).getroot()
-        assert root.get("width") == "16" and root.get("shape-rendering") == "crispEdges"
-        rects = root.findall("{http://www.w3.org/2000/svg}rect")
-        assert sum(int(rect.get("width")) for rect in rects) == 16 * 16
-        fills[state] = {rect.get("fill") for rect in rects}
-    assert fills["off"] != fills["dim"] != fills["on"]
-
-
-def test_wire_is_continuous_and_stays_in_its_rows():
-    cells = wire_cells(40)
-    columns = {x for x, _y in cells}
-    assert columns == set(range(40))
-    assert all(0 <= y < WIRE_ROWS for _x, y in cells)
-    # where the row changes, a connecting cell exists in the same column
-    for x in range(1, 40):
-        before = WIRE_PATTERN[(x - 1) % len(WIRE_PATTERN)]
-        assert (x, before) in cells
-
-
-def test_lit_part_follows_the_real_progress_only():
-    assert lit_columns(0, 100, 80) == 0
-    assert lit_columns(50, 100, 80) == 40
-    assert lit_columns(100, 100, 80) == 80
-    assert lit_columns(150, 100, 80) == 80
-    assert lit_columns(10, 0, 80) == 0
-
-
-def test_sparks_start_at_the_front_rise_and_fade_out():
-    sparks = spawn_sparks(120.0, 20.0, random.Random(1), count=5)
-    assert len(sparks) == 5
-    assert all(abs(s[0] - 120.0) <= 2 and s[3] < 0 for s in sparks)  # at the front, rising
-    later = sparks
-    for _ in range(20):
-        later = step_sparks(later)
-    assert later == []  # every spark ends
 
 
 def test_ticked_check_box_shows_an_own_white_pixel_check_mark():

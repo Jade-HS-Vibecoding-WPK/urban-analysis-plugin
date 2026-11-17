@@ -70,10 +70,6 @@ COLORS = {
     "warning_bg": "#FBF0D9",
     "info": TEXT,
     "info_bg": SURFACE,
-    # step lamps and busy bar (warm lamp light)
-    "lamp_dark": "#f08c24",
-    "lamp": "#ffc845",
-    "lamp_light": "#fff6c2",
 }
 
 # Spacing in a 4 px grid; one "pixel block" of the pixel details is 2 px.
@@ -120,13 +116,6 @@ def load_fonts():
     heading = choose_family(HEADING_FONTS, available) or body
     return {"heading": heading, "body": body}
 
-# Step lamps (own pixel design): off = not done, dim = current, on = done.
-LAMP_FILES = {
-    "off": "lampe_off.svg",
-    "dim": "lampe_dim.svg",
-    "on": "lampe_on.svg",
-}
-LAMP_SIZE_PX = 24
 
 RADIUS_PX = 0  # pixel style: hard corners
 
@@ -379,7 +368,7 @@ QFrame[uaRole="issue-info"] QWidget {{
     border: none;
 }}
 
-/* Busy bar: fills once with the real progress in lamp colours */
+/* Plain progress bars (if any): flat, petrol/pine */
 QProgressBar {{
     background-color: {c['surface']};
     border: 2px solid {c['outline']};
@@ -389,7 +378,7 @@ QProgressBar {{
     text-align: center;
 }}
 QProgressBar::chunk {{
-    background-color: {c['lamp']};
+    background-color: {c['pine']};
 }}
 QToolTip {{
     background-color: {c['surface']};
@@ -413,73 +402,6 @@ QScrollBar::add-line, QScrollBar::sub-line {{
     height: 0px;
 }}
 """
-
-
-# --- Busy bar: own pixel "wire" that lights up with the real progress ------
-
-WIRE_COLORS = {
-    "off": "#4d0d0d",       # wire not loaded yet (dark red)
-    "off_edge": "#2e0707",
-    "on": "#e8261a",        # loaded part (bright red)
-    "on_light": "#ff8a6a",  # highlights on the loaded part
-    "spark": "#ff4a2a",     # particles at the progress front
-}
-WIRE_CELL_PX = 3            # one wire "pixel" on screen
-WIRE_ROWS = 5               # height of the wire pattern in cells
-WIRE_PATTERN = (2, 2, 2, 1, 1, 1, 2, 3, 3, 3, 2, 2)  # own zig-zag motif (row per column)
-SPARK_SPAWN = 2             # new particles per tick at the front
-SPARK_LIFE = (8, 16)        # ticks a particle lives
-
-
-def wire_cells(columns):
-    """Cells (x, y) of the wire pattern for ``columns`` columns.
-
-    Where the row changes, a connecting cell keeps the wire continuous.
-    """
-    cells = []
-    previous = None
-    for x in range(max(columns, 0)):
-        y = WIRE_PATTERN[x % len(WIRE_PATTERN)]
-        if previous is not None and previous != y:
-            cells.append((x, previous))
-        cells.append((x, y))
-        previous = y
-    return cells
-
-
-def lit_columns(value, maximum, columns):
-    """Number of wire columns that are lit for progress ``value``/``maximum``."""
-    if maximum <= 0 or columns <= 0:
-        return 0
-    fraction = min(max(value / maximum, 0.0), 1.0)
-    return int(round(fraction * columns))
-
-
-def spawn_sparks(front_x, front_y, rng, count=SPARK_SPAWN):
-    """New particles at the progress front: [x, y, vx, vy, life, max_life]."""
-    sparks = []
-    for _ in range(count):
-        life = rng.randint(*SPARK_LIFE)
-        sparks.append([
-            front_x + rng.uniform(-2.0, 2.0),
-            front_y + rng.uniform(-1.0, 1.0),
-            rng.uniform(-0.6, 0.6),
-            rng.uniform(-1.8, -0.7),  # rise upwards
-            life,
-            life,
-        ])
-    return sparks
-
-
-def step_sparks(sparks):
-    """Move particles one tick; drop the ones whose life is over."""
-    alive = []
-    for x, y, vx, vy, life, max_life in sparks:
-        life -= 1
-        if life <= 0:
-            continue
-        alive.append([x + vx, y + vy, vx * 0.95, vy * 0.92, life, max_life])
-    return alive
 
 
 def set_role(widget, role):
