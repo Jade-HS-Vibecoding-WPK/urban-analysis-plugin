@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -78,6 +78,7 @@ class HarmonizedRecord:
     source_row_id: Any
     attributes: Mapping[str, Any]
     geometry: Any = None
+    duplicate_group: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class GeoPackageLayer:
     fields: Tuple[str, ...]
     rows: Tuple[Mapping[str, Any], ...]
     geometry_column: Optional[str] = None
+    primary_key: Optional[str] = None
 
 
 def _normalized(value: str) -> str:
@@ -283,9 +285,12 @@ class GeoPackageImporter:
         layers: List[GeoPackageLayer] = []
         for table_name, geometry_type, srs_id in tables:
             quoted_table = '"' + table_name.replace('"', '""') + '"'
-            columns = tuple(row[1] for row in connection.execute(f"PRAGMA table_info({quoted_table})"))
+            table_info = connection.execute(f"PRAGMA table_info({quoted_table})").fetchall()
+            columns = tuple(row[1] for row in table_info)
             if not columns:
                 continue
+            primary_keys = [row[1] for row in table_info if row[5]]
+            primary_key = primary_keys[0] if len(primary_keys) == 1 else None
             geometry_column = self._geometry_column(connection, table_name)
             if geometry_column not in columns:
                 geometry_column = None
@@ -305,7 +310,9 @@ class GeoPackageImporter:
             elif study_area is not None and crs_usable:
                 rows = self._clip_rows(connection, quoted_table, table_name, geometry_column, study_area, issues)
             layers.append(
-                GeoPackageLayer(table_name, geometry_type, source_srs, columns, tuple(rows), geometry_column)
+                GeoPackageLayer(
+                    table_name, geometry_type, source_srs, columns, tuple(rows), geometry_column, primary_key
+                )
             )
         return layers
 
@@ -505,8 +512,6 @@ class GeoPackageImporter:
         issues: List[ValidationIssue],
     ) -> List[HarmonizedRecord]:
         rules = {rule.target_field: rule.source_field for rule in GeoPackageImporter._mapping_rules(layer.fields)}
-        seen: set[Tuple[Any, ...]] = set()
-        records: List[HarmonizedRecord] = []
         geometry_column = layer.geometry_column or next(
             (
                 field
@@ -515,12 +520,23 @@ class GeoPackageImporter:
             ),
             None,
         )
-        row_id_column = next(
+        row_id_column = layer.primary_key or next(
             (field for field in layer.fields if _normalized(field) in {"fid", "id", "rowid"}),
             None,
         )
+        # Exact duplicates: every source column except the primary key is equal,
+        # including the geometry.  Only these are removed automatically.
+        compared_fields = tuple(field for field in layer.fields if field != layer.primary_key)
+        seen: set = set()
         duplicate_count = 0
+        records: List[HarmonizedRecord] = []
+        kept_rows: List[Mapping[str, Any]] = []
         for index, row in enumerate(layer.rows, start=1):
+            duplicate_key = tuple(row.get(field) for field in compared_fields)
+            if duplicate_key in seen:
+                duplicate_count += 1
+                continue
+            seen.add(duplicate_key)
             attributes: Dict[str, Any] = {
                 "source_name": str(file_path),
                 "object_type": row.get(rules["object_type"]) if "object_type" in rules else layer.table_name,
@@ -530,20 +546,15 @@ class GeoPackageImporter:
                 "year": _coerce_year(row.get(rules["year"])) if "year" in rules else None,
                 "source": row.get(rules["source"]) if "source" in rules else str(file_path),
             }
-            geometry_value = row.get(geometry_column) if geometry_column else None
-            duplicate_key = (*(attributes[field] for field in TARGET_FIELDS), geometry_value)
-            if duplicate_key in seen:
-                duplicate_count += 1
-                continue
-            seen.add(duplicate_key)
             records.append(
                 HarmonizedRecord(
                     layer_id=layer.table_name,
                     source_row_id=row.get(row_id_column, index) if row_id_column else index,
                     attributes=attributes,
-                    geometry=geometry_value,
+                    geometry=row.get(geometry_column) if geometry_column else None,
                 )
             )
+            kept_rows.append(row)
         if duplicate_count:
             issues.append(
                 ValidationIssue(
@@ -553,7 +564,83 @@ class GeoPackageImporter:
                         f"{layer.table_name} wurden entfernt."
                     ),
                     severity="warning",
-                    rule="Exakte Attribute und Geometrie",
+                    rule="Alle Attribute und Geometrie identisch",
                 )
             )
+        if geometry_column:
+            records = GeoPackageImporter._mark_uncertain_duplicates(
+                layer.table_name, records, kept_rows, compared_fields, geometry_column, issues
+            )
         return records
+
+    @staticmethod
+    def _mark_uncertain_duplicates(
+        table_name: str,
+        records: List[HarmonizedRecord],
+        rows: List[Mapping[str, Any]],
+        compared_fields: Sequence[str],
+        geometry_column: str,
+        issues: List[ValidationIssue],
+    ) -> List[HarmonizedRecord]:
+        """Group records that share a geometry but differ in other attributes.
+
+        They are kept and reported for confirmation, never removed here.
+        """
+        positions_by_geometry: Dict[Any, List[int]] = {}
+        for position, row in enumerate(rows):
+            geometry = row.get(geometry_column)
+            if geometry is not None:
+                positions_by_geometry.setdefault(geometry, []).append(position)
+        groups = [positions for positions in positions_by_geometry.values() if len(positions) > 1]
+        if not groups:
+            return records
+
+        differing_fields: Dict[str, int] = {}
+        marked = list(records)
+        for number, positions in enumerate(groups, start=1):
+            group_id = f"{table_name}:{number}"
+            for position in positions:
+                marked[position] = replace(marked[position], duplicate_group=group_id)
+            for field in compared_fields:
+                if len({rows[position].get(field) for position in positions}) > 1:
+                    differing_fields[field] = differing_fields.get(field, 0) + 1
+
+        row_count = sum(len(positions) for positions in groups)
+        top_fields = sorted(differing_fields, key=lambda field: (-differing_fields[field], field))[:3]
+        issues.append(
+            ValidationIssue(
+                code="uncertain-duplicate",
+                message=(
+                    f"{len(groups)} Gruppe(n) mit insgesamt {row_count} Objekten in Layer {table_name} "
+                    f"haben dieselbe Geometrie, unterscheiden sich aber in "
+                    f"{', '.join(top_fields) or 'einzelnen Attributen'}. Sie wurden behalten. "
+                    "Bitte bestätigen, ob sie je Gruppe zu einem Objekt zusammengeführt werden sollen "
+                    "(z. B. ein Gebäude mit mehreren Hausnummern)."
+                ),
+                severity="warning",
+                requires_confirmation=True,
+                rule="Gleiche Geometrie, abweichende Attribute",
+            )
+        )
+        return marked
+
+
+def merge_confirmed_duplicates(
+    records: Sequence[HarmonizedRecord], confirmed_groups: Iterable[str]
+) -> List[HarmonizedRecord]:
+    """Keep only the first record of each confirmed uncertain-duplicate group.
+
+    Records of unconfirmed groups stay unchanged, so the user's decision is
+    applied explicitly and the raw data is never modified.
+    """
+    confirmed = set(confirmed_groups)
+    merged: List[HarmonizedRecord] = []
+    seen_groups: set = set()
+    for record in records:
+        group = record.duplicate_group
+        if group in confirmed:
+            if group in seen_groups:
+                continue
+            seen_groups.add(group)
+        merged.append(record)
+    return merged

@@ -3,7 +3,11 @@ import struct
 
 import pytest
 
-from urban_analysis.data_pipeline import GeoPackageImportError, GeoPackageImporter
+from urban_analysis.data_pipeline import (
+    GeoPackageImportError,
+    GeoPackageImporter,
+    merge_confirmed_duplicates,
+)
 
 
 def wkb_point(x, y):
@@ -314,3 +318,77 @@ def test_same_attributes_with_different_geometry_are_not_duplicates(tmp_path):
     assert [record.source_row_id for record in result.harmonized_records] == [1, 3]
     duplicate = next(issue for issue in result.issues if issue.code == "duplicate-row")
     assert duplicate.message.startswith("1 exakte")
+
+
+def make_house_number_geopackage(path):
+    """One building stored once per house number, as in ALKIS exports."""
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER
+            );
+            INSERT INTO gpkg_spatial_ref_sys VALUES
+                ('ETRS89 / UTM zone 32N', 25832, 'EPSG', 25832);
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT,
+                srs_id INTEGER
+            );
+            INSERT INTO gpkg_geometry_columns VALUES
+                ('gebaeude', 'geom', 'MULTIPOLYGON', 25832);
+            CREATE TABLE gebaeude (
+                fid INTEGER PRIMARY KEY, geom BLOB, objid TEXT, gfk__bez TEXT, hnr TEXT
+            );
+            """
+        )
+        house = gpkg_polygon([(1, 1), (3, 1), (3, 3), (1, 3), (1, 1)])
+        other = gpkg_polygon([(5, 1), (7, 1), (7, 3), (5, 3), (5, 1)])
+        connection.executemany(
+            "INSERT INTO gebaeude VALUES (?, ?, ?, 'Wohngebäude', ?)",
+            [
+                (1, house, "DENIAL1", "39"),
+                (2, house, "DENIAL1", "41"),
+                (3, house, "DENIAL1", "41"),
+                (4, other, "DENIAL2", "1"),
+            ],
+        )
+
+
+def import_houses(path):
+    return GeoPackageImporter().import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",
+    )
+
+
+def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+
+    result = import_houses(path)
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 4]
+    assert [record.duplicate_group for record in result.harmonized_records] == [
+        "gebaeude:1",
+        "gebaeude:1",
+        None,
+    ]
+    exact = next(issue for issue in result.issues if issue.code == "duplicate-row")
+    assert exact.message.startswith("1 exakte")
+    uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
+    assert uncertain.requires_confirmation
+    assert uncertain.severity == "warning"
+    assert "hnr" in uncertain.message
+    assert "1 Gruppe(n) mit insgesamt 2 Objekten" in uncertain.message
+
+
+def test_merge_confirmed_duplicates_keeps_first_record_per_group(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    records = import_houses(path).harmonized_records
+
+    assert merge_confirmed_duplicates(records, []) == records
+    merged = merge_confirmed_duplicates(records, ["gebaeude:1"])
+    assert [record.source_row_id for record in merged] == [1, 4]
