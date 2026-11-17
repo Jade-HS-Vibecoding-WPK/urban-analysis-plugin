@@ -22,7 +22,7 @@ from qgis.PyQt.QtGui import QColor, QFont, QImage, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import QSizePolicy, QWidget
 
 from .. import scene_art as art
-from ..scene_motion import FRAME_MS, FishingScene, step_positions
+from ..scene_motion import FRAME_MS, JUMP_PATH, FishingScene, step_positions
 
 CLOUDS = ((4, 24, 1.0), (250, 12, 0.75), (345, 34, 0.55))  # x, y, scale (x for 420 px)
 PINES = ((14, 50, 22), (34, 42, 18), (52, 30, 14))       # x, height, width
@@ -65,7 +65,15 @@ class PixelScene(QWidget):
             "caught_2": _pixmap(art.caught_fish(tail_left=True)),
             "jumping": _pixmap(art.fish(False, size=1.0, color="catch")),
         }
-        self._leap = {pose: _pixmap(art.leap_fish(pose)) for pose in ("right", "left", "belly")}
+        # Turned fish for the looping: in the air (colour) and under water
+        # (shadow), one pixmap per angle, made once.
+        angles = {angle for _dx, _y, angle in JUMP_PATH}
+        leap, shadow = art.leap_fish(), art.fish(True, size=1.0)
+        self._loop = {}
+        for angle in angles:
+            for in_air, sprite in ((True, leap), (False, shadow)):
+                turned = art.rotate_sprite(sprite, angle)
+                self._loop[(angle, in_air)] = (_pixmap(turned), turned.anchors["centre"])
         self._clouds = [(x, y, _pixmap(art.cloud(scale))) for x, y, scale in CLOUDS]
         self._pines = [(x, art.pine(height, width)) for x, height, width in PINES]
         self._pine_maps = [_pixmap(sprite) for _x, sprite in self._pines]
@@ -247,15 +255,12 @@ class PixelScene(QWidget):
                 self._dot(p, x + dx, art.WATER_Y - 3 - rise + abs(dx) // 2, "ripple", 1, 2)
         jump = state.jump_view()
         if jump is not None:
-            x, y, pose, in_air = jump
-            if in_air:
-                pixmap = self._leap[pose]
-            else:
-                pixmap = self._fish[(True, False)]
+            x, y, angle, in_air = jump
+            pixmap, (cx, cy) = self._loop[(angle, in_air)]
             p.save()
             if in_air:  # never draw the flying fish into the island area
                 p.setClipRect(art.ISLAND_WIDTH, 0, self.width(), art.SCENE_HEIGHT)
-            p.drawPixmap(x - pixmap.width() // 2, y, pixmap)
+            p.drawPixmap(round(x - cx), round(y - cy), pixmap)
             p.restore()
             return
         fx, right, tail_up, wake = state.fish_state()

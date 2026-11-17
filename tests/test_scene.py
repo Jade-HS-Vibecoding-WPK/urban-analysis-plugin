@@ -173,7 +173,7 @@ def test_all_done_puts_the_fish_on_the_last_step():
     assert scene.fish_x == step_positions(420, 9)[-1]
 
 
-def test_fish_jumps_with_a_flip_after_the_result_layers():
+def test_fish_flies_a_looping_after_the_result_layers():
     from urban_analysis.ui.scene_motion import JUMP_PATH
 
     scene = FishingScene()
@@ -183,14 +183,16 @@ def test_fish_jumps_with_a_flip_after_the_result_layers():
     while scene.jump_view() is None:
         scene.tick()
     assert not scene.fish_moving()
-    poses, in_air, splashes = set(), [], 0
+    angles, in_air, splashes = [], [], 0
     while scene.jump_view() is not None:
-        _x, y, pose, air = scene.jump_view()
-        poses.add(pose)
+        _x, _y, angle, air = scene.jump_view()
+        angles.append(angle)
         in_air.append(air)
         scene.tick()
         splashes = max(splashes, len(scene.splashes))
-    assert {"right", "left", "belly"} <= poses  # flip shows the belly
+    # full circle: nose up, upside down at the top, nose down, level again
+    assert {-90, 180, 90, 0} <= set(angles)
+    assert angles.index(-90) < angles.index(180) < angles.index(90) < angles.index(0)
     assert in_air[0] is False and in_air[-1] is False and any(in_air)  # out and back in
     assert splashes >= 1
     assert len(in_air) == len(JUMP_PATH)
@@ -206,10 +208,18 @@ def test_no_jump_with_reduced_animations():
     assert scene.jump_view() is None and not scene.busy()
 
 
-def test_leap_fish_poses_are_calm_colours():
-    for pose in ("right", "left", "belly"):
-        colours = {c for _x, _y, c in art.leap_fish(pose).cells}
-        assert colours <= {"catch", "catch_belly", "outline"}
+def test_leap_fish_is_calm_and_turns_with_hard_pixels():
+    fish = art.leap_fish()
+    assert {c for _x, _y, c in fish.cells} <= {"catch", "catch_belly", "outline"}
+    for angle in (-90, 180, 45):
+        turned = art.rotate_sprite(fish, angle)
+        # same colours, roughly the same number of pixels, nothing blended
+        assert {c for _x, _y, c in turned.cells} <= {c for _x, _y, c in fish.cells}
+        assert 0.8 < len(turned.cells) / len(fish.cells) < 1.3
+    upright = art.rotate_sprite(fish, -90)
+    assert upright.height > upright.width  # nose up = tall
+    flipped = art.rotate_sprite(fish, 180)
+    assert flipped.width >= fish.width - 1
 
 
 def test_resting_scene_needs_no_event_animation():

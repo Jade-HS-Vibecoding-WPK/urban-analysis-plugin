@@ -264,27 +264,42 @@ def caught_fish(tail_left=False):
     return make_sprite(cells, {"mouth": (4, 1)})
 
 
-def leap_fish(pose="right"):
-    """The step fish in the air during its jump: grey-green with outline.
-    Poses: 'right' / 'left' (side view with light belly and eye) and 'belly'
-    (rolled over in the flip: we see the light belly)."""
-    if pose == "belly":
-        body = ellipse(7, 2, 6, 1.6)
-        tail = {(1 - i, y) for i in range(3) for y in range(2 - i, 3 + i)}
-        return make_sprite(paint(body | tail, "catch_belly", "outline"))
+def leap_fish():
+    """The step fish in the air during its looping: grey-green side view
+    with light belly, eye and outline, nose to the right."""
     body = ellipse(7, 3, 6, 2.6)
     tail = {(1 - i, y) for i in range(4) for y in range(int(3 - i * 0.8), int(3 + i * 0.8) + 1)}
-    shape = body | tail
-    eye = (10, 2)
-    if pose == "left":
-        span = max(x for x, _y in shape)
-        shape = {(span - x, y) for x, y in shape}
-        eye = (span - 10, 2)
-        body = {(span - x, y) for x, y in body}
-    cells = paint(shape, "catch", "outline",
+    cells = paint(body | tail, "catch", "outline",
                   lambda x, y: "catch_belly" if (x, y) in body and y >= 4 else None)
-    cells.append((eye[0], eye[1], "outline"))
+    cells.append((10, 2, "outline"))
     return make_sprite(cells)
+
+
+def rotate_sprite(sprite, degrees):
+    """Turn a sprite around its centre (positive = clockwise on screen).
+
+    Nearest-neighbour on the pixel grid: every target pixel takes the colour
+    of the source pixel it comes from, so edges stay hard (no blending).
+    The anchor 'centre' marks the middle of the turned sprite."""
+    import math
+
+    if degrees % 360 == 0:
+        return make_sprite(list(sprite.cells), {"centre": (sprite.width / 2, sprite.height / 2)})
+    colour = {(x, y): c for x, y, c in sprite.cells}
+    cx, cy = (sprite.width - 1) / 2, (sprite.height - 1) / 2
+    a = math.radians(degrees)
+    cos_a, sin_a = math.cos(a), math.sin(a)
+    radius = int(math.hypot(sprite.width, sprite.height) / 2) + 2
+    cells = []
+    for ty in range(-radius, radius + 1):
+        for tx in range(-radius, radius + 1):
+            # inverse rotation: where does this target pixel come from?
+            sx = cos_a * tx + sin_a * ty + cx
+            sy = -sin_a * tx + cos_a * ty + cy
+            source = (round(sx), round(sy))
+            if source in colour:
+                cells.append((tx, ty, colour[source]))
+    return make_sprite(cells, {"centre": (0, 0)})
 
 
 def sparkle():

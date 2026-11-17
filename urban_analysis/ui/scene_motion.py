@@ -47,15 +47,29 @@ FISH_TAIL_EVERY = 4        # tail flaps every 0.4 s
 WAKE_LINES = ((-10, 1, 7), (-20, 4, 6), (-30, 0, 5), (-40, 3, 4), (-48, 1, 3))
 
 # Celebration jump of the step fish after the result layers were created:
-# per frame (top y of the fish, pose).  It leaves the water, flips over in
-# the air (shows its light belly) and dives back in.
+# a looping.  Per frame: (x offset, centre y, angle).  Angle = turn of the
+# side view on screen (0 = nose right, -90 = nose up, 180 = upside down
+# heading left, 90 = nose down).  The fish shoots out nose first, flies a
+# full circle (upside down at the top), comes out level at the bottom of
+# the loop and dives back in.  No roll around its long axis.
 _W = art.WATER_Y
+_UNDER = art.FISH_Y + 3
 JUMP_PATH = (
-    (art.FISH_Y - 12, "right"), (_W + 6, "right"), (_W - 10, "right"), (_W - 20, "belly"),
-    (_W - 24, "left"), (_W - 20, "belly"), (_W - 10, "right"), (_W + 6, "right"),
-    (art.FISH_Y - 12, "right"), (art.FISH_Y, "right"),
+    (0, _UNDER - 8, -45),
+    (4, _W + 6, -45),
+    (8, _W - 8, -60),
+    (12, _W - 20, -90),
+    (10, _W - 31, -135),
+    (2, _W - 35, 180),
+    (-6, _W - 31, 135),
+    (-9, _W - 21, 90),
+    (-5, _W - 11, 45),
+    (2, _W - 8, 0),
+    (9, _W - 6, 30),
+    (14, _W + 6, 45),
+    (18, _UNDER - 6, 30),
+    (20, _UNDER, 0),
 )
-JUMP_STEP_X = 2            # px forward per frame
 SPLASH_LIFE = 3            # frames a splash stays visible
 
 
@@ -227,21 +241,21 @@ class FishingScene:
         self.jump_frame += 1
         if self.jump_frame >= len(JUMP_PATH):
             self.jump_frame = None
+            self.fish_x += JUMP_PATH[-1][0]  # lands a bit further on, then swims back
             return
         if before != self._in_air(self.jump_frame):  # leaves or enters the water
             self.splashes.append([self.jump_view()[0], SPLASH_LIFE])
 
     @staticmethod
     def _in_air(frame):
-        return JUMP_PATH[frame][0] < art.WATER_Y
+        return JUMP_PATH[frame][1] < art.WATER_Y
 
     def jump_view(self):
-        """None or (centre x, top y, pose, in_air) of the jumping fish."""
+        """None or (centre x, centre y, angle, in_air) of the looping fish."""
         if self.jump_frame is None:
             return None
-        y, pose = JUMP_PATH[self.jump_frame]
-        x = round(self.fish_x) + JUMP_STEP_X * self.jump_frame
-        return x, y, pose, y < art.WATER_Y
+        dx, y, angle = JUMP_PATH[self.jump_frame]
+        return round(self.fish_x) + dx, y, angle, y < art.WATER_Y
 
     def _move_fish(self):
         if self.jump_frame is not None:
