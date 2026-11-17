@@ -5,8 +5,9 @@ colours and widget roles from here, so the look stays consistent and can be
 changed in one place.  The style only applies to widgets of this plugin; the
 rest of QGIS keeps its own look.
 
-Look: light and neutral (white/grey surfaces, calm blue accent, system
-font).  Buttons give visible feedback on hover and when pressed.
+Look "Cozy Pixel": calm pastel mint, dark petrol text, monospace text and
+small pixel-art details.  Hard edges (no rounded corners, no soft shadows);
+red-orange is the only loud colour and is kept for the main action.
 
 Roles: widgets get a dynamic property ``uaRole`` (see ``ROLES``) and the
 stylesheet below styles each role.  Use ``set_role()`` to change a role at
@@ -17,38 +18,107 @@ from pathlib import Path
 
 # --- Design tokens --------------------------------------------------------
 
+# Palette "Cozy Pixel"
+BG = "#D3E6DF"           # mint, main background
+SURFACE = "#EEF4F1"      # cards, inputs, secondary buttons
+TEXT = "#1E3B38"         # dark petrol, headings and text
+TEXT_MUTED = "#4F6B66"
+ACCENT = "#E8655A"       # red-orange: ONLY main / important actions
+ACCENT_DARK = "#B8463D"  # hard pixel shadow below ACCENT
+WATER = "#8DB6AE"
+PINE = "#6E9C8C"
+PINE_DARK = "#4C7466"
+TRUNK = "#7A4E3A"
+CLOUD = "#F6F3EC"
+OUTLINE = "#1E3B38"      # 1-2 px pixel outline
+
 COLORS = {
-    "background": "#f6f7f9",
-    "surface": "#ffffff",
-    "border": "#c9ced6",
-    "border_strong": "#9aa3ae",
-    "text": "#1f2328",
-    "text_muted": "#5b6470",
-    "text_on_accent": "#ffffff",
-    # accent: main action, progress, focus
-    "accent": "#2f6fb0",
-    "accent_hover": "#245a91",
-    "accent_pressed": "#1b4672",
-    "accent_light": "#e6f0fa",
+    "background": BG,
+    "surface": SURFACE,
+    "border": "#9FBDB4",
+    "border_strong": OUTLINE,
+    "outline": OUTLINE,
+    "text": TEXT,
+    "text_muted": TEXT_MUTED,
+    "text_on_accent": "#FFFFFF",
+    # accent: main action and input focus
+    "accent": ACCENT,
+    "accent_hover": "#EE7A70",
+    "accent_pressed": ACCENT_DARK,
+    "accent_dark": ACCENT_DARK,
+    "accent_light": "#F9DDD9",
+    # chosen state of check boxes, radio buttons and choices (calm, not loud)
+    "selected": TEXT,
+    "selected_light": "#DCEAE5",
     # neutral buttons
-    "button": "#eef1f4",
-    "button_hover": "#e1e6eb",
-    "button_pressed": "#d0d7df",
-    "disabled": "#e9ecef",
-    "disabled_text": "#9aa3ae",
+    "button": SURFACE,
+    "button_hover": "#E2EDE8",
+    "button_pressed": "#CFE0D9",
+    "disabled": "#DDE6E2",
+    "disabled_text": "#8FA39E",
+    # scene colours (pixel details)
+    "water": WATER,
+    "pine": PINE,
+    "pine_dark": PINE_DARK,
+    "trunk": TRUNK,
+    "cloud": CLOUD,
     # states
-    "success": "#2e7d32",
-    "error": "#b42318",
-    "error_bg": "#fdecea",
-    "warning": "#8a5a00",
-    "warning_bg": "#fff4e0",
-    "info": "#1f5f99",
-    "info_bg": "#e8f1fb",
+    "success": "#2F6E57",
+    "error": "#B42318",
+    "error_bg": "#FBE3DF",
+    "warning": "#8A5A00",
+    "warning_bg": "#FBF0D9",
+    "info": TEXT,
+    "info_bg": SURFACE,
     # step lamps and busy bar (warm lamp light)
     "lamp_dark": "#f08c24",
     "lamp": "#ffc845",
     "lamp_light": "#fff6c2",
 }
+
+# Spacing in a 4 px grid; one "pixel block" of the pixel details is 2 px.
+GRID_PX = 4
+PIXEL_PX = 2
+SHADOW_PX = 3            # hard shadow offset below raised elements
+
+# --- Fonts ----------------------------------------------------------------
+# Optional font files (OFL) in ui/assets/fonts/; without them the system
+# monospace font is used.  The pixel font is only for headings.
+FONT_DIR = Path(__file__).resolve().parent / "ui" / "assets" / "fonts"
+HEADING_FONTS = ("Pixelify Sans", "Silkscreen")
+BODY_FONTS = ("JetBrains Mono", "IBM Plex Mono", "Consolas", "Menlo",
+              "DejaVu Sans Mono", "Courier New")
+HEADING_SIZE_PT = 13
+BODY_SIZE_PT = 9
+
+
+def choose_family(candidates, available):
+    """First of ``candidates`` that is installed (case-insensitive), else None."""
+    installed = {name.lower(): name for name in available}
+    for name in candidates:
+        if name.lower() in installed:
+            return installed[name.lower()]
+    return None
+
+
+def load_fonts():
+    """Register bundled fonts and return {'heading': family, 'body': family}.
+
+    Needs Qt; call it once before building the panel.  Missing font files are
+    no error: the heading then uses the body font.
+    """
+    from qgis.PyQt.QtGui import QFontDatabase
+
+    if FONT_DIR.is_dir():
+        for path in sorted(FONT_DIR.glob("*.[ot]tf")):
+            QFontDatabase.addApplicationFont(str(path))
+    try:
+        available = QFontDatabase.families()  # Qt6: static
+    except TypeError:
+        available = QFontDatabase().families()  # Qt5
+    body = choose_family(BODY_FONTS, available) or "monospace"
+    heading = choose_family(HEADING_FONTS, available) or body
+    return {"heading": heading, "body": body}
 
 # Step lamps (own pixel design): off = not done, dim = current, on = done.
 LAMP_FILES = {
@@ -58,7 +128,7 @@ LAMP_FILES = {
 }
 LAMP_SIZE_PX = 24
 
-RADIUS_PX = 4
+RADIUS_PX = 0  # pixel style: hard corners
 
 ROLES = (
     "primary",    # one main action per page
@@ -84,6 +154,14 @@ ICON_DIR = Path(__file__).resolve().parent / "icons"
 TOOLBAR_ICON_FILE = "erdblock.svg"
 # Ticked check boxes: own white pixel check mark on the blue box.
 CHECK_ICON_FILE = "haken.svg"
+# Radio buttons: own pixel circles (7x7 blocks of 2 px).
+RADIO_FILES = {
+    "off": "radio_off.svg",
+    "on": "radio_on.svg",
+    "disabled": "radio_disabled.svg",
+}
+RADIO_RING = ("..###..", ".#...#.", "#.....#", "#.....#", "#.....#", ".#...#.", "..###..")
+RADIO_DOT = ((2, 2), (3, 2), (4, 2), (2, 3), (3, 3), (4, 3), (2, 4), (3, 4), (4, 4))
 
 
 def icon_path(name=TOOLBAR_ICON_FILE):
@@ -91,22 +169,32 @@ def icon_path(name=TOOLBAR_ICON_FILE):
     return str(ICON_DIR / name)
 
 
-def panel_stylesheet():
-    """Stylesheet for a plugin window; set it on the window's top widget."""
+def panel_stylesheet(fonts=None):
+    """Stylesheet for a plugin window; set it on the window's top widget.
+
+    ``fonts`` comes from ``load_fonts()``; without it the first body font
+    candidate is named and Qt falls back to its default font if missing.
+    """
     c = COLORS
     r = RADIUS_PX
+    fonts = fonts or {"heading": BODY_FONTS[0], "body": BODY_FONTS[0]}
+    body_font = fonts["body"]
+    heading_font = fonts["heading"]
     # Qt stylesheets need forward slashes, also on Windows.
     check_icon = Path(icon_path(CHECK_ICON_FILE)).as_posix()
-    padding = "padding: 6px 14px;"
-    # Pressed: the label moves 1 px down, so the button feels pushed in.
-    pressed_padding = "padding: 7px 14px 5px 14px;"
+    radio = {state: Path(icon_path(name)).as_posix() for state, name in RADIO_FILES.items()}
+    # Flat pixel buttons: 2 px outline, a thicker bottom edge as hard shadow.
+    padding = "padding: 5px 12px 4px 12px;"
+    pressed_padding = "padding: 7px 12px 4px 12px;"
     return f"""
 QWidget {{
     background-color: {c['background']};
     color: {c['text']};
+    font-family: "{body_font}";
+    font-size: {BODY_SIZE_PT}pt;
 }}
 QDockWidget::title {{
-    background-color: {c['button']};
+    background-color: {c['surface']};
     padding: 4px;
     text-align: left;
 }}
@@ -117,8 +205,9 @@ QLabel {{
     background: transparent;
 }}
 QLabel[uaRole="heading"] {{
+    font-family: "{heading_font}";
     font-weight: bold;
-    font-size: 11pt;
+    font-size: {HEADING_SIZE_PT}pt;
 }}
 QLabel[uaRole="hint"] {{
     color: {c['text_muted']};
@@ -130,79 +219,76 @@ QLabel[uaRole="status"] {{
 QLabel[uaRole="error"] {{
     background-color: {c['error_bg']};
     color: {c['error']};
-    border: 1px solid {c['error']};
+    border: 2px solid {c['error']};
     border-radius: {r}px;
     padding: 6px;
 }}
 QLabel[uaRole="info"] {{
     background-color: {c['info_bg']};
     color: {c['info']};
-    border: 1px solid {c['info']};
+    border: 2px solid {c['outline']};
     border-radius: {r}px;
     padding: 6px;
 }}
 
-/* Buttons: hover darkens and frames, pressed darkens more and shifts down. */
+/* Buttons that are not drawn as PixelButton: flat, 2 px outline,
+   thicker bottom edge as hard shadow; pressed sinks onto the shadow. */
 QPushButton {{
     background-color: {c['button']};
     color: {c['text']};
-    border: 1px solid {c['border_strong']};
+    border: 2px solid {c['outline']};
+    border-bottom-width: {2 + SHADOW_PX}px;
     border-radius: {r}px;
     {padding}
 }}
 QPushButton:hover {{
     background-color: {c['button_hover']};
-    border-color: {c['accent']};
 }}
 QPushButton:pressed {{
     background-color: {c['button_pressed']};
-    border-color: {c['accent_pressed']};
+    border-bottom-width: 2px;
     {pressed_padding}
 }}
 QPushButton[uaRole="primary"] {{
     background-color: {c['accent']};
     color: {c['text_on_accent']};
-    border: 1px solid {c['accent_hover']};
+    border-color: {c['accent_dark']};
     font-weight: bold;
 }}
 QPushButton[uaRole="primary"]:hover {{
     background-color: {c['accent_hover']};
-    border-color: {c['accent_pressed']};
 }}
 QPushButton[uaRole="primary"]:pressed {{
     background-color: {c['accent_pressed']};
+    border-bottom-width: 2px;
     {pressed_padding}
 }}
 /* Choice buttons: full width, left aligned; the chosen one is highlighted
    and its panel opens directly below it. */
 QPushButton[uaRole="choice"] {{
     background-color: {c['surface']};
-    border: 1px solid {c['border_strong']};
     text-align: left;
-    padding: 10px 12px;
+    padding: 9px 12px 8px 12px;
     font-weight: bold;
 }}
 QPushButton[uaRole="choice"]:hover {{
-    background-color: {c['accent_light']};
-    border-color: {c['accent']};
+    background-color: {c['selected_light']};
 }}
 QPushButton[uaRole="choice"]:pressed {{
     background-color: {c['button_pressed']};
-    padding: 11px 12px 9px 12px;
+    border-bottom-width: 2px;
+    padding: 11px 12px 8px 12px;
 }}
 QPushButton[uaRole="choice"]:checked {{
-    background-color: {c['accent_light']};
-    border: 2px solid {c['accent']};
-    border-bottom-left-radius: 0px;
-    border-bottom-right-radius: 0px;
-    color: {c['accent_pressed']};
+    background-color: {c['selected_light']};
+    border-bottom-width: 2px;
+    color: {c['selected']};
 }}
 QFrame[uaRole="panel"] {{
     background-color: {c['surface']};
-    border: 2px solid {c['accent']};
+    border: 2px solid {c['outline']};
     border-top: none;
-    border-bottom-left-radius: {r}px;
-    border-bottom-right-radius: {r}px;
+    border-radius: {r}px;
 }}
 QFrame[uaRole="panel"] QLabel, QFrame[uaRole="panel"] QWidget {{
     background-color: {c['surface']};
@@ -211,21 +297,19 @@ QFrame[uaRole="panel"] QLabel, QFrame[uaRole="panel"] QWidget {{
 QPushButton:disabled, QPushButton[uaRole="primary"]:disabled {{
     background-color: {c['disabled']};
     color: {c['disabled_text']};
-    border-color: {c['border']};
+    border-color: {c['disabled_text']};
+    border-bottom-width: 2px;
 }}
 
-/* Inputs */
+/* Inputs: surface, 2 px outline, red-orange outline while typing */
 QLineEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox, QListWidget {{
     background-color: {c['surface']};
     color: {c['text']};
-    border: 1px solid {c['border']};
+    border: 2px solid {c['outline']};
     border-radius: {r}px;
     padding: 3px;
-    selection-background-color: {c['accent']};
-    selection-color: {c['text_on_accent']};
-}}
-QLineEdit:hover, QAbstractSpinBox:hover, QComboBox:hover {{
-    border-color: {c['border_strong']};
+    selection-background-color: {c['selected']};
+    selection-color: {c['surface']};
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QAbstractSpinBox:focus, QComboBox:focus,
 QListWidget:focus {{
@@ -233,43 +317,47 @@ QListWidget:focus {{
 }}
 QComboBox QAbstractItemView {{
     background-color: {c['surface']};
-    selection-background-color: {c['accent_light']};
+    border: 2px solid {c['outline']};
+    selection-background-color: {c['selected_light']};
     selection-color: {c['text']};
 }}
 QRadioButton, QCheckBox {{
     background: transparent;
     spacing: 6px;
 }}
-/* Clearly visible circles and boxes, filled blue when chosen. */
-QRadioButton::indicator, QCheckBox::indicator {{
+/* Square pixel boxes; ticked = petrol with an own white pixel check mark. */
+QCheckBox::indicator {{
     width: 14px;
     height: 14px;
     background-color: {c['surface']};
-    border: 2px solid {c['border_strong']};
+    border: 2px solid {c['outline']};
+    border-radius: {r}px;
 }}
-QRadioButton::indicator {{
-    border-radius: 9px;
-}}
-QCheckBox::indicator {{
-    border-radius: 3px;
-}}
-QRadioButton::indicator:hover, QCheckBox::indicator:hover {{
-    border-color: {c['accent']};
-}}
-QRadioButton::indicator:checked {{
-    background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
-        stop:0 {c['accent']}, stop:0.55 {c['accent']}, stop:0.65 {c['surface']},
-        stop:1 {c['surface']});
-    border-color: {c['accent']};
+QCheckBox::indicator:hover {{
+    background-color: {c['selected_light']};
 }}
 QCheckBox::indicator:checked {{
-    background-color: {c['accent']};
-    border-color: {c['accent']};
+    background-color: {c['selected']};
+    border-color: {c['selected']};
     image: url("{check_icon}");
 }}
-QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
+QCheckBox::indicator:disabled {{
     background-color: {c['disabled']};
-    border-color: {c['border']};
+    border-color: {c['disabled_text']};
+}}
+/* Round choices as own pixel circles (no soft edges). */
+QRadioButton::indicator {{
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    image: url("{radio['off']}");
+}}
+QRadioButton::indicator:checked {{
+    image: url("{radio['on']}");
+}}
+QRadioButton::indicator:disabled {{
+    image: url("{radio['disabled']}");
 }}
 QRadioButton:disabled, QCheckBox:disabled {{
     color: {c['disabled_text']};
@@ -278,13 +366,13 @@ QRadioButton:disabled, QCheckBox:disabled {{
 /* One review hint per card, coloured edge by severity */
 QFrame[uaRole="issue-error"], QFrame[uaRole="issue-warning"], QFrame[uaRole="issue-info"] {{
     background-color: {c['surface']};
-    border: 1px solid {c['border']};
-    border-left-width: 5px;
+    border: 2px solid {c['outline']};
+    border-left-width: 6px;
     border-radius: {r}px;
 }}
 QFrame[uaRole="issue-error"] {{ border-left-color: {c['error']}; }}
 QFrame[uaRole="issue-warning"] {{ border-left-color: #d99a00; }}
-QFrame[uaRole="issue-info"] {{ border-left-color: {c['border_strong']}; }}
+QFrame[uaRole="issue-info"] {{ border-left-color: {c['pine']}; }}
 QFrame[uaRole="issue-error"] QWidget, QFrame[uaRole="issue-warning"] QWidget,
 QFrame[uaRole="issue-info"] QWidget {{
     background-color: {c['surface']};
@@ -294,7 +382,7 @@ QFrame[uaRole="issue-info"] QWidget {{
 /* Busy bar: fills once with the real progress in lamp colours */
 QProgressBar {{
     background-color: {c['surface']};
-    border: 1px solid {c['border']};
+    border: 2px solid {c['outline']};
     border-radius: {r}px;
     min-height: 12px;
     max-height: 12px;
@@ -302,12 +390,27 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{
     background-color: {c['lamp']};
-    border-radius: {r - 1}px;
 }}
 QToolTip {{
     background-color: {c['surface']};
     color: {c['text']};
-    border: 1px solid {c['border_strong']};
+    border: 2px solid {c['outline']};
+}}
+QScrollBar:vertical, QScrollBar:horizontal {{
+    background: {c['background']};
+    border: none;
+    width: 10px;
+    height: 10px;
+}}
+QScrollBar::handle {{
+    background: {c['pine']};
+    border: 2px solid {c['background']};
+    min-height: 20px;
+    min-width: 20px;
+}}
+QScrollBar::add-line, QScrollBar::sub-line {{
+    width: 0px;
+    height: 0px;
 }}
 """
 

@@ -38,6 +38,7 @@ from .theme import (
     WIRE_ROWS,
     icon_path,
     lit_columns,
+    load_fonts,
     panel_stylesheet,
     set_role,
     spawn_sparks,
@@ -400,8 +401,17 @@ LOG_TAG = "Urban Analysis"
 
 
 def progress_text(index):
-    """Return the overall progress label for the page at ``index``."""
-    return f"Schritt {index + 1} von {len(MVP_UI_STEPS)} – {MVP_UI_STEPS[index]}"
+    """Return the overall progress label for the page at ``index``.
+
+    A no-break space keeps the dash with the number, so a narrow panel never
+    shows the dash alone on a line.
+    """
+    return f"{step_counter_text(index)} – {MVP_UI_STEPS[index]}"
+
+
+def step_counter_text(index):
+    """Small line above the step heading, e.g. 'Schritt 5 von 9'."""
+    return f"Schritt {index + 1} von {len(MVP_UI_STEPS)}"
 
 
 def error_text(error):
@@ -474,6 +484,8 @@ def _create_dock(plugin):
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
     from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
+
+    from .ui.widgets.pixel_button import PixelButton
     from qgis.PyQt.QtGui import QColor, QIcon, QPainter
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
@@ -605,22 +617,29 @@ def _create_dock(plugin):
             self.all_done = False  # all lamps on after "Verarbeitung starten"
             self.last_reports = None  # result of the last processing run (step 9)
 
-            # The whole plugin shares one style (theme.py).
-            self.setStyleSheet(panel_stylesheet())
+            # The whole plugin shares one style (theme.py), with the bundled
+            # fonts if present (otherwise the system monospace font).
+            self.setStyleSheet(panel_stylesheet(load_fonts()))
             body = QWidget()
             layout = QVBoxLayout(body)
 
+            # Header: small "Schritt x von 9" next to "Zurücksetzen", below it
+            # the step name as heading over the full width.
+            self.step_counter = QLabel()
+            set_role(self.step_counter, "hint")
             self.step_label = QLabel()
             self.step_label.setWordWrap(True)
             set_role(self.step_label, "heading")
-            self.reset_button = QPushButton("↺ Zurücksetzen")
-            set_role(self.reset_button, "secondary")
-            self.reset_button.setCursor(Qt.PointingHandCursor)
+            self.reset_button = PixelButton("↺ Zurücksetzen", "secondary")
             self.reset_button.setToolTip(RESET_TOOLTIP)
             self.reset_button.clicked.connect(self.ask_reset)
-            header = QHBoxLayout()
-            header.addWidget(self.step_label, 1)
-            header.addWidget(self.reset_button, 0, Qt.AlignTop)
+            header = QVBoxLayout()
+            header.setSpacing(0)
+            counter_row = QHBoxLayout()
+            counter_row.addWidget(self.step_counter, 1)
+            counter_row.addWidget(self.reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            header.addLayout(counter_row)
+            header.addWidget(self.step_label)
 
             # Overall progress: one lamp per step up to the map
             # (off = open, dim = current step, on = done).
@@ -685,14 +704,11 @@ def _create_dock(plugin):
             self.message_scroll.setMaximumHeight(MESSAGE_MAX_HEIGHT)
             self.message_scroll.hide()
 
-            self.back_button = QPushButton("Zurück")
-            set_role(self.back_button, "secondary")
-            self.back_button.setCursor(Qt.PointingHandCursor)
+            # Footer buttons are drawn as pixel buttons (ui/widgets).
+            self.back_button = PixelButton("Zurück", "secondary")
             self.back_button.clicked.connect(self.go_back)
-            self.primary_button = QPushButton()
+            self.primary_button = PixelButton("", "primary")
             self.primary_button.setObjectName("uaPrimaryButton")
-            set_role(self.primary_button, "primary")
-            self.primary_button.setCursor(Qt.PointingHandCursor)
             self.primary_button.clicked.connect(self.run_primary_action)
             buttons = QHBoxLayout()
             buttons.addWidget(self.back_button)
@@ -739,7 +755,9 @@ def _create_dock(plugin):
             self.stack_layout.activate()
             self.stack.updateGeometry()
             QTimer.singleShot(0, self.fit_wrapped_labels)
-            self.step_label.setText(progress_text(index))
+            self.step_counter.setText(step_counter_text(index))
+            self.step_label.setText(MVP_UI_STEPS[index])
+            self.step_label.setToolTip(progress_text(index))
             self.update_lamps()
             self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
@@ -804,6 +822,10 @@ def _create_dock(plugin):
             Qt underestimates the height of wrapped labels inside nested cards;
             measuring them after the layout has its width avoids cut-off lines.
             """
+            # The step heading wraps in narrow panels, too.
+            heading_height = self.step_label.heightForWidth(self.step_label.width())
+            if heading_height > 0:
+                self.step_label.setMinimumHeight(heading_height)
             if not self.pages:
                 return
             page = self.pages[self.current]
@@ -1438,8 +1460,11 @@ def _create_dock(plugin):
                 target.setCurrentIndex(index)
                 target.setEnabled(accepted.isChecked())
                 accepted.toggled.connect(target.setEnabled)
+                # Column name on its own line, the target field below it, so
+                # long names are never cut off in a narrow panel.
+                card_layout.addWidget(accepted)
                 row = QHBoxLayout()
-                row.addWidget(accepted, 1)
+                row.setContentsMargins(INDENT_PX, 0, 0, 0)
                 row.addWidget(arrow)
                 row.addWidget(target, 1)
                 card_layout.addLayout(row)
