@@ -10,14 +10,20 @@ from .user_guidance import OutputPlan
 def load_qgis_layers(iface, selected_layers: Iterable[LayerDescriptor], layer_objects):
     """Load confirmed result layers without changing the input layer list."""
     if iface is None or not hasattr(iface, "addMapLayer"):
-        raise RuntimeError("A QGIS interface is required to load result layers")
+        raise RuntimeError(
+            "Die Ergebnis-Layer können nur innerhalb von QGIS geladen werden "
+            "(QGIS-Oberfläche nicht verfügbar)."
+        )
 
     loaded = []
     for descriptor in selected_layers:
         try:
             layer = layer_objects[descriptor.layer_id]
         except (KeyError, TypeError):
-            raise KeyError("No QGIS layer object for " + descriptor.layer_id)
+            raise KeyError(
+                f"Für den Layer „{descriptor.layer_id}“ wurde kein QGIS-Layer erzeugt; "
+                "er kann daher nicht geladen werden."
+            )
         iface.addMapLayer(layer)
         loaded.append(descriptor.layer_id)
     return tuple(loaded)
@@ -80,7 +86,10 @@ def export_pdf(path, output_plan: OutputPlan) -> str:
     """Export the selected workflow metadata as the optional PDF output."""
     metadata = output_plan.pdf_metadata
     if not output_plan.pdf_requested or metadata is None:
-        raise ValueError("PDF output was not selected")
+        raise ValueError(
+            "Die PDF-Ausgabe ist nicht ausgewählt. Bitte in Schritt 8 „PDF erzeugen“ "
+            "ankreuzen."
+        )
     return write_minimal_pdf(
         path,
         title="Urban Analysis - Siedlungsstruktur",
@@ -108,9 +117,15 @@ def export_selected_outputs(
         )
     if output_plan.geopackage_requested:
         if not geopackage_path:
-            raise ValueError("A GeoPackage path is required for GeoPackage output")
+            raise ValueError(
+                "Für das bereinigte GeoPackage fehlt der Speicherort. Bitte einen "
+                "Dateinamen wählen."
+            )
         if layer_objects is None:
-            raise ValueError("QGIS layer objects are required for GeoPackage output")
+            raise ValueError(
+                "Das GeoPackage kann nicht gespeichert werden, weil noch keine "
+                "Ergebnis-Layer erzeugt wurden."
+            )
         from qgis.core import QgsCoordinateTransformContext, QgsVectorFileWriter
 
         writer_errors = []
@@ -132,10 +147,15 @@ def export_selected_outputs(
             if error != QgsVectorFileWriter.NoError:
                 writer_errors.append(message or descriptor.layer_id)
         if writer_errors:
-            raise RuntimeError("GeoPackage export failed: " + "; ".join(writer_errors))
+            raise RuntimeError(
+                "Das GeoPackage konnte nicht gespeichert werden: "
+                + "; ".join(writer_errors)
+            )
         result["geopackage_path"] = str(geopackage_path)
     if output_plan.pdf_requested:
         if not pdf_path:
-            raise ValueError("A PDF path is required for PDF output")
+            raise ValueError(
+                "Für das PDF fehlt der Speicherort. Bitte einen Dateinamen wählen."
+            )
         result["pdf_path"] = export_pdf(pdf_path, output_plan)
     return result
