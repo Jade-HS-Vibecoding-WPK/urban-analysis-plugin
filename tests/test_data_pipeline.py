@@ -6,6 +6,7 @@ import pytest
 from urban_analysis.data_pipeline import (
     GeoPackageImportError,
     GeoPackageImporter,
+    apply_attribute_decisions,
     apply_data_source,
     merge_confirmed_duplicates,
 )
@@ -784,3 +785,129 @@ def test_user_guidance_can_detect_progress_support():
     import inspect
 
     assert "progress" in inspect.signature(GeoPackageImporter().import_file).parameters
+
+
+def suggestion_for(result, layer_id, source_field):
+    return next(
+        s for s in result.attribute_suggestions
+        if s.layer_id == layer_id and s.source_field == source_field
+    )
+
+
+def records_of(records, source_layer):
+    return [record for record in records if record.source_layer == source_layer]
+
+
+def test_records_keep_original_columns_and_pipeline_values(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+
+    result = import_alkis(path)
+
+    building = records_of(result.harmonized_records, "gebaeude")[0]
+    assert building.source_attributes["gfk__bez"] == "Wohngebäude"
+    assert building.source_attributes["objid"] == "G1"
+    assert building.pipeline_attributes["object_type"] == "Wohngebäude"
+    park = next(r for r in result.harmonized_records if r.layer_id == "nutzung_gruen")
+    assert park.source_layer == "nutzung"
+
+
+def test_accepting_everything_keeps_the_pipeline_values(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    result = import_alkis(path)
+    for suggestion in result.attribute_suggestions:
+        suggestion.accepted = True
+
+    updated = apply_attribute_decisions(result)
+
+    assert [r.attributes for r in updated] == [r.attributes for r in result.harmonized_records]
+
+
+def test_rejected_suggestion_empties_only_that_layers_target(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    result = import_alkis(path)
+    suggestion_for(result, "gebaeude", "gfk__bez").accepted = False
+
+    updated = apply_attribute_decisions(result)
+
+    building = records_of(updated, "gebaeude")[0]
+    assert building.attributes["object_type"] is None
+    assert building.attributes["object_detail"] is None
+    assert building.attributes["category"] == "Gebäude"
+    assert building.layer_id == "gebaeude"
+    nutzung = records_of(updated, "nutzung")[0]
+    assert nutzung.attributes["object_type"] == "Strassenverkehr"
+
+
+def test_moved_suggestion_fills_the_chosen_target(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    result = import_alkis(path)
+    suggestion_for(result, "nutzung", "tn__bez").user_value = "Status"
+
+    updated = apply_attribute_decisions(result)
+
+    park = next(r for r in records_of(updated, "nutzung") if r.layer_id == "nutzung_gruen")
+    assert park.attributes["status"] == "Sport-, Freizeit- und Erholungsfläche, Park"
+    assert park.attributes["object_type"] is None
+    assert park.attributes["object_detail"] is None
+    assert park.attributes["category"] == "Grünflächen"
+
+
+def test_decisions_can_be_changed_again_without_losing_data(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    result = import_alkis(path)
+    original = [dict(r.attributes) for r in result.harmonized_records]
+    suggestion = suggestion_for(result, "nutzung", "tn__bez")
+
+    suggestion.user_value = "status"
+    result.harmonized_records = apply_attribute_decisions(result)
+    suggestion.user_value = None
+    suggestion.accepted = True
+    result.harmonized_records = apply_attribute_decisions(result)
+
+    assert [dict(r.attributes) for r in result.harmonized_records] == original
+
+
+def test_area_and_year_from_a_chosen_column_are_converted(tmp_path):
+    path = tmp_path / "sample.gpkg"
+    make_geopackage(path)
+    result = GeoPackageImporter().import_file(
+        path, project_crs="EPSG:25832", study_area_wkt="POLYGON ((0 0, 10 0, 10 10, 0 0))"
+    )
+    suggestion_for(result, "buildings", "area").user_value = "Jahr"
+    suggestion_for(result, "buildings", "year").user_value = "area_m2"
+
+    updated = apply_attribute_decisions(result)
+
+    assert updated[0].attributes["area_m2"] == 2020.0
+    assert updated[0].attributes["year"] is None  # "12,5" is not a year
+
+
+def test_user_entered_data_source_survives_attribute_decisions(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    result = import_alkis(path)
+    result.harmonized_records = apply_data_source(result.harmonized_records, "ALKIS, LGLN 2025")
+
+    updated = apply_attribute_decisions(result)
+
+    assert {r.attributes["source"] for r in updated} == {"ALKIS, LGLN 2025"}
+
+
+def test_unknown_or_double_targets_are_rejected(tmp_path):
+    path = tmp_path / "sample.gpkg"
+    make_geopackage(path)
+    result = GeoPackageImporter().import_file(
+        path, project_crs="EPSG:25832", study_area_wkt="POLYGON ((0 0, 10 0, 10 10, 0 0))"
+    )
+    suggestion_for(result, "buildings", "type").user_value = "Gebäudehöhe"
+    with pytest.raises(ValueError, match="Unbekanntes Zielfeld"):
+        apply_attribute_decisions(result)
+
+    suggestion_for(result, "buildings", "type").user_value = "year"
+    with pytest.raises(ValueError, match="zweimal zugeordnet"):
+        apply_attribute_decisions(result)
