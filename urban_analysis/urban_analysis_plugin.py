@@ -20,6 +20,7 @@ class UrbanAnalysisPlugin:
         self.action = None
         self.dock = None
         self.workflow = None
+        self.result_layers = {}  # layer_id -> QgsVectorLayer from step 9 (W6, S7)
 
     def initGui(self):
         """Add a toggle action for the side panel to the menu and toolbar."""
@@ -79,6 +80,7 @@ class UrbanAnalysisPlugin:
     def reset_workflow(self):
         """Forget loaded data and decisions ("Zurücksetzen" in the side panel)."""
         self.workflow = None
+        self.result_layers = {}
 
     def _require_workflow(self) -> GuidedWorkflow:
         if self.workflow is None:
