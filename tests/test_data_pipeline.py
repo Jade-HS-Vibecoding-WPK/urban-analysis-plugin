@@ -318,7 +318,7 @@ def test_same_attributes_with_different_geometry_are_not_duplicates(tmp_path):
 
     assert [record.source_row_id for record in result.harmonized_records] == [1, 3]
     duplicate = next(issue for issue in result.issues if issue.code == "duplicate-row")
-    assert duplicate.message.startswith("1 exakte")
+    assert duplicate.message == "buildings: 1 Eintrag war doppelt (komplett gleich) und wurde automatisch entfernt."
 
 
 def make_house_number_geopackage(path):
@@ -377,12 +377,15 @@ def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
         None,
     ]
     exact = next(issue for issue in result.issues if issue.code == "duplicate-row")
-    assert exact.message.startswith("1 exakte")
+    assert exact.message == "Gebäude: 1 Eintrag war doppelt (komplett gleich) und wurde automatisch entfernt."
     uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
     assert uncertain.requires_confirmation
     assert uncertain.severity == "warning"
-    assert uncertain.message.startswith("gebaeude: 1 Gruppe(n) mit 2 Objekten")
-    assert "Hausnummer (hnr)" in uncertain.message
+    assert uncertain.message.startswith(
+        "Gebäude: An einer Stelle liegen mehrere Objekte genau übereinander (2 Objekte). "
+        "Sie unterscheiden sich nur in Hausnummer – z. B. ein Haus mit mehreren Hausnummern."
+    )
+    assert uncertain.message.endswith("Sollen sie je Stelle zu einem Objekt zusammengefasst werden?")
     assert "Alle wurden behalten" in uncertain.message
 
 
@@ -467,7 +470,8 @@ def test_source_name_is_only_the_file_name_and_source_stays_empty(tmp_path):
     assert {record.attributes["source"] for record in result.harmonized_records} == {None}
     hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
     assert hint.severity == "warning"
-    assert "gebaeude" in hint.message
+    assert hint.message.startswith("Datenquelle fehlt: In der Datei steht nicht, woher die Daten stammen.")
+    assert "z. B. „ALKIS, © LGLN 2025“" in hint.message
     assert str(tmp_path) not in hint.message
 
 
@@ -643,5 +647,81 @@ def test_without_alkis_profile_only_the_layer_name_decides(tmp_path):
     categories = {layer.layer_id: layer.category for layer in result.layers}
     assert categories == {"nutzung": "Nutzungsflächen", "gebaeude": "Gebäude", "bodenschaetzung": None}
     hint = next(issue for issue in result.issues if issue.code == "missing-category")
-    assert "bodenschaetzung" in hint.message
+    assert hint.message.startswith("Bodenschätzung: Für diesen Layer ist unklar, was er darstellt")
     assert all(record.attributes["object_detail"] is None for record in result.harmonized_records)
+
+
+def test_data_source_hint_names_only_the_layers_without_source(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE gebaeude ADD COLUMN quelle TEXT")
+        connection.execute("UPDATE gebaeude SET quelle = 'ALKIS, LGLN 2025'")
+
+    result = import_alkis(path)
+
+    hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
+    assert hint.message.startswith("Datenquelle fehlt für Nutzung und Bodenschätzung:")
+
+
+def test_uncertain_duplicate_hint_skips_key_column_when_readable_twin_differs(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE gebaeude ADD COLUMN gfk TEXT")
+        connection.execute("UPDATE gebaeude SET gfk = CAST(fid AS TEXT), gfk__bez = 'Funktion ' || fid")
+
+    result = import_houses(path)
+
+    uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
+    assert "nur in Gebäudefunktion und Hausnummer" in uncertain.message
+    assert "Gebäudefunktionsschlüssel" not in uncertain.message
+    assert "(" not in uncertain.message.split("(3 Objekte)")[1].split("–")[0]
+
+
+def test_attribute_suggestions_name_their_layer_and_show_examples(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+
+    result = import_alkis(path)
+
+    by_layer = {(s.layer_id, s.source_field): s for s in result.attribute_suggestions}
+    nutzung = by_layer[("nutzung", "tn__bez")]
+    assert nutzung.target_field == "object_type"
+    assert nutzung.examples == ("Strassenverkehr, Begleitfläche Straßenverkehr", "Platz, Parkplatz")
+    assert by_layer[("gebaeude", "gfk__bez")].examples == ("Wohngebäude",)
+
+
+def test_same_geometry_in_different_categories_is_not_an_uncertain_duplicate(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    area = gpkg_polygon([(20, 1), (21, 1), (21, 2), (20, 2), (20, 1)])
+    path_area = gpkg_polygon([(24, 1), (25, 1), (25, 2), (24, 2), (24, 1)])
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO nutzung VALUES (?, ?, ?, ?)",
+            [
+                (101, area, "X1", "Strassenverkehr"),
+                (102, area, "X2", "Sport-, Freizeit- und Erholungsfläche, Park"),
+                (103, path_area, "X3", "Weg"),
+                (104, path_area, "X4", "Weg, Fußweg"),
+            ],
+        )
+
+    result = import_alkis(path)
+
+    groups = {
+        record.source_row_id: record.duplicate_group
+        for record in result.harmonized_records
+        if record.source_row_id in (101, 102, 103, 104) and record.layer_id.startswith("nutzung")
+    }
+    assert groups[101] is None and groups[102] is None
+    assert groups[103] is not None and groups[103] == groups[104]
+    uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
+    assert uncertain.message.startswith("Nutzung: An einer Stelle liegen mehrere Objekte")
+    overlap = next(issue for issue in result.issues if issue.code == "overlap-different-category")
+    assert overlap.severity == "info"
+    assert overlap.message == (
+        "Nutzung: An einer Stelle liegen Flächen mit unterschiedlicher Kategorie genau übereinander. "
+        "Sie sind keine Dubletten und bleiben in ihrer jeweiligen Kategorie erhalten."
+    )

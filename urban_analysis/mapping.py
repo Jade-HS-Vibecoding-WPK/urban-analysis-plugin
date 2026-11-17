@@ -15,7 +15,7 @@ adjust them without changing code.  Keys starting with ``_`` are comments.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
@@ -109,6 +109,8 @@ class MappingRules:
     profiles: Tuple[LayerProfile, ...]
     name_categories: Tuple[Tuple[str, Tuple[str, ...]], ...]
     field_labels: Mapping[str, str]
+    layer_labels: Mapping[str, str] = field(default_factory=dict)
+    target_field_labels: Mapping[str, str] = field(default_factory=dict)
 
     def profile_for(self, table_name: str, fields: Iterable[str]) -> Optional[LayerProfile]:
         available = set(fields)
@@ -125,9 +127,21 @@ class MappingRules:
         return None
 
     def label(self, field: str) -> str:
-        """Readable field name, e.g. ``Hausnummer (hnr)``."""
+        """Readable field name with its code, e.g. ``Hausnummer (hnr)``."""
         text = self.field_labels.get(field)
         return f"{text} ({field})" if text else field
+
+    def field_name(self, field: str) -> str:
+        """Readable field name only, e.g. ``Hausnummer``; unknown fields stay as they are."""
+        return self.field_labels.get(field, field)
+
+    def layer_name(self, table_name: str) -> str:
+        """Readable layer name, e.g. ``Gebäude`` for ``gebaeude``."""
+        return self.layer_labels.get(table_name, table_name)
+
+    def target_field_name(self, field: str) -> str:
+        """German name of a target field, e.g. ``Objektart`` for ``object_type``."""
+        return self.target_field_labels.get(field, field)
 
 
 def _rule(data: Mapping[str, Any], where: str) -> CategoryRule:
@@ -170,11 +184,19 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         (str(category), tuple(str(term).casefold() for term in terms))
         for category, terms in _without_comments(data.get("name_categories", {})).items()
     )
-    labels = {
-        str(field): str(label)
-        for field, label in _without_comments(data.get("field_labels", {})).items()
-    }
-    return MappingRules(tuple(profiles), name_categories, labels)
+    def _labels(key: str) -> Dict[str, str]:
+        return {
+            str(name): str(label)
+            for name, label in _without_comments(data.get(key, {})).items()
+        }
+
+    return MappingRules(
+        tuple(profiles),
+        name_categories,
+        _labels("field_labels"),
+        _labels("layer_labels"),
+        _labels("target_field_labels"),
+    )
 
 
 def load_mapping_rules(path: Optional[Path] = None) -> MappingRules:
@@ -190,3 +212,18 @@ def load_mapping_rules(path: Optional[Path] = None) -> MappingRules:
 @lru_cache(maxsize=1)
 def default_mapping_rules() -> MappingRules:
     return load_mapping_rules()
+
+
+def readable_field(field: str) -> str:
+    """For the user guidance: ``gfk__bez`` -> ``Gebäudefunktion``."""
+    return default_mapping_rules().field_name(field)
+
+
+def readable_layer(layer_id: str) -> str:
+    """For the user guidance: ``gebaeude`` -> ``Gebäude``."""
+    return default_mapping_rules().layer_name(layer_id)
+
+
+def readable_target_field(field: str) -> str:
+    """For the user guidance: ``object_type`` -> ``Objektart``."""
+    return default_mapping_rules().target_field_name(field)
