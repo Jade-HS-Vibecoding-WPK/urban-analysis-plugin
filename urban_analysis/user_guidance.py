@@ -10,7 +10,126 @@ from .contracts import (
     PipelineResult,
     ValidationIssue,
 )
+from .data_pipeline import merge_confirmed_duplicates
 from .ui_contract import MVP_REQUIRED_TOPIC_SUGGESTIONS
+
+
+SEVERITY_ORDER = ("error", "warning", "info")
+# (singular, plural) per severity
+SEVERITY_LABELS = {
+    "error": ("Fehler", "Fehler"),
+    "warning": ("Warnung", "Warnungen"),
+    "info": ("Info", "Infos"),
+}
+
+
+def severity_label(severity: str, count: int) -> str:
+    """'1 Warnung', '6 Warnungen', '0 Fehler' ..."""
+    singular, plural = SEVERITY_LABELS[severity]
+    return f"{count} {singular if count == 1 else plural}"
+
+
+# Hints confirmed in a later step instead of step 4 ("Layer prüfen").
+DECIDED_IN_HARMONIZATION = ("uncertain-duplicate",)
+# Errors that leave no usable data (decision E4): only these block step 4.
+BLOCKING_ERROR_CODES = ("invalid-study-area", "no-feature-layers")
+UNCERTAIN_DUPLICATE_EXPLANATION = (
+    "Unsichere Dubletten sind Objekte mit derselben Geometrie, aber "
+    "unterschiedlichen Angaben – etwa wenn dasselbe Objekt mehrfach mit "
+    "unterschiedlichen Angaben gespeichert ist. Alle wurden behalten. Ob sie "
+    "zusammengeführt werden, entscheidest du in Schritt 6 „Harmonisierung“."
+)
+
+EXAMPLE_FIELDS = ("object_type", "object_detail", "category", "status")
+
+
+@dataclass(frozen=True)
+class DuplicateLayer:
+    """Uncertain-duplicate groups of one input layer (step 6)."""
+
+    table_name: str
+    groups: Tuple[Tuple[str, Tuple[object, ...]], ...]  # (group id, records)
+
+    @property
+    def group_count(self) -> int:
+        return len(self.groups)
+
+    @property
+    def record_count(self) -> int:
+        return sum(len(records) for _group, records in self.groups)
+
+    @property
+    def removable_count(self) -> int:
+        """Objects removed if all groups are merged (one is kept per group)."""
+        return self.record_count - self.group_count
+
+    def cross_layer_groups(self) -> Tuple[str, ...]:
+        """Groups whose objects ended up in different result layers."""
+        return tuple(
+            group for group, records in self.groups
+            if len({record.layer_id for record in records}) > 1
+        )
+
+
+def group_table_name(group_id: str) -> str:
+    """'gebaeude:12' -> 'gebaeude'."""
+    return group_id.rsplit(":", 1)[0]
+
+
+def _layer_names(table_name: str) -> Tuple[str, ...]:
+    """Table name plus its readable name from the pipeline, if available.
+
+    The pipeline's hint texts may use readable names such as „Gebäude“ for the
+    table ``gebaeude`` (``mapping.readable_layer``, PR #13).
+    """
+    names = [table_name]
+    try:
+        from .mapping import readable_layer  # provided by the pipeline
+    except ImportError:
+        return tuple(names)
+    try:
+        readable = readable_layer(table_name)
+    except Exception:  # an unknown table must not break the assignment
+        readable = None
+    if readable and readable not in names:
+        names.append(str(readable))
+    return tuple(names)
+
+
+def issue_table_name(message: str, table_names: Iterable[str]) -> Optional[str]:
+    """The one layer mentioned in a hint text, else ``None``.
+
+    Hints have no layer field in the contract, so the table name or its
+    readable name is looked up as a whole word in the text; ambiguous texts
+    are not assigned.
+    """
+    import re
+
+    found = [
+        name for name in table_names
+        if any(
+            re.search(rf"(?<![\w]){re.escape(candidate)}(?![\w])", message, re.IGNORECASE)
+            for candidate in _layer_names(name)
+        )
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def describe_group(records) -> str:
+    """Short example of one group: count and the shown attribute values."""
+    parts = []
+    for field in EXAMPLE_FIELDS:
+        values = []
+        for record in records:
+            value = record.attributes.get(field)
+            text = "–" if value in (None, "") else str(value)
+            if text not in values:
+                values.append(text)
+        if values != ["–"]:
+            parts.append(" / ".join(values))
+    layers = sorted({record.layer_id for record in records})
+    detail = "; ".join(parts) if parts else "gleiche Angaben im Zielschema"
+    return f"{len(records)} Objekte ({detail}) in {', '.join(layers)}"
 
 
 PDF_DATA_SOURCE_MESSAGE = (
@@ -34,6 +153,11 @@ class GuidedWorkflow:
     def __init__(self, result: PipelineResult):
         self.result = result
         self._step_index = 0
+        # Step 6: decisions per input layer (True = merge, False = keep) and
+        # the records as delivered by the pipeline, so a decision can be
+        # changed later without losing data.
+        self.duplicate_decisions: Dict[str, bool] = {}
+        self._records_before_merge: Optional[List[object]] = None
 
     @property
     def current_step(self) -> str:
@@ -105,6 +229,130 @@ class GuidedWorkflow:
                     "Vorschlag abzulehnen."
                 )
         return self.attribute_suggestions()
+
+    # --- Step 4 "Layer prüfen" (W5): all hints, grouped and confirmable ---
+
+    def issues_by_severity(self) -> Dict[str, List[ValidationIssue]]:
+        """All hints of the result (incl. infos), grouped error/warning/info.
+
+        Unknown severities are shown as warnings so nothing disappears.
+        """
+        groups: Dict[str, List[ValidationIssue]] = {key: [] for key in SEVERITY_ORDER}
+        for issue in self.result.issues:
+            key = issue.severity if issue.severity in groups else "warning"
+            groups[key].append(issue)
+        return groups
+
+    @staticmethod
+    def needs_review_confirmation(issue: ValidationIssue) -> bool:
+        """True if the hint gets a check box in step 4."""
+        return issue.requires_confirmation and issue.code not in DECIDED_IN_HARMONIZATION
+
+    def open_review_confirmations(self) -> Tuple[ValidationIssue, ...]:
+        """Hints in step 4 that still have to be confirmed."""
+        return tuple(
+            issue
+            for issue in self.result.issues
+            if self.needs_review_confirmation(issue) and issue.confirmed is not True
+        )
+
+    @staticmethod
+    def confirm_issue(issue: ValidationIssue, confirmed: bool) -> ValidationIssue:
+        """Store the user's confirmation on the hint itself (decision E3)."""
+        issue.confirmed = bool(confirmed)
+        return issue
+
+    def has_uncertain_duplicates(self) -> bool:
+        return any(issue.code in DECIDED_IN_HARMONIZATION for issue in self.result.issues)
+
+    def review_blocker(self) -> Optional[str]:
+        """Why step 4 cannot be left yet, or ``None`` if it can."""
+        blocking = [issue for issue in self.result.issues if issue.code in BLOCKING_ERROR_CODES]
+        if blocking or not self.result.layers:
+            return (
+                "Es sind keine verwendbaren Daten übrig. Bitte mit „Zurück“ das "
+                "Untersuchungsgebiet (Schritt 2) oder die Datei (Schritt 3) prüfen."
+            )
+        open_items = self.open_review_confirmations()
+        if open_items:
+            count = len(open_items)
+            noun = "Hinweis" if count == 1 else "Hinweise"
+            return (
+                f"Noch {count} {noun} bestätigen: Bitte bei allen markierten Hinweisen "
+                "„Gelesen und bestätigt“ ankreuzen."
+            )
+        return None
+
+    def review_summary_text(self) -> str:
+        """One line above the list, e.g. '9 Layer geladen · 0 Fehler · ...'."""
+        groups = self.issues_by_severity()
+        return " · ".join(
+            [f"{len(self.result.layers)} Layer geladen"]
+            + [severity_label(key, len(groups[key])) for key in SEVERITY_ORDER]
+        )
+
+    # --- Step 6 "Harmonisierung" (W5 part 2): uncertain duplicates (S4) ---
+
+    def _source_records(self) -> List[object]:
+        if self._records_before_merge is not None:
+            return self._records_before_merge
+        return list(self.result.harmonized_records)
+
+    def duplicate_layers(self) -> Tuple[DuplicateLayer, ...]:
+        """Uncertain-duplicate groups per input layer, in data order."""
+        groups: Dict[str, List[object]] = {}
+        for record in self._source_records():
+            group = getattr(record, "duplicate_group", None)
+            if group:
+                groups.setdefault(group, []).append(record)
+        layers: Dict[str, List[Tuple[str, Tuple[object, ...]]]] = {}
+        for group, records in groups.items():
+            layers.setdefault(group_table_name(group), []).append((group, tuple(records)))
+        return tuple(DuplicateLayer(name, tuple(items)) for name, items in layers.items())
+
+    def set_duplicate_decision(self, table_name: str, merge: bool) -> None:
+        known = {layer.table_name for layer in self.duplicate_layers()}
+        if table_name not in known:
+            raise KeyError(f"Für den Layer „{table_name}“ gibt es keine unsicheren Dubletten.")
+        self.duplicate_decisions[table_name] = bool(merge)
+
+    def open_duplicate_decisions(self) -> Tuple[str, ...]:
+        """Layers whose duplicate groups still need a decision."""
+        return tuple(
+            layer.table_name
+            for layer in self.duplicate_layers()
+            if layer.table_name not in self.duplicate_decisions
+        )
+
+    def apply_duplicate_decisions(self) -> int:
+        """Apply all decisions to the original records; return removed objects.
+
+        Every call starts again from the records the pipeline delivered, so
+        changing a decision never loses data. The decision is also stored on
+        the matching hint (confirmed True = merged, False = kept).
+        """
+        open_layers = self.open_duplicate_decisions()
+        if open_layers:
+            raise ValueError(
+                "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen: "
+                + ", ".join(open_layers)
+            )
+        original = self._source_records()
+        self._records_before_merge = original
+        confirmed_groups = [
+            group
+            for layer in self.duplicate_layers()
+            if self.duplicate_decisions.get(layer.table_name)
+            for group, _records in layer.groups
+        ]
+        merged = merge_confirmed_duplicates(original, confirmed_groups)
+        self.result.harmonized_records = merged
+        for issue in self.result.issues:
+            if issue.code in DECIDED_IN_HARMONIZATION:
+                table = issue_table_name(issue.message, self.duplicate_decisions)
+                if table is not None:
+                    issue.confirmed = self.duplicate_decisions[table]
+        return len(original) - len(merged)
 
     def recognized_categories(self) -> Tuple[str, ...]:
         """Return categories supplied by the pipeline in stable input order."""

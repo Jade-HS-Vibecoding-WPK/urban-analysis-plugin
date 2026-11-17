@@ -20,8 +20,21 @@ from .study_area import (
     create_polygon_draw_tool,
     study_area_from_layer,
 )
-from .theme import panel_stylesheet, set_role
+from .theme import (
+    LAMP_FILES,
+    LAMP_SIZE_PX,
+    busy_chunk_stylesheet,
+    icon_path,
+    panel_stylesheet,
+    set_role,
+)
 from .ui_contract import UI_LABELS
+from .user_guidance import (
+    DECIDED_IN_HARMONIZATION,
+    SEVERITY_LABELS,
+    SEVERITY_ORDER,
+    describe_group,
+)
 
 
 DOCK_OBJECT_NAME = "UrbanAnalysisDock"
@@ -43,7 +56,7 @@ PAGE_ACTIONS = (
     UI_LABELS["load_data"],
     "Hinweise geprüft",
     "Zuordnung bestätigen",
-    "Weiter",
+    "Entscheidung übernehmen",
     "Thema übernehmen",
     "Ausgabe übernehmen",
     UI_LABELS["start_processing"],
@@ -72,6 +85,41 @@ ARROW_CLOSED = "▸"
 ARROW_OPEN = "▾"
 PANEL_ANIMATION_MS = 180
 BUSY_TICK_MS = 120
+BUSY_SHINE_STEP = 0.06
+PROGRESS_MARGIN_PX = 10
+RESET_TOOLTIP = "Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
+RESET_QUESTION = (
+    "Alles auf Anfang zurücksetzen?\n\n"
+    "Alle Eingaben und die geladenen Daten im Plugin werden verworfen, du beginnst "
+    "wieder bei Schritt 1. Layer in deinem QGIS-Projekt (auch ein gezeichnetes "
+    "Untersuchungsgebiet) bleiben erhalten."
+)
+RESET_DONE_MESSAGE = "Das Plugin wurde zurückgesetzt. Du beginnst wieder bei Schritt 1."
+NO_DUPLICATES_TEXT = "Keine unsicheren Dubletten gefunden – hier gibt es nichts zu entscheiden."
+UNCERTAIN_DUPLICATE_EXPLANATION_STEP6 = (
+    "Unsichere Dubletten: Objekte mit derselben Geometrie, aber unterschiedlichen "
+    "Angaben. Bitte pro Layer entscheiden, ob jede Gruppe zu einem Objekt "
+    "zusammengeführt wird oder alle Objekte bleiben. Die Originaldaten bleiben "
+    "unverändert; die Entscheidung lässt sich mit „Zurück“ noch ändern."
+)
+DUPLICATE_EXAMPLES = 3
+
+
+def cross_layer_warning_text(count):
+    """Hint for groups whose objects lie in different result layers."""
+    return (
+        f"Achtung: {count} Gruppe(n) liegen in verschiedenen Ergebnis-Layern "
+        "(z. B. einmal als Straße, einmal als Weg). Beim Zusammenführen bleibt nur "
+        "das erste Objekt – das andere fehlt dann in seiner Kategorie."
+    )
+
+
+def duplicates_applied_text(removed):
+    """Feedback after step 6."""
+    if removed == 0:
+        return "Entscheidung übernommen: Alle Objekte bleiben erhalten."
+    noun = "Objekt" if removed == 1 else "Objekte"
+    return f"Entscheidung übernommen: {removed} {noun} durch Zusammenführen entfernt."
 INDENT_PX = 22
 MIN_CONTENT_WIDTH = 300
 MESSAGE_MAX_HEIGHT = 140
@@ -112,6 +160,40 @@ def import_error_text(file_name, error, full_path=None):
         "Bitte prüfen, ob es eine gültige GeoPackage-Datei (.gpkg) ist, oder eine "
         "andere Datei wählen."
     )
+
+
+def lamp_state(step_index, current_index, pulse_on=False):
+    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'.
+
+    While a long step runs without known progress, the current lamp pulses
+    (``pulse_on``) between 'dim' and 'on'.
+    """
+    if step_index < current_index:
+        return "on"
+    if step_index == current_index:
+        return "on" if pulse_on else "dim"
+    return "off"
+
+
+def pipeline_reports_progress(importer):
+    """True if ``import_file`` accepts a ``progress`` callback (fraction 0..1).
+
+    The current pipeline runs in one piece; once it offers this parameter the
+    busy bar shows the real progress without further UI changes.
+    """
+    import inspect
+
+    try:
+        return "progress" in inspect.signature(importer.import_file).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def busy_label_text(text, percent):
+    """Text above the busy bar, with the real progress when it is known."""
+    if percent is None:
+        return text
+    return f"{text} {int(percent)} %"
 
 
 def choice_label(text, opened):
@@ -181,6 +263,7 @@ def _clear_layout(layout):
         item = layout.takeAt(0)
         widget = item.widget()
         if widget is not None:
+            widget.hide()  # hide at once; deletion happens later in the event loop
             widget.deleteLater()
 
 
@@ -212,6 +295,7 @@ def _create_dock(plugin):
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
     from qgis.PyQt.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+    from qgis.PyQt.QtGui import QIcon
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QButtonGroup,
@@ -224,6 +308,7 @@ def _create_dock(plugin):
         QLineEdit,
         QListWidget,
         QListWidgetItem,
+        QMessageBox,
         QProgressBar,
         QPushButton,
         QRadioButton,
@@ -265,6 +350,7 @@ def _create_dock(plugin):
             self.previous_map_tool = None
             self.import_task = None  # running background import (step 3)
             self.closing = False
+            self.next_message = None  # info shown after the next page change
 
             # The whole plugin shares one style (theme.py).
             self.setStyleSheet(panel_stylesheet())
@@ -274,27 +360,47 @@ def _create_dock(plugin):
             self.step_label = QLabel()
             self.step_label.setWordWrap(True)
             set_role(self.step_label, "heading")
+            self.reset_button = QPushButton("↺ Zurücksetzen")
+            set_role(self.reset_button, "secondary")
+            self.reset_button.setCursor(Qt.PointingHandCursor)
+            self.reset_button.setToolTip(RESET_TOOLTIP)
+            self.reset_button.clicked.connect(self.ask_reset)
+            header = QHBoxLayout()
+            header.addWidget(self.step_label, 1)
+            header.addWidget(self.reset_button, 0, Qt.AlignTop)
 
-            # Overall progress: one block per step up to the map.
-            self.step_blocks = []
+            # Overall progress: one lamp per step up to the map
+            # (off = open, dim = current step, on = done).
+            self.lamp_pixmaps = {
+                state: QIcon(icon_path(name)).pixmap(LAMP_SIZE_PX, LAMP_SIZE_PX)
+                for state, name in LAMP_FILES.items()
+            }
+            self.step_lamps = []
             progress_row = QHBoxLayout()
-            progress_row.setSpacing(3)
+            progress_row.setContentsMargins(0, PROGRESS_MARGIN_PX, 0, PROGRESS_MARGIN_PX)
+            progress_row.setSpacing(6)
             for index, step in enumerate(MVP_UI_STEPS):
-                block = QFrame()
-                block.setFixedSize(26, 8)
-                block.setToolTip(f"{index + 1}. {step}")
-                set_role(block, "step-todo")
-                progress_row.addWidget(block)
-                self.step_blocks.append(block)
+                lamp = QLabel()
+                lamp.setFixedSize(LAMP_SIZE_PX, LAMP_SIZE_PX)
+                lamp.setToolTip(f"{index + 1}. {step}")
+                lamp.setPixmap(self.lamp_pixmaps["off"])
+                progress_row.addWidget(lamp)
+                self.step_lamps.append(lamp)
             progress_row.addStretch()
+            self.pulse_on = False
 
-            # Busy indicator for long steps (used from W4 on). A timer moves
-            # the blocks, so it is visible that QGIS is still working.
+            # Busy bar for long steps: fills once with the real progress (if the
+            # pipeline reports it); only the loaded part shimmers. While no
+            # progress is known, the current lamp pulses so QGIS looks alive.
             self.busy_label = QLabel()
+            self.busy_label.setWordWrap(True)
             set_role(self.busy_label, "status")
             self.busy_bar = QProgressBar()
-            self.busy_bar.setRange(0, 12)
+            self.busy_bar.setRange(0, 100)
             self.busy_bar.setTextVisible(False)
+            self.busy_text = ""
+            self.busy_progress_known = False
+            self.busy_phase = 0.0
             self.busy_timer = QTimer(self)
             self.busy_timer.setInterval(BUSY_TICK_MS)
             self.busy_timer.timeout.connect(self._advance_busy)
@@ -345,7 +451,7 @@ def _create_dock(plugin):
             buttons.addStretch()
             buttons.addWidget(self.primary_button)
 
-            layout.addWidget(self.step_label)
+            layout.addLayout(header)
             layout.addLayout(progress_row)
             layout.addWidget(self.busy_label)
             layout.addWidget(self.busy_bar)
@@ -377,17 +483,19 @@ def _create_dock(plugin):
             self.scroll.horizontalScrollBar().setValue(0)
             for page_index, other in enumerate(self.pages):
                 other.widget.setVisible(page_index == index)
+            # Recalculate heights now that the page is visible, so wrapped
+            # texts in freshly built cards get their full height.
+            page.layout.activate()
+            self.stack_layout.activate()
+            self.stack.updateGeometry()
             self.step_label.setText(progress_text(index))
-            for block_index, block in enumerate(self.step_blocks):
-                if block_index < index:
-                    set_role(block, "step-done")
-                elif block_index == index:
-                    set_role(block, "step-current")
-                else:
-                    set_role(block, "step-todo")
+            self.update_lamps()
             self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
+            if self.next_message:
+                text, self.next_message = self.next_message, None
+                self.show_message(text, kind="info")
 
         def run_primary_action(self):
             self.clear_message()
@@ -426,28 +534,85 @@ def _create_dock(plugin):
             self.message.clear()
             self.message_scroll.hide()
 
+        def update_lamps(self):
+            """Lamps before the current step are on, the current one glows."""
+            for index, lamp in enumerate(self.step_lamps):
+                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, self.current, self.pulse_on)])
+
         def set_busy(self, text):
-            """Show the moving busy bar and block navigation."""
-            self.busy_label.setText(text)
+            """Show the busy bar and lock the panel while a step runs."""
+            self.busy_text = text
+            self.busy_progress_known = False
+            self.busy_phase = 0.0
             self.busy_bar.setValue(0)
+            self.busy_label.setText(busy_label_text(text, None))
             self.busy_label.show()
             self.busy_bar.show()
             self.busy_timer.start()
             self.primary_button.setEnabled(False)
             self.back_button.setEnabled(False)
+            self.reset_button.setEnabled(False)
             self.stack.setEnabled(False)
+
+        def set_busy_progress(self, percent):
+            """Real progress from the background task (0-100)."""
+            self.busy_progress_known = True
+            self.busy_bar.setValue(int(percent))
+            self.busy_label.setText(busy_label_text(self.busy_text, percent))
 
         def clear_busy(self):
             self.busy_timer.stop()
+            self.pulse_on = False
+            self.update_lamps()
             self.busy_label.hide()
             self.busy_bar.hide()
             self.stack.setEnabled(True)
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
+            self.reset_button.setEnabled(True)
 
         def _advance_busy(self):
-            value = self.busy_bar.value() + 1
-            self.busy_bar.setValue(0 if value > self.busy_bar.maximum() else value)
+            # Shine moves across the loaded part of the bar only.
+            self.busy_phase = (self.busy_phase + BUSY_SHINE_STEP) % 1.0
+            self.busy_bar.setStyleSheet(busy_chunk_stylesheet(self.busy_phase))
+            if not self.busy_progress_known:
+                # Unknown progress: the current lamp pulses between dim and on.
+                self.pulse_on = not self.pulse_on
+                self.update_lamps()
+
+        def ask_reset(self):
+            """Ask, then reset the whole plugin to step 1 without data."""
+            answer = QMessageBox.question(
+                self,
+                "Urban Analysis zurücksetzen",
+                RESET_QUESTION,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer == QMessageBox.Yes:
+                self.reset()
+
+        def reset(self):
+            try:
+                if self.import_task is not None:
+                    self.import_task.cancel()
+                    self.import_task = None
+                self.clear_busy()
+                self.stop_drawing()
+                plugin.reset_workflow()
+                self.settings = {}
+                self.next_message = None
+                for page in self.pages:
+                    if page.rebuild:
+                        # Pages 4-9 need loaded data; they are rebuilt when reached.
+                        _clear_layout(page.layout)
+                        page.widgets = {}
+                    elif page.builder is not None:
+                        page.build()
+                self.show_page(0)
+                self.show_message(RESET_DONE_MESSAGE, kind="info")
+            except Exception as error:  # show every program error visibly
+                self.show_unexpected_error("Zurücksetzen", error)
 
         def start_drawing(self, on_finished, on_canceled):
             """Activate the polygon drawing tool in the QGIS map."""
@@ -508,15 +673,16 @@ def _create_dock(plugin):
         return False
 
     # Pages 1-3 start from an existing workflow (console start) or from the
-    # current QGIS project.
-    existing = plugin.workflow.result if plugin.workflow is not None else None
+    # current QGIS project; after "Zurücksetzen" there is no workflow.
+    def existing():
+        return plugin.workflow.result if plugin.workflow is not None else None
 
     # 1 Projekt-CRS
     def build_crs(page):
         crs_widget = QgsProjectionSelectionWidget()
         crs_widget.setCrs(
-            QgsCoordinateReferenceSystem(existing.project_crs)
-            if existing
+            QgsCoordinateReferenceSystem(existing().project_crs)
+            if existing()
             else QgsProject.instance().crs()
         )
         hint = QLabel(CRS_HINT)
@@ -578,7 +744,7 @@ def _create_dock(plugin):
         buffer_input = QDoubleSpinBox()
         buffer_input.setRange(0, 1000000)
         buffer_input.setValue(
-            existing.buffer_meters if existing else MVP_DEFAULT_BUFFER_METERS
+            existing().buffer_meters if existing() else MVP_DEFAULT_BUFFER_METERS
         )
 
         page.layout.addWidget(QLabel(UI_LABELS["study_area"]))
@@ -847,12 +1013,18 @@ def _create_dock(plugin):
         settings = dict(dock.settings)
         dock.set_busy(f"Lade „{path.name}“ … Das kann bei großen Dateien etwas dauern.")
 
-        def run_import(_task):
-            return GeoPackageImporter().import_file(
+        def run_import(task):
+            importer = GeoPackageImporter()
+            options = {}
+            if pipeline_reports_progress(importer):
+                # fraction 0..1 from the pipeline -> task progress 0..100
+                options["progress"] = lambda fraction: task.setProgress(fraction * 100)
+            return importer.import_file(
                 path,
                 project_crs=settings["project_crs"],
                 study_area_wkt=settings["study_area_wkt"],
                 buffer_meters=settings["buffer_meters"],
+                **options,
             )
 
         def finished(exception, result=None):
@@ -883,18 +1055,73 @@ def _create_dock(plugin):
         task = QgsTask.fromFunction(
             f"Urban Analysis: {path.name} laden", run_import, on_finished=finished
         )
+        task.progressChanged.connect(
+            lambda percent: dock.set_busy_progress(percent) if not dock.closing else None
+        )
         dock.import_task = task
         QgsApplication.taskManager().addTask(task)
 
-    # 4 Layer prüfen
+    # 4 Layer prüfen: every hint as its own card, grouped error/warning/info
     def build_review(page):
-        page.layout.addWidget(QLabel("Prüfhinweise aus der Datenpipeline:"))
-        messages = QLabel(
-            "\n".join(issue.message for issue in workflow().result.visible_issues())
-            or "Keine Prüfhinweise."
-        )
-        messages.setWordWrap(True)
-        page.layout.addWidget(messages)
+        flow = workflow()
+        summary = QLabel(flow.review_summary_text())
+        summary.setWordWrap(True)
+        set_role(summary, "status")
+        page.layout.addWidget(summary)
+
+        groups = flow.issues_by_severity()
+        if not any(groups.values()):
+            page.layout.addWidget(QLabel("Keine Prüfhinweise."))
+        for severity in SEVERITY_ORDER:
+            issues = groups[severity]
+            if not issues:
+                continue
+            title = f"{SEVERITY_LABELS[severity][1]} ({len(issues)})"
+            group_layout = choice_with_panel(page, f"review_{severity}", title)
+            for issue in issues:
+                group_layout.addWidget(issue_card(flow, severity, issue))
+            page.widgets[f"review_{severity}_button"].setChecked(True)
+
+    def issue_card(flow, severity, issue):
+        card = QFrame()
+        set_role(card, f"issue-{severity}")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 6, 8, 6)
+        text = QLabel(issue.message)
+        text.setWordWrap(True)
+        card_layout.addWidget(text)
+        details = []
+        if issue.rule:
+            details.append(f"Regel: {issue.rule}")
+        if issue.code in DECIDED_IN_HARMONIZATION:
+            details.append("Entscheidung in Schritt 6 „Harmonisierung“")
+        if details:
+            meta = QLabel(" · ".join(details))
+            meta.setWordWrap(True)
+            set_role(meta, "hint")
+            card_layout.addWidget(meta)
+        if flow.needs_review_confirmation(issue):
+            confirm = QCheckBox("Gelesen und bestätigt")
+            confirm.setChecked(issue.confirmed is True)
+            confirm.setCursor(Qt.PointingHandCursor)
+
+            def toggled(checked, issue=issue):
+                flow.confirm_issue(issue, checked)
+                dock.clear_message()
+
+            confirm.toggled.connect(toggled)
+            card_layout.addWidget(confirm)
+        return card
+
+    def validate_review(page):
+        blocker = workflow().review_blocker()
+        if blocker:
+            for severity in SEVERITY_ORDER:
+                button = page.widgets.get(f"review_{severity}_button")
+                if button is not None and not button.isChecked():
+                    button.setChecked(True)
+            return reject(blocker)
+        return True
 
     # 5 Attributzuordnung
     def build_mapping(page):
@@ -920,14 +1147,99 @@ def _create_dock(plugin):
             return reject(error_text(error))
         return True
 
-    # 6 Harmonisierung
+    # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
     def build_harmonization(page):
-        label = QLabel(
-            "Unsichere Dopplungen und Harmonisierung bleiben vor der "
-            "Verarbeitung sichtbar."
+        flow = workflow()
+        layers = flow.duplicate_layers()
+        if not layers:
+            none = QLabel(NO_DUPLICATES_TEXT)
+            none.setWordWrap(True)
+            page.layout.addWidget(none)
+            return
+        intro = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION_STEP6)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        for layer in layers:
+            page.layout.addWidget(duplicate_card(flow, layer))
+
+    def duplicate_card(flow, layer):
+        card = QFrame()
+        set_role(card, "issue-warning")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 8, 8)
+        title = QLabel(
+            f"{layer.table_name}: {layer.group_count} Gruppe(n) mit "
+            f"{layer.record_count} Objekten"
         )
-        label.setWordWrap(True)
-        page.layout.addWidget(label)
+        title.setWordWrap(True)
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        card_layout.addWidget(title)
+        for group, records in layer.groups[:DUPLICATE_EXAMPLES]:
+            example = QLabel(f"• {describe_group(records)}")
+            example.setWordWrap(True)
+            set_role(example, "hint")
+            card_layout.addWidget(example)
+        if layer.group_count > DUPLICATE_EXAMPLES:
+            more = QLabel(f"… und {layer.group_count - DUPLICATE_EXAMPLES} weitere Gruppe(n)")
+            set_role(more, "hint")
+            card_layout.addWidget(more)
+        cross = layer.cross_layer_groups()
+        if cross:
+            warning = QLabel(cross_layer_warning_text(len(cross)))
+            warning.setWordWrap(True)
+            set_role(warning, "error")
+            card_layout.addWidget(warning)
+
+        keep = QRadioButton("Behalten")
+        keep_hint = QLabel("Alle Objekte bleiben erhalten.")
+        merge = QRadioButton("Zusammenführen")
+        merge_hint = QLabel(
+            f"Je Gruppe bleibt das erste Objekt, {layer.removable_count} Objekte "
+            "werden entfernt."
+        )
+        for button in (keep, merge):
+            button.setCursor(Qt.PointingHandCursor)
+        for hint in (keep_hint, merge_hint):
+            hint.setWordWrap(True)
+            set_role(hint, "hint")
+        choice = QButtonGroup(card)
+        choice.addButton(keep)
+        choice.addButton(merge)
+        decision = flow.duplicate_decisions.get(layer.table_name)
+        if decision is True:
+            merge.setChecked(True)
+        elif decision is False:
+            keep.setChecked(True)
+
+        def chosen(merge_it, table=layer.table_name):
+            flow.set_duplicate_decision(table, merge_it)
+            dock.clear_message()
+
+        keep.toggled.connect(lambda checked: checked and chosen(False))
+        merge.toggled.connect(lambda checked: checked and chosen(True))
+        card_layout.addWidget(keep)
+        card_layout.addWidget(indented(keep_hint))
+        card_layout.addWidget(merge)
+        card_layout.addWidget(indented(merge_hint))
+        card._choice_group = choice  # keep the group alive with the card
+        return card
+
+    def validate_harmonization(_page):
+        flow = workflow()
+        open_layers = flow.open_duplicate_decisions()
+        if open_layers:
+            return reject(
+                "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
+                "Noch offen: " + ", ".join(open_layers)
+            )
+        if not flow.duplicate_layers():
+            return True
+        removed = flow.apply_duplicate_decisions()
+        dock.next_message = duplicates_applied_text(removed)
+        return True
 
     # 7 Kartenthema
     def build_topic(page):
@@ -999,9 +1311,9 @@ def _create_dock(plugin):
     crs_page = dock.add_page(build_crs, validate_crs)
     dock.add_page(build_area, validate_area, on_show=update_area_status)
     dock.add_page(build_data, validate_data)
-    dock.add_page(build_review, rebuild=True)
+    dock.add_page(build_review, validate_review, rebuild=True)
     dock.add_page(build_mapping, validate_mapping, rebuild=True)
-    dock.add_page(build_harmonization, rebuild=True)
+    dock.add_page(build_harmonization, validate_harmonization, rebuild=True)
     dock.add_page(build_topic, validate_topic, rebuild=True)
     dock.add_page(build_output, validate_output, rebuild=True)
     dock.add_page(build_summary, validate_summary, rebuild=True)

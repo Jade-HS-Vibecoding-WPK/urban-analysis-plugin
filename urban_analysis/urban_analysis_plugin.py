@@ -76,6 +76,10 @@ class UrbanAnalysisPlugin:
         self.workflow = GuidedWorkflow(result)
         return self.workflow
 
+    def reset_workflow(self):
+        """Forget loaded data and decisions ("Zurücksetzen" in the side panel)."""
+        self.workflow = None
+
     def _require_workflow(self) -> GuidedWorkflow:
         if self.workflow is None:
             raise RuntimeError(

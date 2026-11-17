@@ -6,7 +6,10 @@ import types
 from urban_analysis.contracts import MVP_UI_STEPS, PipelineResult
 from urban_analysis.guided_dialog import (
     PAGE_ACTIONS,
+    busy_label_text,
     error_text,
+    lamp_state,
+    pipeline_reports_progress,
     progress_text,
     unexpected_error_text,
 )
@@ -147,6 +150,41 @@ def test_unexpected_errors_are_described_with_step_type_and_log_hint():
     assert "ZeroDivisionError: division by zero" in text
     assert "Protokollmeldungen" in text
     assert "Urban Analysis" in text
+
+
+def test_lamps_are_on_for_done_steps_dim_for_the_current_and_off_after():
+    assert [lamp_state(i, 3) for i in range(6)] == ["on", "on", "on", "dim", "off", "off"]
+    assert lamp_state(3, 3, pulse_on=True) == "on"  # pulsing while loading
+
+
+def test_busy_text_shows_real_progress_only_when_known():
+    assert busy_label_text("Lade a.gpkg …", None) == "Lade a.gpkg …"
+    assert busy_label_text("Lade a.gpkg …", 42.7) == "Lade a.gpkg … 42 %"
+
+
+def test_progress_is_used_only_if_the_pipeline_offers_a_callback():
+    class Old:
+        def import_file(self, path, *, project_crs, study_area_wkt, buffer_meters=500):
+            pass
+
+    class New:
+        def import_file(self, path, *, project_crs, study_area_wkt, buffer_meters=500, progress=None):
+            pass
+
+    assert pipeline_reports_progress(Old()) is False
+    assert pipeline_reports_progress(New()) is True
+
+
+def test_reset_forgets_loaded_data(monkeypatch):
+    plugin_module = load_plugin_module(monkeypatch)
+    plugin = plugin_module.UrbanAnalysisPlugin(FakeIface())
+    plugin.start_workflow(
+        PipelineResult(contract_version="1.0", project_crs="EPSG:25832", study_area_wkt="POLYGON EMPTY")
+    )
+
+    plugin.reset_workflow()
+
+    assert plugin.workflow is None
 
 
 def test_key_errors_are_shown_without_python_quotes():

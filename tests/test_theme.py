@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from urban_analysis.theme import COLORS, ROLES, icon_path, panel_stylesheet, set_role
+from urban_analysis.theme import (
+    COLORS,
+    LAMP_FILES,
+    ROLES,
+    busy_chunk_stylesheet,
+    icon_path,
+    panel_stylesheet,
+    set_role,
+)
 
 
 def _rule(css, selector):
@@ -45,6 +53,28 @@ def test_every_role_used_in_the_stylesheet_is_known():
 def test_unknown_role_is_rejected():
     with pytest.raises(ValueError, match="Unbekannte Stilrolle"):
         set_role(object(), "rainbow")
+
+
+def test_three_own_pixel_lamps_for_the_step_progress():
+    assert set(LAMP_FILES) == {"off", "dim", "on"}
+    fills = {}
+    for state, name in LAMP_FILES.items():
+        root = ET.parse(Path(icon_path(name))).getroot()
+        assert root.get("width") == "16" and root.get("shape-rendering") == "crispEdges"
+        rects = root.findall("{http://www.w3.org/2000/svg}rect")
+        assert sum(int(rect.get("width")) for rect in rects) == 16 * 16
+        fills[state] = {rect.get("fill") for rect in rects}
+    assert fills["off"] != fills["dim"] != fills["on"]
+
+
+def test_busy_bar_shine_stays_inside_the_loaded_part_and_uses_lamp_colours():
+    css = busy_chunk_stylesheet(0.5)
+    assert css.startswith("QProgressBar::chunk")
+    assert COLORS["lamp"] in css and COLORS["lamp_light"] in css
+    assert "stop:0.500" in css
+    for phase in (-1, 0, 1, 2):  # always valid gradient stops 0..1
+        stops = [float(s) for s in re.findall(r"stop:([0-9.]+)", busy_chunk_stylesheet(phase))]
+        assert all(0 <= s <= 1 for s in stops) and stops == sorted(stops)
 
 
 def test_toolbar_icon_is_an_own_16x16_pixel_svg():
