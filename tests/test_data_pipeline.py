@@ -725,3 +725,62 @@ def test_same_geometry_in_different_categories_is_not_an_uncertain_duplicate(tmp
         "Nutzung: An einer Stelle liegen Flächen mit unterschiedlicher Kategorie genau übereinander. "
         "Sie sind keine Dubletten und bleiben in ihrer jeweiligen Kategorie erhalten."
     )
+
+
+def make_many_points_geopackage(path, count):
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER
+            );
+            INSERT INTO gpkg_spatial_ref_sys VALUES ('ETRS89 / UTM zone 32N', 25832, 'EPSG', 25832);
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT, srs_id INTEGER
+            );
+            INSERT INTO gpkg_geometry_columns VALUES ('points', 'geom', 'POINT', 25832);
+            CREATE TABLE points (fid INTEGER PRIMARY KEY, geom BLOB, typ TEXT);
+            """
+        )
+        connection.executemany(
+            "INSERT INTO points VALUES (?, ?, ?)",
+            [(index, gpkg_point(index % 100, index // 100), f"p{index}") for index in range(1, count + 1)],
+        )
+
+
+def test_progress_rises_from_zero_to_one(tmp_path):
+    path = tmp_path / "points.gpkg"
+    make_many_points_geopackage(path, 5000)
+    reported = []
+
+    GeoPackageImporter().import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0))",
+        buffer_meters=0,
+        progress=reported.append,
+    )
+
+    assert reported[0] == 0.0
+    assert reported[-1] == 1.0
+    assert reported == sorted(reported)
+    assert any(0.1 < value < 0.9 for value in reported)
+    assert len(reported) <= 102
+
+
+def test_progress_ends_at_one_even_without_usable_data(tmp_path):
+    path = tmp_path / "places.gpkg"
+    make_clipping_geopackage(path)
+    reported = []
+
+    import_places(path, study_area_wkt="LINESTRING (0 0, 10 10)", progress=reported.append)
+
+    assert reported[0] == 0.0
+    assert reported[-1] == 1.0
+
+
+def test_user_guidance_can_detect_progress_support():
+    import inspect
+
+    assert "progress" in inspect.signature(GeoPackageImporter().import_file).parameters
