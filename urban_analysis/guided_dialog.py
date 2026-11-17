@@ -15,7 +15,9 @@ from .data_pipeline import TARGET_FIELDS, GeoPackageImporter, GeoPackageImportEr
 from .outputs import (
     add_result_layers,
     build_result_layers,
+    format_count,
     result_group_name,
+    result_layer_name,
     result_layers_text,
 )
 from .study_area import (
@@ -120,6 +122,90 @@ MAPPING_SAVED_TEXT = (
     "Anwenden unterstützt (ARBEITSPLAN M4)."
 )
 MAPPING_APPLIED_TEXT = "Zuordnung übernommen: Die Daten wurden neu zugeordnet."
+
+
+SUMMARY_INTRO = (
+    "Prüfe die Übersicht. Mit „Verarbeitung starten“ werden die Ergebnis-Layer in "
+    "QGIS angelegt. Deine Eingangsdaten und Projekt-Layer bleiben unverändert."
+)
+DONE_TITLE = "Fertig ✓ – die Ergebnis-Layer sind in QGIS angelegt."
+RERUN_ACTION = "Erneut verarbeiten"
+
+
+def format_hectares(hectares):
+    text = f"{hectares:,.1f}"
+    return text.replace(",", " ").replace(".", ",")
+
+
+def objects_text(count):
+    """'1 Objekt', '1 571 Objekte'."""
+    return f"{format_count(count)} {'Objekt' if count == 1 else 'Objekte'}"
+
+
+def done_hint_text(group_name):
+    return (
+        f"Du findest sie im Layer-Bedienfeld in der Gruppe „{group_name}“. "
+        "„Erneut verarbeiten“ ersetzt diese Gruppe; andere Layer bleiben unberührt."
+    )
+
+
+def overview_rows(flow, area_ha, names):
+    """Key facts of the run as (label, value) rows for step 9."""
+    result = flow.result
+    files = sorted({layer.source_name for layer in result.layers if layer.source_name})
+    decisions = flow.duplicate_decisions
+    if decisions:
+        duplicates = ", ".join(
+            f"{names.layer(table)} {'zusammengeführt' if merge else 'behalten'}"
+            for table, merge in decisions.items()
+        )
+    else:
+        duplicates = "keine"
+    warnings = len(flow.issues_by_severity()["warning"])
+    return (
+        ("Projekt-CRS", result.project_crs),
+        ("Untersuchungsgebiet", f"{format_hectares(area_ha)} ha" if area_ha else "–"),
+        ("Puffer", f"{format_count(int(round(result.buffer_meters)))} m"),
+        ("Datei", ", ".join(files) or "–"),
+        ("Kartenthema", result.selected_topic or "–"),
+        ("Datenquelle", result.output.data_source or "– noch nicht eingetragen (Schritt 8)"),
+        ("Unsichere Dubletten", duplicates),
+        ("Hinweise aus Schritt 4", f"{warnings} Warnung(en)"),
+    )
+
+
+def planned_layer_rows(flow, names):
+    """One row per result layer that will be created, with its object count."""
+    counts = {}
+    for record in flow.result.harmonized_records:
+        counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
+    rows = []
+    for descriptor in flow.result.selected_layers():
+        name = result_layer_name(descriptor, names.layer)
+        rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}"))
+    return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
+
+
+def output_rows(output):
+    def yes_no(flag, pending=False):
+        if not flag:
+            return "nein"
+        return "ja (wird mit W8 angeschlossen)" if pending else "ja"
+
+    return (
+        ("Ergebnis-Layer in QGIS", "ja"),
+        ("Bereinigtes GeoPackage", yes_no(output.save_cleaned_geopackage, pending=True)),
+        ("PDF", yes_no(output.create_pdf, pending=True)),
+    )
+
+
+def result_rows(reports):
+    """Rows for the 'Fertig' view: created layers and anything not taken over."""
+    rows = [(None, f"{report.name} – {objects_text(report.feature_count)}") for report in reports]
+    for report in reports:
+        for reason, count in report.skipped.items():
+            rows.append((None, f"{report.name}: {format_count(count)} nicht übernommen ({reason})"))
+    return tuple(rows)
 
 
 class ReadableNames:
@@ -346,6 +432,7 @@ def _create_dock(plugin):
         Qgis,
         QgsApplication,
         QgsCoordinateReferenceSystem,
+        QgsGeometry,
         QgsProject,
         QgsSettings,
         QgsTask,
@@ -411,6 +498,7 @@ def _create_dock(plugin):
             self.closing = False
             self.next_message = None  # info shown after the next page change
             self.all_done = False  # all lamps on after "Verarbeitung starten"
+            self.last_reports = None  # result of the last processing run (step 9)
 
             # The whole plugin shares one style (theme.py).
             self.setStyleSheet(panel_stylesheet())
@@ -533,6 +621,7 @@ def _create_dock(plugin):
 
         def show_page(self, index):
             self.stop_drawing()
+            self.last_reports = None  # step 9 starts with the overview again
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -1438,13 +1527,55 @@ def _create_dock(plugin):
             return reject(str(error))
         return True
 
-    # 9 Verarbeitung starten
-    def build_summary(page):
-        summary = QLabel(str(workflow().summary()))
-        summary.setWordWrap(True)
-        page.layout.addWidget(summary)
+    # 9 Verarbeitung starten: readable overview before, result list after
+    def summary_card(title, rows):
+        card = QFrame()
+        set_role(card, "issue-info")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 8, 8)
+        heading = QLabel(title)
+        font = heading.font()
+        font.setBold(True)
+        heading.setFont(font)
+        card_layout.addWidget(heading)
+        for label, value in rows:
+            line = QLabel(f"{label}: {value}" if label else value)
+            line.setWordWrap(True)
+            card_layout.addWidget(line)
+        return card
 
-    def validate_summary(_page):
+    def study_area_hectares(result):
+        geometry = QgsGeometry.fromWkt(result.study_area_wkt or "")
+        if geometry is None or geometry.isNull():
+            return None
+        return geometry.area() / 10000
+
+    def build_summary(page):
+        flow = workflow()
+        names = readable_names()
+        if dock.last_reports is not None:
+            done = QLabel(DONE_TITLE)
+            done.setWordWrap(True)
+            set_role(done, "status")
+            page.layout.addWidget(done)
+            page.layout.addWidget(summary_card(
+                "Angelegte Ergebnis-Layer", result_rows(dock.last_reports)))
+            hint = QLabel(done_hint_text(result_group_name(flow.result.selected_topic)))
+            hint.setWordWrap(True)
+            set_role(hint, "hint")
+            page.layout.addWidget(hint)
+            return
+        intro = QLabel(SUMMARY_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        page.layout.addWidget(summary_card(
+            "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
+        page.layout.addWidget(summary_card(
+            "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
+        page.layout.addWidget(summary_card("Ausgabe", output_rows(flow.result.output)))
+
+    def validate_summary(page):
         """'Verarbeitung starten': build the result layers and add them to QGIS."""
         flow = workflow()
         selected = flow.result.selected_layers()
@@ -1464,6 +1595,12 @@ def _create_dock(plugin):
         finally:
             QApplication.restoreOverrideCursor()
         plugin.result_layers = layer_objects
+        # Switch the page to "Fertig" with the list of created layers.
+        dock.last_reports = reports
+        page.build()
+        make_texts_selectable(page.widget)
+        QTimer.singleShot(0, dock.fit_wrapped_labels)
+        dock.primary_button.setText(RERUN_ACTION)
         text = result_layers_text(reports)
         if flow.result.output.save_cleaned_geopackage or flow.result.output.create_pdf:
             text += "\n" + EXPORT_PENDING_MESSAGE
