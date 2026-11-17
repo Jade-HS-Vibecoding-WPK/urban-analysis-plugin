@@ -20,6 +20,8 @@ PALETTE = {
     "a": COLORS["water"], "A": "#B7D3CC", "h": "#5E8A81",
     "k": "#6F7F7B", "K": "#A9B5B2", "y": "#D9C7A0", "Y": "#BFA87C",
     "m": COLORS["background"], "n": "#C9D9D3",
+    "q": "#EDB8AF", "Q": "#D9918A",   # residential area (plan colours) and its hatch
+    "c": "#B9C2C0", "C": "#97A3A0",   # commercial area and its hatch
 }
 
 # Result categories (pipeline names) -> icon
@@ -203,16 +205,31 @@ def _schiff():
 
 
 def _nutzung():
-    i = _Tile("g")
-    i.rect(1, 1, 6, 6, "y")
-    i.rect(8, 1, 7, 4, "l")
-    i.rect(8, 6, 7, 1, "g")
-    i.rect(1, 8, 4, 7, "a")
-    i.rect(6, 8, 9, 7, "s")
-    i.rect(1, 7, 14, 1, "o")
-    i.rect(7, 1, 1, 6, "o")
-    i.rect(8, 5, 7, 1, "o")
-    i.rect(5, 8, 1, 7, "o")
+    """Excerpt of a land-use plan: residential (pink, hatched), commercial
+    (grey, hatched), green with tree dots and water, split by light streets."""
+    i = _Tile("w")
+    # top left: residential area
+    for y in range(1, 7):
+        for x in range(1, 8):
+            i.set(x, y, "Q" if (x + y) % 3 == 0 else "q")
+    # top right: commercial area
+    for y in range(1, 7):
+        for x in range(9, 15):
+            i.set(x, y, "C" if (x - y) % 3 == 0 else "c")
+    # bottom left: green with tree dots
+    i.rect(1, 9, 5, 6, "g")
+    for x, y in ((2, 10), (4, 11), (2, 13), (4, 14)):
+        i.set(x, y, "G")
+    # bottom right: residential, with water along the lower edge
+    for y in range(9, 12):
+        for x in range(7, 15):
+            i.set(x, y, "Q" if (x + y) % 3 == 0 else "q")
+    i.rect(7, 12, 8, 3, "a")
+    i.rect(8, 13, 3, 1, "A")
+    # light streets between the areas (row 7-8, column 8 and 6)
+    i.rect(1, 7, 14, 2, "w")
+    i.rect(8, 1, 1, 6, "w")
+    i.rect(6, 9, 1, 6, "w")
     return i
 
 
