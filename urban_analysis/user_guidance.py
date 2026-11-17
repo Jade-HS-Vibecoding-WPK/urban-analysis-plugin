@@ -115,8 +115,12 @@ def issue_table_name(message: str, table_names: Iterable[str]) -> Optional[str]:
     return found[0] if len(found) == 1 else None
 
 
-def describe_group(records) -> str:
-    """Short example of one group: count and the shown attribute values."""
+def describe_group(records, layer_name=None) -> str:
+    """Short example of one group: count and the shown attribute values.
+
+    ``layer_name`` turns a layer id into a readable name (e.g. 'Gebäude');
+    without it the technical layer id is shown.
+    """
     parts = []
     for field in EXAMPLE_FIELDS:
         values = []
@@ -128,6 +132,8 @@ def describe_group(records) -> str:
         if values != ["–"]:
             parts.append(" / ".join(values))
     layers = sorted({record.layer_id for record in records})
+    if layer_name is not None:
+        layers = [layer_name(layer) or layer for layer in layers]
     detail = "; ".join(parts) if parts else "gleiche Angaben im Zielschema"
     return f"{len(records)} Objekte ({detail}) in {', '.join(layers)}"
 

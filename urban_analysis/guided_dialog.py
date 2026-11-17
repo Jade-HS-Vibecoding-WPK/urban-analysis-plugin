@@ -256,12 +256,41 @@ def mapping_detail_text(source_field, examples):
     return f"{prefix}Spalte {source_field}"
 
 
+def count_text(count, singular, plural):
+    """'1 Gruppe', '645 Gruppen', '1 675 Objekte'."""
+    return f"{format_count(count)} {singular if count == 1 else plural}"
+
+
+def duplicate_title_text(layer_name, group_count, record_count):
+    """Card title in step 6, e.g. 'Gebäude: 645 Gruppen mit 1 675 Objekten'."""
+    return (
+        f"{layer_name}: {count_text(group_count, 'Gruppe', 'Gruppen')} mit "
+        f"{count_text(record_count, 'Objekt', 'Objekten')}"
+    )
+
+
+def more_groups_text(count):
+    """'… und 1 weitere Gruppe' / '… und 642 weitere Gruppen'."""
+    return f"… und {count_text(count, 'weitere Gruppe', 'weitere Gruppen')}"
+
+
+def merge_hint_text(removable):
+    """What 'Zusammenführen' removes in one layer."""
+    verb = "wird" if removable == 1 else "werden"
+    return (
+        f"Je Gruppe bleibt das erste Objekt, "
+        f"{count_text(removable, 'Objekt', 'Objekte')} {verb} entfernt."
+    )
+
+
 def cross_layer_warning_text(count):
     """Hint for groups whose objects lie in different result layers."""
+    verb = "liegt" if count == 1 else "liegen"
     return (
-        f"Achtung: {count} Gruppe(n) liegen in verschiedenen Ergebnis-Layern "
-        "(z. B. einmal als Straße, einmal als Weg). Beim Zusammenführen bleibt nur "
-        "das erste Objekt – das andere fehlt dann in seiner Kategorie."
+        f"Achtung: {count_text(count, 'Gruppe', 'Gruppen')} {verb} in verschiedenen "
+        "Ergebnis-Layern (z. B. einmal als Straße, einmal als Weg). Beim "
+        "Zusammenführen bleibt nur das erste Objekt – das andere fehlt dann in "
+        "seiner Kategorie."
     )
 
 
@@ -269,8 +298,10 @@ def duplicates_applied_text(removed):
     """Feedback after step 6."""
     if removed == 0:
         return "Entscheidung übernommen: Alle Objekte bleiben erhalten."
-    noun = "Objekt" if removed == 1 else "Objekte"
-    return f"Entscheidung übernommen: {removed} {noun} durch Zusammenführen entfernt."
+    return (
+        f"Entscheidung übernommen: {count_text(removed, 'Objekt', 'Objekte')} "
+        "durch Zusammenführen entfernt."
+    )
 INDENT_PX = 22
 MIN_CONTENT_WIDTH = 300
 MESSAGE_MAX_HEIGHT = 140
@@ -1459,9 +1490,21 @@ def _create_dock(plugin):
         set_role(card, "issue-warning")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 8, 8, 8)
+        names = readable_names()
+        descriptors = {d.layer_id: d for d in flow.result.layers}
+
+        def result_label(layer_id):
+            # same names as the result layers in step 9 (e.g. split
+            # 'nutzung_flaechen' -> 'Nutzungsflächen')
+            descriptor = descriptors.get(layer_id)
+            if descriptor is None:
+                return names.layer(layer_id)
+            return result_layer_name(descriptor, names.layer)
+
         title = QLabel(
-            f"{layer.table_name}: {layer.group_count} Gruppe(n) mit "
-            f"{layer.record_count} Objekten"
+            duplicate_title_text(
+                names.layer(layer.table_name), layer.group_count, layer.record_count
+            )
         )
         title.setWordWrap(True)
         font = title.font()
@@ -1469,12 +1512,12 @@ def _create_dock(plugin):
         title.setFont(font)
         card_layout.addWidget(title)
         for group, records in layer.groups[:DUPLICATE_EXAMPLES]:
-            example = QLabel(f"• {describe_group(records)}")
+            example = QLabel(f"• {describe_group(records, result_label)}")
             example.setWordWrap(True)
             set_role(example, "hint")
             card_layout.addWidget(example)
         if layer.group_count > DUPLICATE_EXAMPLES:
-            more = QLabel(f"… und {layer.group_count - DUPLICATE_EXAMPLES} weitere Gruppe(n)")
+            more = QLabel(more_groups_text(layer.group_count - DUPLICATE_EXAMPLES))
             set_role(more, "hint")
             card_layout.addWidget(more)
         cross = layer.cross_layer_groups()
@@ -1487,10 +1530,7 @@ def _create_dock(plugin):
         keep = QRadioButton("Behalten")
         keep_hint = QLabel("Alle Objekte bleiben erhalten.")
         merge = QRadioButton("Zusammenführen")
-        merge_hint = QLabel(
-            f"Je Gruppe bleibt das erste Objekt, {layer.removable_count} Objekte "
-            "werden entfernt."
-        )
+        merge_hint = QLabel(merge_hint_text(layer.removable_count))
         for button in (keep, merge):
             button.setCursor(Qt.PointingHandCursor)
         for hint in (keep_hint, merge_hint):
@@ -1524,7 +1564,7 @@ def _create_dock(plugin):
         if open_layers:
             return reject(
                 "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
-                "Noch offen: " + ", ".join(open_layers)
+                "Noch offen: " + ", ".join(readable_names().layer(name) for name in open_layers)
             )
         if not flow.duplicate_layers():
             return True
