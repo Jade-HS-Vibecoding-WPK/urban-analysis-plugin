@@ -33,7 +33,7 @@ from .user_guidance import (
     DECIDED_IN_HARMONIZATION,
     SEVERITY_LABELS,
     SEVERITY_ORDER,
-    UNCERTAIN_DUPLICATE_EXPLANATION,
+    describe_group,
 )
 
 
@@ -56,7 +56,7 @@ PAGE_ACTIONS = (
     UI_LABELS["load_data"],
     "Hinweise geprüft",
     "Zuordnung bestätigen",
-    "Weiter",
+    "Entscheidung übernehmen",
     "Thema übernehmen",
     "Ausgabe übernehmen",
     UI_LABELS["start_processing"],
@@ -95,6 +95,31 @@ RESET_QUESTION = (
     "Untersuchungsgebiet) bleiben erhalten."
 )
 RESET_DONE_MESSAGE = "Das Plugin wurde zurückgesetzt. Du beginnst wieder bei Schritt 1."
+NO_DUPLICATES_TEXT = "Keine unsicheren Dubletten gefunden – hier gibt es nichts zu entscheiden."
+UNCERTAIN_DUPLICATE_EXPLANATION_STEP6 = (
+    "Unsichere Dubletten: Objekte mit derselben Geometrie, aber unterschiedlichen "
+    "Angaben. Bitte pro Layer entscheiden, ob jede Gruppe zu einem Objekt "
+    "zusammengeführt wird oder alle Objekte bleiben. Die Originaldaten bleiben "
+    "unverändert; die Entscheidung lässt sich mit „Zurück“ noch ändern."
+)
+DUPLICATE_EXAMPLES = 3
+
+
+def cross_layer_warning_text(count):
+    """Hint for groups whose objects lie in different result layers."""
+    return (
+        f"Achtung: {count} Gruppe(n) liegen in verschiedenen Ergebnis-Layern "
+        "(z. B. einmal als Straße, einmal als Weg). Beim Zusammenführen bleibt nur "
+        "das erste Objekt – das andere fehlt dann in seiner Kategorie."
+    )
+
+
+def duplicates_applied_text(removed):
+    """Feedback after step 6."""
+    if removed == 0:
+        return "Entscheidung übernommen: Alle Objekte bleiben erhalten."
+    noun = "Objekt" if removed == 1 else "Objekte"
+    return f"Entscheidung übernommen: {removed} {noun} durch Zusammenführen entfernt."
 INDENT_PX = 22
 MIN_CONTENT_WIDTH = 300
 MESSAGE_MAX_HEIGHT = 140
@@ -325,6 +350,7 @@ def _create_dock(plugin):
             self.previous_map_tool = None
             self.import_task = None  # running background import (step 3)
             self.closing = False
+            self.next_message = None  # info shown after the next page change
 
             # The whole plugin shares one style (theme.py).
             self.setStyleSheet(panel_stylesheet())
@@ -457,11 +483,19 @@ def _create_dock(plugin):
             self.scroll.horizontalScrollBar().setValue(0)
             for page_index, other in enumerate(self.pages):
                 other.widget.setVisible(page_index == index)
+            # Recalculate heights now that the page is visible, so wrapped
+            # texts in freshly built cards get their full height.
+            page.layout.activate()
+            self.stack_layout.activate()
+            self.stack.updateGeometry()
             self.step_label.setText(progress_text(index))
             self.update_lamps()
             self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
+            if self.next_message:
+                text, self.next_message = self.next_message, None
+                self.show_message(text, kind="info")
 
         def run_primary_action(self):
             self.clear_message()
@@ -567,6 +601,7 @@ def _create_dock(plugin):
                 self.stop_drawing()
                 plugin.reset_workflow()
                 self.settings = {}
+                self.next_message = None
                 for page in self.pages:
                     if page.rebuild:
                         # Pages 4-9 need loaded data; they are rebuilt when reached.
@@ -1033,11 +1068,6 @@ def _create_dock(plugin):
         summary.setWordWrap(True)
         set_role(summary, "status")
         page.layout.addWidget(summary)
-        if flow.has_uncertain_duplicates():
-            explanation = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION)
-            explanation.setWordWrap(True)
-            set_role(explanation, "hint")
-            page.layout.addWidget(explanation)
 
         groups = flow.issues_by_severity()
         if not any(groups.values()):
@@ -1117,14 +1147,99 @@ def _create_dock(plugin):
             return reject(error_text(error))
         return True
 
-    # 6 Harmonisierung
+    # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
     def build_harmonization(page):
-        label = QLabel(
-            "Unsichere Dopplungen und Harmonisierung bleiben vor der "
-            "Verarbeitung sichtbar."
+        flow = workflow()
+        layers = flow.duplicate_layers()
+        if not layers:
+            none = QLabel(NO_DUPLICATES_TEXT)
+            none.setWordWrap(True)
+            page.layout.addWidget(none)
+            return
+        intro = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION_STEP6)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        for layer in layers:
+            page.layout.addWidget(duplicate_card(flow, layer))
+
+    def duplicate_card(flow, layer):
+        card = QFrame()
+        set_role(card, "issue-warning")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 8, 8)
+        title = QLabel(
+            f"{layer.table_name}: {layer.group_count} Gruppe(n) mit "
+            f"{layer.record_count} Objekten"
         )
-        label.setWordWrap(True)
-        page.layout.addWidget(label)
+        title.setWordWrap(True)
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        card_layout.addWidget(title)
+        for group, records in layer.groups[:DUPLICATE_EXAMPLES]:
+            example = QLabel(f"• {describe_group(records)}")
+            example.setWordWrap(True)
+            set_role(example, "hint")
+            card_layout.addWidget(example)
+        if layer.group_count > DUPLICATE_EXAMPLES:
+            more = QLabel(f"… und {layer.group_count - DUPLICATE_EXAMPLES} weitere Gruppe(n)")
+            set_role(more, "hint")
+            card_layout.addWidget(more)
+        cross = layer.cross_layer_groups()
+        if cross:
+            warning = QLabel(cross_layer_warning_text(len(cross)))
+            warning.setWordWrap(True)
+            set_role(warning, "error")
+            card_layout.addWidget(warning)
+
+        keep = QRadioButton("Behalten")
+        keep_hint = QLabel("Alle Objekte bleiben erhalten.")
+        merge = QRadioButton("Zusammenführen")
+        merge_hint = QLabel(
+            f"Je Gruppe bleibt das erste Objekt, {layer.removable_count} Objekte "
+            "werden entfernt."
+        )
+        for button in (keep, merge):
+            button.setCursor(Qt.PointingHandCursor)
+        for hint in (keep_hint, merge_hint):
+            hint.setWordWrap(True)
+            set_role(hint, "hint")
+        choice = QButtonGroup(card)
+        choice.addButton(keep)
+        choice.addButton(merge)
+        decision = flow.duplicate_decisions.get(layer.table_name)
+        if decision is True:
+            merge.setChecked(True)
+        elif decision is False:
+            keep.setChecked(True)
+
+        def chosen(merge_it, table=layer.table_name):
+            flow.set_duplicate_decision(table, merge_it)
+            dock.clear_message()
+
+        keep.toggled.connect(lambda checked: checked and chosen(False))
+        merge.toggled.connect(lambda checked: checked and chosen(True))
+        card_layout.addWidget(keep)
+        card_layout.addWidget(indented(keep_hint))
+        card_layout.addWidget(merge)
+        card_layout.addWidget(indented(merge_hint))
+        card._choice_group = choice  # keep the group alive with the card
+        return card
+
+    def validate_harmonization(_page):
+        flow = workflow()
+        open_layers = flow.open_duplicate_decisions()
+        if open_layers:
+            return reject(
+                "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
+                "Noch offen: " + ", ".join(open_layers)
+            )
+        if not flow.duplicate_layers():
+            return True
+        removed = flow.apply_duplicate_decisions()
+        dock.next_message = duplicates_applied_text(removed)
+        return True
 
     # 7 Kartenthema
     def build_topic(page):
@@ -1198,7 +1313,7 @@ def _create_dock(plugin):
     dock.add_page(build_data, validate_data)
     dock.add_page(build_review, validate_review, rebuild=True)
     dock.add_page(build_mapping, validate_mapping, rebuild=True)
-    dock.add_page(build_harmonization, rebuild=True)
+    dock.add_page(build_harmonization, validate_harmonization, rebuild=True)
     dock.add_page(build_topic, validate_topic, rebuild=True)
     dock.add_page(build_output, validate_output, rebuild=True)
     dock.add_page(build_summary, validate_summary, rebuild=True)
