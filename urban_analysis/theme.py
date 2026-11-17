@@ -44,7 +44,19 @@ COLORS = {
     "warning_bg": "#fff4e0",
     "info": "#1f5f99",
     "info_bg": "#e8f1fb",
+    # step lamps and busy bar (warm lamp light)
+    "lamp_dark": "#f08c24",
+    "lamp": "#ffc845",
+    "lamp_light": "#fff6c2",
 }
+
+# Step lamps (own pixel design): off = not done, dim = current, on = done.
+LAMP_FILES = {
+    "off": "lampe_off.svg",
+    "dim": "lampe_dim.svg",
+    "on": "lampe_on.svg",
+}
+LAMP_SIZE_PX = 24
 
 RADIUS_PX = 4
 
@@ -58,9 +70,9 @@ ROLES = (
     "status",     # live feedback such as the area summary
     "error",      # message: something must be fixed
     "info",       # message: neutral information
-    "step-done",  # progress marker of a finished step
-    "step-current",
-    "step-todo",
+    "issue-error",    # one review hint (step 4), by severity
+    "issue-warning",
+    "issue-info",
 )
 
 # Map drawing (study area) uses the accent colour.
@@ -258,28 +270,33 @@ QRadioButton:disabled, QCheckBox:disabled {{
     color: {c['disabled_text']};
 }}
 
-/* Progress markers and busy bar */
-QFrame[uaRole="step-done"] {{
-    background-color: {c['accent']};
-    border-radius: 3px;
+/* One review hint per card, coloured edge by severity */
+QFrame[uaRole="issue-error"], QFrame[uaRole="issue-warning"], QFrame[uaRole="issue-info"] {{
+    background-color: {c['surface']};
+    border: 1px solid {c['border']};
+    border-left-width: 5px;
+    border-radius: {r}px;
 }}
-QFrame[uaRole="step-current"] {{
-    background-color: {c['accent_light']};
-    border: 2px solid {c['accent']};
-    border-radius: 3px;
+QFrame[uaRole="issue-error"] {{ border-left-color: {c['error']}; }}
+QFrame[uaRole="issue-warning"] {{ border-left-color: #d99a00; }}
+QFrame[uaRole="issue-info"] {{ border-left-color: {c['border_strong']}; }}
+QFrame[uaRole="issue-error"] QWidget, QFrame[uaRole="issue-warning"] QWidget,
+QFrame[uaRole="issue-info"] QWidget {{
+    background-color: {c['surface']};
+    border: none;
 }}
-QFrame[uaRole="step-todo"] {{
-    background-color: {c['border']};
-    border-radius: 3px;
-}}
+
+/* Busy bar: fills once with the real progress in lamp colours */
 QProgressBar {{
     background-color: {c['surface']};
     border: 1px solid {c['border']};
     border-radius: {r}px;
-    height: 10px;
+    min-height: 12px;
+    max-height: 12px;
+    text-align: center;
 }}
 QProgressBar::chunk {{
-    background-color: {c['accent']};
+    background-color: {c['lamp']};
     border-radius: {r - 1}px;
 }}
 QToolTip {{
@@ -288,6 +305,27 @@ QToolTip {{
     border: 1px solid {c['border_strong']};
 }}
 """
+
+
+def busy_chunk_stylesheet(phase):
+    """Stylesheet for the filled part of the busy bar with a moving shine.
+
+    ``phase`` runs from 0 to 1; the bright band moves across the part that is
+    already loaded, so only finished progress "shimmers".
+    """
+    c = COLORS
+    centre = min(max(phase, 0.0), 1.0)
+    left = max(centre - 0.15, 0.0)
+    right = min(centre + 0.15, 1.0)
+    return (
+        "QProgressBar::chunk {"
+        f"border-radius: {RADIUS_PX - 1}px;"
+        "background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+        f"stop:0 {c['lamp_dark']}, stop:{left:.3f} {c['lamp']}, "
+        f"stop:{centre:.3f} {c['lamp_light']}, stop:{right:.3f} {c['lamp']}, "
+        f"stop:1 {c['lamp_dark']});"
+        "}"
+    )
 
 
 def set_role(widget, role):

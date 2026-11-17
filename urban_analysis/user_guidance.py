@@ -13,6 +13,30 @@ from .contracts import (
 from .ui_contract import MVP_REQUIRED_TOPIC_SUGGESTIONS
 
 
+SEVERITY_ORDER = ("error", "warning", "info")
+# (singular, plural) per severity
+SEVERITY_LABELS = {
+    "error": ("Fehler", "Fehler"),
+    "warning": ("Warnung", "Warnungen"),
+    "info": ("Info", "Infos"),
+}
+
+
+def severity_label(severity: str, count: int) -> str:
+    """'1 Warnung', '6 Warnungen', '0 Fehler' ..."""
+    singular, plural = SEVERITY_LABELS[severity]
+    return f"{count} {singular if count == 1 else plural}"
+# Hints confirmed in a later step instead of step 4 ("Layer prüfen").
+DECIDED_IN_HARMONIZATION = ("uncertain-duplicate",)
+# Errors that leave no usable data (decision E4): only these block step 4.
+BLOCKING_ERROR_CODES = ("invalid-study-area", "no-feature-layers")
+UNCERTAIN_DUPLICATE_EXPLANATION = (
+    "Unsichere Dubletten sind Objekte mit derselben Geometrie, aber "
+    "unterschiedlichen Angaben – etwa wenn dasselbe Objekt mehrfach mit "
+    "unterschiedlichen Angaben gespeichert ist. Alle wurden behalten. Ob sie "
+    "zusammengeführt werden, entscheidest du in Schritt 6 „Harmonisierung“."
+)
+
 PDF_DATA_SOURCE_MESSAGE = (
     "Für das PDF ist eine Datenquelle nötig. Bitte das Feld „Datenquelle“ ausfüllen."
 )
@@ -105,6 +129,67 @@ class GuidedWorkflow:
                     "Vorschlag abzulehnen."
                 )
         return self.attribute_suggestions()
+
+    # --- Step 4 "Layer prüfen" (W5): all hints, grouped and confirmable ---
+
+    def issues_by_severity(self) -> Dict[str, List[ValidationIssue]]:
+        """All hints of the result (incl. infos), grouped error/warning/info.
+
+        Unknown severities are shown as warnings so nothing disappears.
+        """
+        groups: Dict[str, List[ValidationIssue]] = {key: [] for key in SEVERITY_ORDER}
+        for issue in self.result.issues:
+            key = issue.severity if issue.severity in groups else "warning"
+            groups[key].append(issue)
+        return groups
+
+    @staticmethod
+    def needs_review_confirmation(issue: ValidationIssue) -> bool:
+        """True if the hint gets a check box in step 4."""
+        return issue.requires_confirmation and issue.code not in DECIDED_IN_HARMONIZATION
+
+    def open_review_confirmations(self) -> Tuple[ValidationIssue, ...]:
+        """Hints in step 4 that still have to be confirmed."""
+        return tuple(
+            issue
+            for issue in self.result.issues
+            if self.needs_review_confirmation(issue) and issue.confirmed is not True
+        )
+
+    @staticmethod
+    def confirm_issue(issue: ValidationIssue, confirmed: bool) -> ValidationIssue:
+        """Store the user's confirmation on the hint itself (decision E3)."""
+        issue.confirmed = bool(confirmed)
+        return issue
+
+    def has_uncertain_duplicates(self) -> bool:
+        return any(issue.code in DECIDED_IN_HARMONIZATION for issue in self.result.issues)
+
+    def review_blocker(self) -> Optional[str]:
+        """Why step 4 cannot be left yet, or ``None`` if it can."""
+        blocking = [issue for issue in self.result.issues if issue.code in BLOCKING_ERROR_CODES]
+        if blocking or not self.result.layers:
+            return (
+                "Es sind keine verwendbaren Daten übrig. Bitte mit „Zurück“ das "
+                "Untersuchungsgebiet (Schritt 2) oder die Datei (Schritt 3) prüfen."
+            )
+        open_items = self.open_review_confirmations()
+        if open_items:
+            count = len(open_items)
+            noun = "Hinweis" if count == 1 else "Hinweise"
+            return (
+                f"Noch {count} {noun} bestätigen: Bitte bei allen markierten Hinweisen "
+                "„Gelesen und bestätigt“ ankreuzen."
+            )
+        return None
+
+    def review_summary_text(self) -> str:
+        """One line above the list, e.g. '9 Layer geladen · 0 Fehler · ...'."""
+        groups = self.issues_by_severity()
+        return " · ".join(
+            [f"{len(self.result.layers)} Layer geladen"]
+            + [severity_label(key, len(groups[key])) for key in SEVERITY_ORDER]
+        )
 
     def recognized_categories(self) -> Tuple[str, ...]:
         """Return categories supplied by the pipeline in stable input order."""
