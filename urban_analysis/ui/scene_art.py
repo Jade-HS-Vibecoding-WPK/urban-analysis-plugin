@@ -264,6 +264,29 @@ def caught_fish(tail_left=False):
     return make_sprite(cells, {"mouth": (4, 1)})
 
 
+def leap_fish(pose="right"):
+    """The step fish in the air during its jump: grey-green with outline.
+    Poses: 'right' / 'left' (side view with light belly and eye) and 'belly'
+    (rolled over in the flip: we see the light belly)."""
+    if pose == "belly":
+        body = ellipse(7, 2, 6, 1.6)
+        tail = {(1 - i, y) for i in range(3) for y in range(2 - i, 3 + i)}
+        return make_sprite(paint(body | tail, "catch_belly", "outline"))
+    body = ellipse(7, 3, 6, 2.6)
+    tail = {(1 - i, y) for i in range(4) for y in range(int(3 - i * 0.8), int(3 + i * 0.8) + 1)}
+    shape = body | tail
+    eye = (10, 2)
+    if pose == "left":
+        span = max(x for x, _y in shape)
+        shape = {(span - x, y) for x, y in shape}
+        eye = (span - 10, 2)
+        body = {(span - x, y) for x, y in body}
+    cells = paint(shape, "catch", "outline",
+                  lambda x, y: "catch_belly" if (x, y) in body and y >= 4 else None)
+    cells.append((eye[0], eye[1], "outline"))
+    return make_sprite(cells)
+
+
 def sparkle():
     """Small twinkle above the happy rabbit."""
     cells = [(3, y, "sparkle") for y in range(7)] + [(x, 3, "sparkle") for x in range(7)]

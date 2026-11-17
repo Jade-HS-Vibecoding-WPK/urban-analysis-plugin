@@ -46,6 +46,18 @@ FISH_SPEED = 3             # px per frame when the step fish swims
 FISH_TAIL_EVERY = 4        # tail flaps every 0.4 s
 WAKE_LINES = ((-10, 1, 7), (-20, 4, 6), (-30, 0, 5), (-40, 3, 4), (-48, 1, 3))
 
+# Celebration jump of the step fish after the result layers were created:
+# per frame (top y of the fish, pose).  It leaves the water, flips over in
+# the air (shows its light belly) and dives back in.
+_W = art.WATER_Y
+JUMP_PATH = (
+    (art.FISH_Y - 12, "right"), (_W + 6, "right"), (_W - 10, "right"), (_W - 20, "belly"),
+    (_W - 24, "left"), (_W - 20, "belly"), (_W - 10, "right"), (_W + 6, "right"),
+    (art.FISH_Y - 12, "right"), (art.FISH_Y, "right"),
+)
+JUMP_STEP_X = 2            # px forward per frame
+SPLASH_LIFE = 3            # frames a splash stays visible
+
 
 def step_positions(width, total):
     """x positions of the steps along the bottom (left to right)."""
@@ -90,6 +102,9 @@ class FishingScene:
         self.step = 0
         self.fish_x = float(step_positions(width, total_steps)[0])
         self.fish_facing_right = True
+        self.jump_pending = False
+        self.jump_frame = None   # index in JUMP_PATH while the fish jumps
+        self.splashes = []       # [x, frames left] on the water line
 
     # --- commands from the panel -------------------------------------------
 
@@ -141,6 +156,12 @@ class FishingScene:
             if not self.animations:
                 self.float_x = art.BOBBER_REST_X
 
+    def celebrate(self):
+        """Result layers created: the step fish jumps once with a flip
+        (as soon as it has reached its step).  Skipped with reduced animations."""
+        if self.animations:
+            self.jump_pending = True
+
     def cancel(self):
         """Back to rest at once (reset, aborted loading)."""
         self._enter("idle")
@@ -148,6 +169,9 @@ class FishingScene:
         self.progress = 0
         self.twitch = 0
         self.bubble = 0
+        self.jump_pending = False
+        self.jump_frame = None
+        self.splashes = []
 
     # --- animation ---------------------------------------------------------
 
@@ -164,7 +188,8 @@ class FishingScene:
     def busy(self):
         """True while a short, event-driven animation still runs."""
         return (self.phase in ("cast", "catch", "reel") or self.splash > 0
-                or self.twitch > 0 or self.bubble > 0 or self.fish_moving())
+                or self.twitch > 0 or self.bubble > 0 or self.fish_moving()
+                or self.jump_pending or self.jump_frame is not None or bool(self.splashes))
 
     def tick(self):
         """Advance one frame (about 100 ms)."""
@@ -178,6 +203,7 @@ class FishingScene:
         if self.animations and self.ticks % CLOUD_STEP_EVERY == 0:
             self.cloud_offset += 1
         self._move_fish()
+        self._advance_jump()
         self.frame += 1
         if self.phase == "cast" and self.frame >= len(CAST_FRAMES):
             self.splash = SPLASH_FRAMES
@@ -190,7 +216,36 @@ class FishingScene:
             self.float_x = art.BOBBER_REST_X
             self._enter("idle")
 
+    def _advance_jump(self):
+        self.splashes = [[x, left - 1] for x, left in self.splashes if left > 1]
+        if self.jump_frame is None:
+            if self.jump_pending and not self.fish_moving():
+                self.jump_pending = False
+                self.jump_frame = 0
+            return
+        before = self._in_air(self.jump_frame)
+        self.jump_frame += 1
+        if self.jump_frame >= len(JUMP_PATH):
+            self.jump_frame = None
+            return
+        if before != self._in_air(self.jump_frame):  # leaves or enters the water
+            self.splashes.append([self.jump_view()[0], SPLASH_LIFE])
+
+    @staticmethod
+    def _in_air(frame):
+        return JUMP_PATH[frame][0] < art.WATER_Y
+
+    def jump_view(self):
+        """None or (centre x, top y, pose, in_air) of the jumping fish."""
+        if self.jump_frame is None:
+            return None
+        y, pose = JUMP_PATH[self.jump_frame]
+        x = round(self.fish_x) + JUMP_STEP_X * self.jump_frame
+        return x, y, pose, y < art.WATER_Y
+
     def _move_fish(self):
+        if self.jump_frame is not None:
+            return  # the fish is in the middle of its jump
         target = self.fish_target()
         if not self.animations:
             self.fish_x = float(target)

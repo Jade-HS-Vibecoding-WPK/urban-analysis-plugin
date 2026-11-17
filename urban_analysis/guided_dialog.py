@@ -732,8 +732,10 @@ def _create_dock(plugin):
             self.scene.set_step(len(MVP_UI_STEPS) if self.all_done else self.current)
 
         def mark_all_done(self):
+            """Result layers created: fish to the last step, then a happy jump."""
             self.all_done = True
             self.update_progress()
+            self.scene.celebrate()
 
         def fit_wrapped_labels(self):
             """Give every wrapped text its full height at the current width.

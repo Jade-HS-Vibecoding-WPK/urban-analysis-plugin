@@ -173,6 +173,45 @@ def test_all_done_puts_the_fish_on_the_last_step():
     assert scene.fish_x == step_positions(420, 9)[-1]
 
 
+def test_fish_jumps_with_a_flip_after_the_result_layers():
+    from urban_analysis.ui.scene_motion import JUMP_PATH
+
+    scene = FishingScene()
+    scene.set_step(8)
+    scene.celebrate()
+    assert scene.jump_view() is None  # first it swims to the last step
+    while scene.jump_view() is None:
+        scene.tick()
+    assert not scene.fish_moving()
+    poses, in_air, splashes = set(), [], 0
+    while scene.jump_view() is not None:
+        _x, y, pose, air = scene.jump_view()
+        poses.add(pose)
+        in_air.append(air)
+        scene.tick()
+        splashes = max(splashes, len(scene.splashes))
+    assert {"right", "left", "belly"} <= poses  # flip shows the belly
+    assert in_air[0] is False and in_air[-1] is False and any(in_air)  # out and back in
+    assert splashes >= 1
+    assert len(in_air) == len(JUMP_PATH)
+    for _ in range(20):
+        scene.tick()
+    assert not scene.busy()  # back to calm swimming
+
+
+def test_no_jump_with_reduced_animations():
+    scene = FishingScene(animations=False)
+    scene.celebrate()
+    scene.tick()
+    assert scene.jump_view() is None and not scene.busy()
+
+
+def test_leap_fish_poses_are_calm_colours():
+    for pose in ("right", "left", "belly"):
+        colours = {c for _x, _y, c in art.leap_fish(pose).cells}
+        assert colours <= {"catch", "catch_belly", "outline"}
+
+
 def test_resting_scene_needs_no_event_animation():
     scene = FishingScene()
     run(scene, 5)
