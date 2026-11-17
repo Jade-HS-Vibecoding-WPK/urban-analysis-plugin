@@ -792,7 +792,39 @@ class GeoPackageImporter:
             geometry = row.get(geometry_column)
             if geometry is not None:
                 positions_by_geometry.setdefault(geometry, []).append(position)
-        groups = [positions for positions in positions_by_geometry.values() if len(positions) > 1]
+        # Only records that ended up in the same result layer (same category)
+        # can be duplicates.  Equal geometries in different categories are two
+        # different uses at the same place and are reported separately.
+        groups: List[List[int]] = []
+        cross_category_places = 0
+        for positions in positions_by_geometry.values():
+            if len(positions) < 2:
+                continue
+            by_layer: Dict[str, List[int]] = {}
+            for position in positions:
+                by_layer.setdefault(records[position].layer_id, []).append(position)
+            if len(by_layer) > 1:
+                cross_category_places += 1
+            groups.extend(group for group in by_layer.values() if len(group) > 1)
+
+        if cross_category_places:
+            issues.append(
+                ValidationIssue(
+                    code="overlap-different-category",
+                    message=(
+                        f"{display_name or table_name}: "
+                        + (
+                            "An einer Stelle liegen"
+                            if cross_category_places == 1
+                            else f"An {_count(cross_category_places)} Stellen liegen"
+                        )
+                        + " Flächen mit unterschiedlicher Kategorie genau übereinander. "
+                        "Sie sind keine Dubletten und bleiben in ihrer jeweiligen Kategorie erhalten."
+                    ),
+                    severity="info",
+                    rule="Gleiche Geometrie, unterschiedliche Kategorie",
+                )
+            )
         if not groups:
             return records
 

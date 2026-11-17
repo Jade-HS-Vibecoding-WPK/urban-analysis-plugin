@@ -690,3 +690,38 @@ def test_attribute_suggestions_name_their_layer_and_show_examples(tmp_path):
     assert nutzung.target_field == "object_type"
     assert nutzung.examples == ("Strassenverkehr, Begleitfläche Straßenverkehr", "Platz, Parkplatz")
     assert by_layer[("gebaeude", "gfk__bez")].examples == ("Wohngebäude",)
+
+
+def test_same_geometry_in_different_categories_is_not_an_uncertain_duplicate(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    area = gpkg_polygon([(20, 1), (21, 1), (21, 2), (20, 2), (20, 1)])
+    path_area = gpkg_polygon([(24, 1), (25, 1), (25, 2), (24, 2), (24, 1)])
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO nutzung VALUES (?, ?, ?, ?)",
+            [
+                (101, area, "X1", "Strassenverkehr"),
+                (102, area, "X2", "Sport-, Freizeit- und Erholungsfläche, Park"),
+                (103, path_area, "X3", "Weg"),
+                (104, path_area, "X4", "Weg, Fußweg"),
+            ],
+        )
+
+    result = import_alkis(path)
+
+    groups = {
+        record.source_row_id: record.duplicate_group
+        for record in result.harmonized_records
+        if record.source_row_id in (101, 102, 103, 104) and record.layer_id.startswith("nutzung")
+    }
+    assert groups[101] is None and groups[102] is None
+    assert groups[103] is not None and groups[103] == groups[104]
+    uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
+    assert uncertain.message.startswith("Nutzung: An einer Stelle liegen mehrere Objekte")
+    overlap = next(issue for issue in result.issues if issue.code == "overlap-different-category")
+    assert overlap.severity == "info"
+    assert overlap.message == (
+        "Nutzung: An einer Stelle liegen Flächen mit unterschiedlicher Kategorie genau übereinander. "
+        "Sie sind keine Dubletten und bleiben in ihrer jeweiligen Kategorie erhalten."
+    )
