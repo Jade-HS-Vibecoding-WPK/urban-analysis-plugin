@@ -154,7 +154,7 @@ def test_unexpected_errors_are_described_with_step_type_and_log_hint():
 
 def test_lamps_are_on_for_done_steps_dim_for_the_current_and_off_after():
     assert [lamp_state(i, 3) for i in range(6)] == ["on", "on", "on", "dim", "off", "off"]
-    assert lamp_state(3, 3, pulse_on=True) == "on"  # pulsing while loading
+    assert [lamp_state(i, 9) for i in range(9)] == ["on"] * 9  # all done
 
 
 def test_busy_text_shows_real_progress_only_when_known():

@@ -8,6 +8,7 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
+import random
 from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
@@ -31,10 +32,17 @@ from .study_area import (
 from .theme import (
     LAMP_FILES,
     LAMP_SIZE_PX,
-    busy_chunk_stylesheet,
+    WIRE_CELL_PX,
+    WIRE_COLORS,
+    WIRE_PATTERN,
+    WIRE_ROWS,
     icon_path,
+    lit_columns,
     panel_stylesheet,
     set_role,
+    spawn_sparks,
+    step_sparks,
+    wire_cells,
 )
 from .ui_contract import UI_LABELS
 from .user_guidance import (
@@ -92,8 +100,8 @@ LAST_FOLDER_SETTING = "urban_analysis/last_geopackage_folder"
 ARROW_CLOSED = "▸"
 ARROW_OPEN = "▾"
 PANEL_ANIMATION_MS = 180
-BUSY_TICK_MS = 120
-BUSY_SHINE_STEP = 0.06
+BUSY_TICK_MS = 60
+WIRE_SPARK_SPACE_PX = 14  # room above the wire for rising sparks
 PROGRESS_MARGIN_PX = 10
 RESET_TOOLTIP = "Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
 RESET_QUESTION = (
@@ -305,16 +313,12 @@ def import_error_text(file_name, error, full_path=None):
     )
 
 
-def lamp_state(step_index, current_index, pulse_on=False):
-    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'.
-
-    While a long step runs without known progress, the current lamp pulses
-    (``pulse_on``) between 'dim' and 'on'.
-    """
+def lamp_state(step_index, current_index):
+    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'."""
     if step_index < current_index:
         return "on"
     if step_index == current_index:
-        return "on" if pulse_on else "dim"
+        return "dim"
     return "off"
 
 
@@ -439,7 +443,7 @@ def _create_dock(plugin):
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
     from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
-    from qgis.PyQt.QtGui import QIcon
+    from qgis.PyQt.QtGui import QColor, QIcon, QPainter
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
@@ -455,7 +459,6 @@ def _create_dock(plugin):
         QListWidget,
         QListWidgetItem,
         QMessageBox,
-        QProgressBar,
         QPushButton,
         QRadioButton,
         QScrollArea,
@@ -481,6 +484,77 @@ def _create_dock(plugin):
             _clear_layout(self.layout)
             self.widgets = {}
             self.builder(self)
+
+    class WireBar(QWidget):
+        """Busy bar as an own pixel wire that lights up with the real progress.
+
+        Dark red = not loaded yet, bright red = loaded. Sparks rise at the
+        progress front while a step runs.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self._value = 0
+            self._maximum = 100
+            self.sparks = []
+            self.rng = random.Random(7)
+            self.setFixedHeight(WIRE_ROWS * WIRE_CELL_PX + WIRE_SPARK_SPACE_PX)
+
+        # QProgressBar-like interface used by the dock and tests
+        def setValue(self, value):
+            self._value = max(0, min(int(value), self._maximum))
+            self.update()
+
+        def value(self):
+            return self._value
+
+        def maximum(self):
+            return self._maximum
+
+        def reset(self):
+            self._value = 0
+            self.sparks = []
+            self.update()
+
+        def _columns(self):
+            return max(self.width() // WIRE_CELL_PX, 1)
+
+        def _top(self):
+            return self.height() - WIRE_ROWS * WIRE_CELL_PX
+
+        def tick(self):
+            """Move sparks and create new ones at the front of the lit wire."""
+            self.sparks = step_sparks(self.sparks)
+            lit = lit_columns(self._value, self._maximum, self._columns())
+            if lit > 0:
+                front = lit - 1
+                row = WIRE_PATTERN[front % len(WIRE_PATTERN)]
+                self.sparks += spawn_sparks(
+                    front * WIRE_CELL_PX + WIRE_CELL_PX / 2,
+                    self._top() + row * WIRE_CELL_PX,
+                    self.rng,
+                )
+            self.update()
+
+        def paintEvent(self, _event):
+            painter = QPainter(self)
+            columns = self._columns()
+            lit = lit_columns(self._value, self._maximum, columns)
+            top = self._top()
+            colors = {key: QColor(value) for key, value in WIRE_COLORS.items()}
+            for x, y in wire_cells(columns):
+                if x < lit:
+                    color = colors["on_light"] if (x + y) % 5 == 0 else colors["on"]
+                else:
+                    color = colors["off_edge"] if (x + y) % 4 == 0 else colors["off"]
+                painter.fillRect(x * WIRE_CELL_PX, top + y * WIRE_CELL_PX,
+                                 WIRE_CELL_PX, WIRE_CELL_PX, color)
+            for x, y, _vx, _vy, life, max_life in self.sparks:
+                spark = QColor(WIRE_COLORS["spark"])
+                spark.setAlpha(int(255 * life / max_life))
+                size = 2 if life < max_life / 2 else 3
+                painter.fillRect(int(x), int(y), size, size, spark)
+            painter.end()
 
     class GuidedDock(QgsDockWidget):
         """Side panel that walks through the nine MVP steps."""
@@ -535,20 +609,14 @@ def _create_dock(plugin):
                 progress_row.addWidget(lamp)
                 self.step_lamps.append(lamp)
             progress_row.addStretch()
-            self.pulse_on = False
 
-            # Busy bar for long steps: fills once with the real progress (if the
-            # pipeline reports it); only the loaded part shimmers. While no
-            # progress is known, the current lamp pulses so QGIS looks alive.
+            # Busy bar for long steps: a pixel wire that lights up with the
+            # real progress; sparks rise at the progress front.
             self.busy_label = QLabel()
             self.busy_label.setWordWrap(True)
             set_role(self.busy_label, "status")
-            self.busy_bar = QProgressBar()
-            self.busy_bar.setRange(0, 100)
-            self.busy_bar.setTextVisible(False)
+            self.busy_bar = WireBar()
             self.busy_text = ""
-            self.busy_progress_known = False
-            self.busy_phase = 0.0
             self.busy_timer = QTimer(self)
             self.busy_timer.setInterval(BUSY_TICK_MS)
             self.busy_timer.timeout.connect(self._advance_busy)
@@ -693,7 +761,7 @@ def _create_dock(plugin):
             """
             current = len(self.step_lamps) if self.all_done else self.current
             for index, lamp in enumerate(self.step_lamps):
-                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current, self.pulse_on)])
+                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current)])
 
         def mark_all_done(self):
             self.all_done = True
@@ -728,9 +796,7 @@ def _create_dock(plugin):
         def set_busy(self, text):
             """Show the busy bar and lock the panel while a step runs."""
             self.busy_text = text
-            self.busy_progress_known = False
-            self.busy_phase = 0.0
-            self.busy_bar.setValue(0)
+            self.busy_bar.reset()
             self.busy_label.setText(busy_label_text(text, None))
             self.busy_label.show()
             self.busy_bar.show()
@@ -742,14 +808,12 @@ def _create_dock(plugin):
 
         def set_busy_progress(self, percent):
             """Real progress from the background task (0-100)."""
-            self.busy_progress_known = True
             self.busy_bar.setValue(int(percent))
             self.busy_label.setText(busy_label_text(self.busy_text, percent))
 
         def clear_busy(self):
             self.busy_timer.stop()
-            self.pulse_on = False
-            self.update_lamps()
+            self.busy_bar.reset()
             self.busy_label.hide()
             self.busy_bar.hide()
             self.stack.setEnabled(True)
@@ -758,13 +822,8 @@ def _create_dock(plugin):
             self.reset_button.setEnabled(True)
 
         def _advance_busy(self):
-            # Shine moves across the loaded part of the bar only.
-            self.busy_phase = (self.busy_phase + BUSY_SHINE_STEP) % 1.0
-            self.busy_bar.setStyleSheet(busy_chunk_stylesheet(self.busy_phase))
-            if not self.busy_progress_known:
-                # Unknown progress: the current lamp pulses between dim and on.
-                self.pulse_on = not self.pulse_on
-                self.update_lamps()
+            # Sparks rise at the front of the lit wire.
+            self.busy_bar.tick()
 
         def ask_reset(self):
             """Ask, then reset the whole plugin to step 1 without data."""
