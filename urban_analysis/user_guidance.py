@@ -13,6 +13,11 @@ from .contracts import (
 from .ui_contract import MVP_REQUIRED_TOPIC_SUGGESTIONS
 
 
+PDF_DATA_SOURCE_MESSAGE = (
+    "Für das PDF ist eine Datenquelle nötig. Bitte das Feld „Datenquelle“ ausfüllen."
+)
+
+
 @dataclass(frozen=True)
 class OutputPlan:
     """Concrete output choices derived from the user's selection."""
@@ -49,11 +54,18 @@ class GuidedWorkflow:
     ) -> PipelineResult:
         """Validate and store the CRS, study area, and user-selected buffer."""
         if not project_crs.strip():
-            raise ValueError("A project CRS is required")
+            raise ValueError(
+                "Es ist kein Projekt-CRS gewählt. Bitte in Schritt 1 ein CRS auswählen."
+            )
         if not study_area_wkt.strip():
-            raise ValueError("A study area polygon is required")
+            raise ValueError(
+                "Es ist kein Untersuchungsgebiet angegeben. Bitte in Schritt 2 ein "
+                "Polygon wählen."
+            )
         if buffer_meters < 0:
-            raise ValueError("The buffer must not be negative")
+            raise ValueError(
+                "Der Puffer darf nicht negativ sein. Bitte einen Wert ab 0 m eingeben."
+            )
         self.result.project_crs = project_crs.strip()
         self.result.study_area_wkt = study_area_wkt.strip()
         self.result.buffer_meters = buffer_meters
@@ -74,7 +86,10 @@ class GuidedWorkflow:
         known = {suggestion.source_field: suggestion for suggestion in self.result.attribute_suggestions}
         unknown = set(decisions) - set(known)
         if unknown:
-            raise KeyError("Unknown source fields: " + ", ".join(sorted(unknown)))
+            raise KeyError(
+                "Diese Quellfelder gibt es in den Attributvorschlägen nicht: "
+                + ", ".join(sorted(unknown))
+            )
 
         for source_field, decision in decisions.items():
             suggestion = known[source_field]
@@ -84,7 +99,11 @@ class GuidedWorkflow:
                 suggestion.user_value = decision.strip()
                 suggestion.accepted = True
             else:
-                raise ValueError("Each attribute decision must be a boolean or non-empty string")
+                raise ValueError(
+                    f"Für das Quellfeld „{source_field}“ ist kein Zielfeld eingetragen. "
+                    "Bitte ein Zielfeld eintragen oder das Häkchen entfernen, um den "
+                    "Vorschlag abzulehnen."
+                )
         return self.attribute_suggestions()
 
     def recognized_categories(self) -> Tuple[str, ...]:
@@ -113,11 +132,19 @@ class GuidedWorkflow:
         selected_categories = tuple(categories) if categories is not None else self.recognized_categories()
         unknown = set(selected_categories) - set(self.recognized_categories())
         if unknown:
-            raise ValueError("Unknown categories: " + ", ".join(sorted(unknown)))
+            raise ValueError(
+                "Diese Kategorien wurden in den Daten nicht erkannt: "
+                + ", ".join(sorted(unknown))
+            )
 
         missing = [category for category in MVP_REQUIRED_TOPIC_SUGGESTIONS if category not in selected_categories]
         if missing and not confirm_missing:
-            raise ValueError("Missing categories require confirmation: " + ", ".join(missing))
+            raise ValueError(
+                "Für das Kartenthema fehlen diese Kategorien: "
+                + ", ".join(missing)
+                + ". Bitte „Unvollständig fortfahren“ ankreuzen, um bewusst ohne sie "
+                "weiterzumachen. Das Ergebnis wird dann als unvollständig markiert."
+            )
         self.result.selected_topic = topic
         for layer in self.result.layers:
             layer.selected_for_topic = bool(layer.category in selected_categories)
@@ -149,7 +176,7 @@ class GuidedWorkflow:
         if data_source is not None:
             self.result.output.data_source = data_source.strip()
         if create_pdf and not self.result.output.data_source:
-            raise ValueError("A data source is required for PDF output")
+            raise ValueError(PDF_DATA_SOURCE_MESSAGE)
         self.result.output = OutputSelection(
             load_qgis_layers=True,
             save_cleaned_geopackage=save_cleaned_geopackage,
@@ -164,7 +191,7 @@ class GuidedWorkflow:
         metadata = None
         if output.create_pdf:
             if not output.data_source:
-                raise ValueError("A data source is required for PDF output")
+                raise ValueError(PDF_DATA_SOURCE_MESSAGE)
             metadata = {
                 "study_area_wkt": self.result.study_area_wkt,
                 "buffer_meters": self.result.buffer_meters,

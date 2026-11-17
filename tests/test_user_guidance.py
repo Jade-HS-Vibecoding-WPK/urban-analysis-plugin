@@ -49,7 +49,7 @@ def test_project_setup_rejects_invalid_buffer_and_exposes_contract_steps():
 
     assert workflow.current_step == "Projekt-CRS"
     assert workflow.advance() == "Untersuchungsgebiet"
-    with pytest.raises(ValueError, match="must not be negative"):
+    with pytest.raises(ValueError, match="darf nicht negativ sein"):
         workflow.configure_project(
             project_crs="EPSG:25832",
             study_area_wkt="POLYGON EMPTY",
@@ -60,8 +60,10 @@ def test_project_setup_rejects_invalid_buffer_and_exposes_contract_steps():
 def test_missing_category_requires_explicit_confirmation():
     workflow = GuidedWorkflow(make_result())
 
-    with pytest.raises(ValueError, match="Missing categories"):
+    with pytest.raises(ValueError, match="fehlen diese Kategorien: Straßen") as error:
         workflow.select_topic("Siedlungsstruktur", categories=("Gebäude",))
+
+    assert "Unvollständig fortfahren" in str(error.value)
 
 
 def test_output_plan_keeps_qgis_layers_and_describes_optional_exports():
@@ -88,5 +90,14 @@ def test_output_plan_keeps_qgis_layers_and_describes_optional_exports():
 def test_pdf_requires_editable_data_source():
     workflow = GuidedWorkflow(make_result())
 
-    with pytest.raises(ValueError, match="data source"):
+    with pytest.raises(ValueError, match="Datenquelle"):
         workflow.choose_output(create_pdf=True)
+
+
+def test_empty_target_field_explains_how_to_fix_it():
+    workflow = GuidedWorkflow(make_result())
+
+    with pytest.raises(ValueError, match="kein Zielfeld eingetragen") as error:
+        workflow.confirm_attribute_suggestions({"type": "  "})
+
+    assert "Häkchen entfernen" in str(error.value)

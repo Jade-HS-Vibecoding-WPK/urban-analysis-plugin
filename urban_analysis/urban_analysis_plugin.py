@@ -3,9 +3,13 @@
 from qgis.PyQt.QtWidgets import QAction
 
 from .contracts import PipelineResult
-from .guided_dialog import show_guided_dialog
+from .guided_dialog import report_unexpected_error, set_dock_visible
 from .outputs import export_selected_outputs
 from .user_guidance import GuidedWorkflow, OutputPlan
+
+
+MENU_NAME = "&Urban Analysis"
+TOOLBAR_ICON = "/mLayoutItemMap.svg"
 
 
 class UrbanAnalysisPlugin:
@@ -14,21 +18,57 @@ class UrbanAnalysisPlugin:
     def __init__(self, iface):
         self.iface = iface
         self.action = None
+        self.dock = None
         self.workflow = None
 
     def initGui(self):
-        """Add the plugin action to the QGIS plugin menu."""
-        self.action = QAction("Urban Analysis", self.iface.mainWindow())
+        """Add a toggle action for the side panel to the menu and toolbar."""
+        from qgis.core import QgsApplication
+
+        self.action = QAction(
+            QgsApplication.getThemeIcon(TOOLBAR_ICON),
+            "Urban Analysis",
+            self.iface.mainWindow(),
+        )
         self.action.setObjectName("urbanAnalysisAction")
-        self.action.triggered.connect(self._show_workflow_status)
-        self.iface.addPluginToMenu("&Urban Analysis", self.action)
+        self.action.setToolTip("Urban Analysis: Seitenfenster ein- oder ausblenden")
+        self.action.setCheckable(True)
+        self.action.triggered.connect(self.toggle_dock)
+        self.iface.addPluginToMenu(MENU_NAME, self.action)
+        self.iface.addToolBarIcon(self.action)
 
     def unload(self):
-        """Remove the plugin action from the QGIS plugin menu."""
+        """Remove the side panel, menu entry and toolbar button."""
+        if self.dock is not None:
+            self.iface.removeDockWidget(self.dock)
+            self.dock.deleteLater()
+            self.dock = None
         if self.action is not None:
-            self.iface.removePluginMenu("&Urban Analysis", self.action)
+            self.iface.removePluginMenu(MENU_NAME, self.action)
+            self.iface.removeToolBarIcon(self.action)
             self.action.deleteLater()
             self.action = None
+
+    def toggle_dock(self, checked=False):
+        """Show or hide the side panel (toolbar button and menu entry)."""
+        self._set_dock_visible(bool(checked))
+
+    def open_guided_dialog(self, *_args):
+        """Show the side panel, with or without already loaded data."""
+        self._set_dock_visible(True)
+
+    def _set_dock_visible(self, visible):
+        try:
+            set_dock_visible(self, visible)
+        except Exception as error:  # show every program error visibly
+            report_unexpected_error(self, "Seitenfenster öffnen", error)
+            if self.action is not None:
+                self.action.setChecked(self.dock is not None and self.dock.isVisible())
+
+    def _on_dock_visibility_changed(self, visible):
+        """Keep the toolbar button in sync when the panel is closed via its X."""
+        if self.action is not None:
+            self.action.setChecked(bool(visible))
 
     def start_workflow(self, result: PipelineResult) -> GuidedWorkflow:
         """Create the guided workflow for a pipeline result."""
@@ -37,7 +77,10 @@ class UrbanAnalysisPlugin:
 
     def _require_workflow(self) -> GuidedWorkflow:
         if self.workflow is None:
-            raise RuntimeError("Start a workflow with a PipelineResult first")
+            raise RuntimeError(
+                "Es sind noch keine Daten geladen. Bitte zuerst in Schritt 3 ein "
+                "GeoPackage laden."
+            )
         return self.workflow
 
     def advance_workflow(self) -> str:
@@ -75,13 +118,3 @@ class UrbanAnalysisPlugin:
             geopackage_path=geopackage_path,
             pdf_path=pdf_path,
         )
-
-    def _show_workflow_status(self):
-        """Report whether a contract-backed workflow has been started."""
-        if self.workflow is None:
-            self.iface.messageBar().pushInfo(
-                "Urban Analysis",
-                "PipelineResult für den Workflowstart erforderlich.",
-            )
-            return
-        show_guided_dialog(self)
