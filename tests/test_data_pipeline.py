@@ -295,3 +295,22 @@ def test_invalid_study_area_is_reported_and_nothing_is_imported(tmp_path):
     issue = next(issue for issue in result.issues if issue.code == "invalid-study-area")
     assert issue.severity == "error"
 
+
+def test_same_attributes_with_different_geometry_are_not_duplicates(tmp_path):
+    path = tmp_path / "sample.gpkg"
+    make_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO buildings VALUES (3, ?, 'house', '12,5', 'Gebäude', '2020')",
+            (gpkg_polygon([(5, 1), (7, 1), (7, 3), (5, 3), (5, 1)]),),
+        )
+
+    result = GeoPackageImporter().import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 10 0, 10 10, 0 0))",
+    )
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 3]
+    duplicate = next(issue for issue in result.issues if issue.code == "duplicate-row")
+    assert duplicate.message.startswith("1 exakte")

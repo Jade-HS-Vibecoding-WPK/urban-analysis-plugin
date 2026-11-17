@@ -530,7 +530,8 @@ class GeoPackageImporter:
                 "year": _coerce_year(row.get(rules["year"])) if "year" in rules else None,
                 "source": row.get(rules["source"]) if "source" in rules else str(file_path),
             }
-            duplicate_key = tuple(attributes[field] for field in TARGET_FIELDS)
+            geometry_value = row.get(geometry_column) if geometry_column else None
+            duplicate_key = (*(attributes[field] for field in TARGET_FIELDS), geometry_value)
             if duplicate_key in seen:
                 duplicate_count += 1
                 continue
@@ -540,7 +541,7 @@ class GeoPackageImporter:
                     layer_id=layer.table_name,
                     source_row_id=row.get(row_id_column, index) if row_id_column else index,
                     attributes=attributes,
-                    geometry=row.get(geometry_column) if geometry_column else None,
+                    geometry=geometry_value,
                 )
             )
         if duplicate_count:
@@ -552,7 +553,7 @@ class GeoPackageImporter:
                         f"{layer.table_name} wurden entfernt."
                     ),
                     severity="warning",
-                    rule="Exakte Attribute",
+                    rule="Exakte Attribute und Geometrie",
                 )
             )
         return records
