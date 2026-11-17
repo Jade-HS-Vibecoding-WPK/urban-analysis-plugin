@@ -11,7 +11,7 @@ they always reflect the data that is currently loaded.
 from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
-from .data_pipeline import GeoPackageImporter, GeoPackageImportError
+from .data_pipeline import TARGET_FIELDS, GeoPackageImporter, GeoPackageImportError
 from .outputs import (
     add_result_layers,
     build_result_layers,
@@ -109,6 +109,57 @@ UNCERTAIN_DUPLICATE_EXPLANATION_STEP6 = (
     "unverändert; die Entscheidung lässt sich mit „Zurück“ noch ändern."
 )
 DUPLICATE_EXAMPLES = 3
+MAPPING_INTRO = (
+    "Die Datenpipeline schlägt vor, welche Spalte deiner Daten in welches Feld der "
+    "Ergebnis-Layer kommt. Prüfe die Vorschläge je Layer: Häkchen = Spalte "
+    "übernehmen, rechts das Zielfeld wählen."
+)
+NO_SUGGESTIONS_TEXT = "Für diese Daten gibt es keine Vorschläge zur Attributzuordnung."
+MAPPING_SAVED_TEXT = (
+    "Zuordnung gespeichert. Auf die Daten wirkt sie, sobald die Datenpipeline das "
+    "Anwenden unterstützt (ARBEITSPLAN M4)."
+)
+MAPPING_APPLIED_TEXT = "Zuordnung übernommen: Die Daten wurden neu zugeordnet."
+
+
+class ReadableNames:
+    """German names from the pipeline (mapping.py); technical names as fallback."""
+
+    def __init__(self, layer=None, field=None, target=None):
+        self._layer, self._field, self._target = layer, field, target
+
+    @staticmethod
+    def _call(function, value):
+        if function is None or value is None:
+            return value
+        try:
+            return function(value) or value
+        except Exception:  # a missing name must not break the step
+            return value
+
+    def layer(self, layer_id):
+        return self._call(self._layer, layer_id)
+
+    def field(self, field):
+        return self._call(self._field, field)
+
+    def target(self, field):
+        return self._call(self._target, field)
+
+
+def readable_names():
+    try:
+        from .mapping import readable_field, readable_layer, readable_target_field
+    except ImportError:
+        return ReadableNames()
+    return ReadableNames(readable_layer, readable_field, readable_target_field)
+
+
+def mapping_detail_text(source_field, examples):
+    """Small line below a mapping row: examples from the data and the column."""
+    shown = [f"„{example}“" for example in tuple(examples or ())[:2] if example not in (None, "")]
+    prefix = f"z. B. {', '.join(shown)} · " if shown else ""
+    return f"{prefix}Spalte {source_field}"
 
 
 def cross_layer_warning_text(count):
@@ -300,13 +351,14 @@ def _create_dock(plugin):
         QgsTask,
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
-    from qgis.PyQt.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+    from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
     from qgis.PyQt.QtGui import QIcon
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
         QButtonGroup,
         QCheckBox,
+        QComboBox,
         QDoubleSpinBox,
         QFileDialog,
         QFrame,
@@ -433,6 +485,7 @@ def _create_dock(plugin):
             scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             scroll.setWidget(self.stack)
             self.scroll = scroll
+            self.stack.installEventFilter(self)
 
             # Messages get their own small scroll area, so long texts (e.g. an
             # unexpected error) stay readable without pushing the buttons away.
@@ -497,6 +550,7 @@ def _create_dock(plugin):
             page.layout.activate()
             self.stack_layout.activate()
             self.stack.updateGeometry()
+            QTimer.singleShot(0, self.fit_wrapped_labels)
             self.step_label.setText(progress_text(index))
             self.update_lamps()
             self.primary_button.setText(PAGE_ACTIONS[index])
@@ -555,6 +609,32 @@ def _create_dock(plugin):
         def mark_all_done(self):
             self.all_done = True
             self.update_lamps()
+
+        def fit_wrapped_labels(self):
+            """Give every wrapped text its full height at the current width.
+
+            Qt underestimates the height of wrapped labels inside nested cards;
+            measuring them after the layout has its width avoids cut-off lines.
+            """
+            if not self.pages:
+                return
+            page = self.pages[self.current]
+            changed = False
+            for label in page.widget.findChildren(QLabel):
+                if not label.wordWrap() or not label.isVisibleTo(page.widget):
+                    continue
+                height = label.heightForWidth(label.width())
+                if height > 0 and label.minimumHeight() != height:
+                    label.setMinimumHeight(height)
+                    changed = True
+            if changed:
+                page.layout.activate()
+                self.stack.updateGeometry()
+
+        def eventFilter(self, watched, event):
+            if watched is self.stack and event.type() == QEvent.Resize:
+                QTimer.singleShot(0, self.fit_wrapped_labels)
+            return super().eventFilter(watched, event)
 
         def set_busy(self, text):
             """Show the busy bar and lock the panel while a step runs."""
@@ -1140,28 +1220,71 @@ def _create_dock(plugin):
             return reject(blocker)
         return True
 
-    # 5 Attributzuordnung
+    # 5 Attributzuordnung: per layer "column -> target field" with examples
     def build_mapping(page):
+        flow = workflow()
+        names = readable_names()
+        intro = QLabel(MAPPING_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        groups = flow.suggestions_by_layer()
+        if not groups:
+            page.layout.addWidget(QLabel(NO_SUGGESTIONS_TEXT))
         inputs = []
-        for suggestion in workflow().attribute_suggestions():
-            accepted = QCheckBox(suggestion.source_field)
-            accepted.setChecked(suggestion.accepted is not False)
-            target = QLineEdit(suggestion.user_value or suggestion.target_field)
-            page.layout.addWidget(accepted)
-            page.layout.addWidget(target)
-            inputs.append((suggestion, accepted, target))
+        for layer_id, suggestions in groups.items():
+            card = QFrame()
+            set_role(card, "issue-info")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(10, 8, 8, 8)
+            title = QLabel(names.layer(layer_id) if layer_id else "Ohne Layer-Angabe")
+            font = title.font()
+            font.setBold(True)
+            title.setFont(font)
+            card_layout.addWidget(title)
+            for suggestion in suggestions:
+                accepted = QCheckBox(names.field(suggestion.source_field))
+                accepted.setChecked(suggestion.accepted is not False)
+                accepted.setToolTip(f"Spalte „{suggestion.source_field}“ übernehmen")
+                accepted.setCursor(Qt.PointingHandCursor)
+                arrow = QLabel("→")
+                target = QComboBox()
+                for field in TARGET_FIELDS:
+                    target.addItem(names.target(field), field)
+                current = suggestion.user_value or suggestion.target_field
+                index = target.findData(current)
+                if index < 0:  # value outside the target schema stays visible
+                    target.addItem(current, current)
+                    index = target.count() - 1
+                target.setCurrentIndex(index)
+                target.setEnabled(accepted.isChecked())
+                accepted.toggled.connect(target.setEnabled)
+                row = QHBoxLayout()
+                row.addWidget(accepted, 1)
+                row.addWidget(arrow)
+                row.addWidget(target, 1)
+                card_layout.addLayout(row)
+                detail = QLabel(mapping_detail_text(suggestion.source_field, suggestion.examples))
+                detail.setWordWrap(True)
+                set_role(detail, "hint")
+                card_layout.addWidget(indented(detail))
+                inputs.append((suggestion, accepted, target))
+            page.layout.addWidget(card)
         page.widgets["inputs"] = inputs
 
     def validate_mapping(page):
+        flow = workflow()
         decisions = {}
         for suggestion, accepted, target in page.widgets["inputs"]:
-            decisions[suggestion.source_field] = (
-                target.text() if accepted.isChecked() else False
+            decisions[(suggestion.layer_id, suggestion.source_field)] = (
+                target.currentData() if accepted.isChecked() else False
             )
         try:
-            workflow().confirm_attribute_suggestions(decisions)
+            flow.confirm_attribute_suggestions(decisions)
         except (KeyError, ValueError) as error:
             return reject(error_text(error))
+        applied = flow.apply_attribute_decisions()
+        dock.next_message = MAPPING_APPLIED_TEXT if applied else MAPPING_SAVED_TEXT
         return True
 
     # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged

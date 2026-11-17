@@ -199,36 +199,80 @@ class GuidedWorkflow:
         """Expose visible, editable attribute proposals from the pipeline."""
         return tuple(self.result.attribute_suggestions)
 
-    def confirm_attribute_suggestions(
-        self, decisions: Mapping[str, object]
-    ) -> Tuple[AttributeSuggestion, ...]:
-        """Apply confirmation or replacement values keyed by source field.
+    def suggestions_by_layer(self) -> Dict[Optional[str], Tuple[AttributeSuggestion, ...]]:
+        """Attribute proposals grouped by their input layer (E2), in data order."""
+        groups: Dict[Optional[str], List[AttributeSuggestion]] = {}
+        for suggestion in self.result.attribute_suggestions:
+            groups.setdefault(suggestion.layer_id, []).append(suggestion)
+        return {layer: tuple(items) for layer, items in groups.items()}
 
+    def confirm_attribute_suggestions(
+        self, decisions: Mapping[object, object]
+    ) -> Tuple[AttributeSuggestion, ...]:
+        """Apply confirmation or replacement values to the proposals.
+
+        Keys are ``(layer_id, source_field)`` pairs, so equal column names in
+        different layers are decided separately. A plain ``source_field`` key
+        still works and applies to every layer with that column.
         A boolean confirms or rejects a proposal. A string replaces the target
         field and confirms it, keeping the decision visible in the contract.
         """
-        known = {suggestion.source_field: suggestion for suggestion in self.result.attribute_suggestions}
-        unknown = set(decisions) - set(known)
+        suggestions = list(self.result.attribute_suggestions)
+        targets: Dict[object, List[AttributeSuggestion]] = {}
+        for key in decisions:
+            if isinstance(key, tuple):
+                layer_id, source_field = key
+                matches = [
+                    s for s in suggestions
+                    if s.layer_id == layer_id and s.source_field == source_field
+                ]
+            else:
+                matches = [s for s in suggestions if s.source_field == key]
+            targets[key] = matches
+        unknown = [key for key, matches in targets.items() if not matches]
         if unknown:
             raise KeyError(
                 "Diese Quellfelder gibt es in den Attributvorschlägen nicht: "
-                + ", ".join(sorted(unknown))
+                + ", ".join(sorted(
+                    f"{key[1]} ({key[0]})" if isinstance(key, tuple) else str(key)
+                    for key in unknown
+                ))
             )
 
-        for source_field, decision in decisions.items():
-            suggestion = known[source_field]
-            if isinstance(decision, bool):
-                suggestion.accepted = decision
-            elif isinstance(decision, str) and decision.strip():
-                suggestion.user_value = decision.strip()
-                suggestion.accepted = True
-            else:
+        for key, decision in decisions.items():
+            source_field = key[1] if isinstance(key, tuple) else key
+            if not isinstance(decision, bool) and not (
+                isinstance(decision, str) and decision.strip()
+            ):
                 raise ValueError(
                     f"Für das Quellfeld „{source_field}“ ist kein Zielfeld eingetragen. "
                     "Bitte ein Zielfeld eintragen oder das Häkchen entfernen, um den "
                     "Vorschlag abzulehnen."
                 )
+            for suggestion in targets[key]:
+                if isinstance(decision, bool):
+                    suggestion.accepted = decision
+                else:
+                    suggestion.user_value = decision.strip()
+                    suggestion.accepted = True
         return self.attribute_suggestions()
+
+    def apply_attribute_decisions(self) -> bool:
+        """Re-harmonize the records with the confirmed mapping (S5, M4).
+
+        Uses the pipeline's ``apply_attribute_decisions`` once it exists and
+        returns ``True``; returns ``False`` while the pipeline cannot do it yet,
+        so the step can say so instead of pretending the data changed.
+        """
+        from . import data_pipeline
+
+        apply = getattr(data_pipeline, "apply_attribute_decisions", None)
+        if apply is None:
+            return False
+        self.result.harmonized_records = apply(self.result)
+        # Step 6 starts again from the newly harmonized records.
+        self._records_before_merge = None
+        return True
 
     # --- Step 4 "Layer prüfen" (W5): all hints, grouped and confirmable ---
 
