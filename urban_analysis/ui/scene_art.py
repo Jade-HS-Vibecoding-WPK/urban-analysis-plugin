@@ -20,7 +20,7 @@ ISLAND_WIDTH = 104
 RABBIT_POS = (70, WATER_Y - 33)       # top-left of the rabbit sprite
 BOBBER_REST_X = 150                   # float in front of the rabbit
 BOBBER_RIGHT_MARGIN = 30              # the long cast lands this far from the right edge
-TITLE_POS = (124, 24)                 # "Urban Analysis" in the sky (baseline)
+TITLE_TOP, TITLE_HEIGHT = 8, 24       # "Urban Analysis" centred in the sky
 FISH_Y = SCENE_HEIGHT - 20
 STEP_LEFT, STEP_RIGHT_MARGIN = 24, 40  # where the step fish swims
 

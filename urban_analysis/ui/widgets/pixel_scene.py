@@ -213,7 +213,9 @@ class PixelScene(QWidget):
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         p.setFont(self.title_font)
         p.setPen(self._colors["title"])
-        p.drawText(art.TITLE_POS[0], art.TITLE_POS[1], self.title)
+        # Always centred in the current panel width.
+        p.drawText(0, art.TITLE_TOP, self.width(), art.TITLE_HEIGHT,
+                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, self.title)
         p.restore()
 
     def _paint_clouds(self, p):

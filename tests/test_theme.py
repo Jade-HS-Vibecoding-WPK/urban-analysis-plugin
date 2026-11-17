@@ -105,12 +105,16 @@ def test_ticked_check_box_shows_an_own_white_pixel_check_mark():
     assert "\\" not in checked  # Qt needs forward slashes
 
 
-def test_toolbar_icon_is_an_own_16x16_pixel_svg():
+def test_toolbar_icon_is_an_own_16x16_pixel_rabbit_head():
     path = Path(icon_path())
-    assert path.name == "erdblock.svg"
+    assert path.name == "hase.svg"
     root = ET.parse(path).getroot()
     assert root.tag == "{http://www.w3.org/2000/svg}svg"
     assert root.get("width") == "16" and root.get("height") == "16"
     assert root.get("shape-rendering") == "crispEdges"
     rects = root.findall("{http://www.w3.org/2000/svg}rect")
-    assert sum(int(rect.get("width")) for rect in rects) == 16 * 16
+    cells = {(int(r.get("x")), int(r.get("y"))) for r in rects}
+    assert len(cells) == len(rects) and all(0 <= x < 16 and 0 <= y < 16 for x, y in cells)
+    fills = {r.get("fill") for r in rects}
+    assert COLORS["accent"] in fills  # red-orange scarf
+    assert COLORS["outline"] in fills and COLORS["cloud"] in fills  # outline, white fur

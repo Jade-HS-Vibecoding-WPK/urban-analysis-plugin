@@ -139,8 +139,8 @@ DRAW_STROKE_RGBA = (47, 111, 176, 230)
 DRAW_FILL_RGBA = (47, 111, 176, 60)
 
 ICON_DIR = Path(__file__).resolve().parent / "icons"
-# Toolbar button: own 16x16 pixel design of an earth block with grass.
-TOOLBAR_ICON_FILE = "erdblock.svg"
+# Toolbar button: own 16x16 pixel rabbit head looking at us, with scarf.
+TOOLBAR_ICON_FILE = "hase.svg"
 # Ticked check boxes: own white pixel check mark on the blue box.
 CHECK_ICON_FILE = "haken.svg"
 # Radio buttons: own pixel circles (7x7 blocks of 2 px).
