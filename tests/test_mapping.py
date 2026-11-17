@@ -2,7 +2,14 @@ import json
 
 import pytest
 
-from urban_analysis.mapping import MappingRulesError, default_mapping_rules, load_mapping_rules
+from urban_analysis.mapping import (
+    MappingRulesError,
+    default_mapping_rules,
+    load_mapping_rules,
+    readable_field,
+    readable_layer,
+    readable_target_field,
+)
 
 
 def test_rules_file_loads_and_knows_alkis_layers():
@@ -40,3 +47,12 @@ def test_broken_rules_file_is_reported(tmp_path):
     path.write_text(json.dumps({"profiles": [{"layers": {"x": {"category_rules": [{"category": "A"}]}}}]}), encoding="utf-8")
     with pytest.raises(MappingRulesError):
         load_mapping_rules(path)
+
+
+def test_readable_names_for_the_user_guidance():
+    assert readable_field("gfk__bez") == "Gebäudefunktion"
+    assert readable_field("unbekannt") == "unbekannt"
+    assert readable_layer("bauwerke_f") == "Bauwerke (Flächen)"
+    assert readable_layer("eigener_layer") == "eigener_layer"
+    assert readable_target_field("object_detail") == "Nutzungsdetail"
+    assert readable_target_field("area_m2") == "Fläche (m²)"
