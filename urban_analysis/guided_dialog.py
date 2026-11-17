@@ -8,7 +8,10 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
+from pathlib import Path
+
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
+from .data_pipeline import GeoPackageImporter, GeoPackageImportError
 from .study_area import (
     DRAW_INSTRUCTIONS,
     StudyAreaError,
@@ -53,13 +56,67 @@ ONLINE_PENDING_MESSAGE = (
     "Bitte vorerst „Lokale Daten“ verwenden."
 )
 LOCAL_DATA_HINT = (
-    "Eigene GeoPackage-Datei (.gpkg) von deinem Rechner. Dateiauswahl und Start "
-    "der Datenpipeline folgen im nächsten Schritt (ARBEITSPLAN W4)."
+    "Eine GeoPackage-Datei (.gpkg) von deinem Rechner, z. B. ALKIS-Daten. "
+    "Pro Durchlauf wird eine Datei geladen."
 )
+CHOOSE_SOURCE_MESSAGE = "Bitte zuerst wählen, woher die Daten kommen: „Lokale Daten“ oder „Online-Suche“."
+CHOOSE_FILE_MESSAGE = "Bitte zuerst mit „Datei wählen …“ eine GeoPackage-Datei auswählen."
+MISSING_AREA_MESSAGE = (
+    "Projekt-CRS und Untersuchungsgebiet fehlen. Bitte mit „Zurück“ Schritt 1 und 2 "
+    "abschließen."
+)
+FILE_DIALOG_TITLE = "GeoPackage-Datei wählen"
+FILE_DIALOG_FILTER = "GeoPackage (*.gpkg);;Alle Dateien (*)"
+LAST_FOLDER_SETTING = "urban_analysis/last_geopackage_folder"
+ARROW_CLOSED = "▸"
+ARROW_OPEN = "▾"
+PANEL_ANIMATION_MS = 180
 BUSY_TICK_MS = 120
 INDENT_PX = 22
 MIN_CONTENT_WIDTH = 300
 MESSAGE_MAX_HEIGHT = 140
+
+
+def format_megabytes(size_bytes):
+    """File size in MB with a German decimal comma, e.g. '350,2 MB'."""
+    text = f"{size_bytes / (1024 * 1024):,.1f}"
+    return text.replace(",", " ").replace(".", ",") + " MB"
+
+
+def file_summary_text(name, folder, size_bytes):
+    """Feedback after choosing a file: name, size and (shortened) folder."""
+    return f"{name} – {format_megabytes(size_bytes)}\nOrdner: {shorten_middle(str(folder))}"
+
+
+def shorten_middle(text, max_chars=40):
+    """Shorten a long path in the middle, e.g. 'C:\\Users\\…\\Daten'."""
+    if len(text) <= max_chars:
+        return text
+    keep = max_chars - 1
+    head = keep // 2
+    return text[:head] + "…" + text[len(text) - (keep - head):]
+
+
+def import_error_text(file_name, error, full_path=None):
+    """Readable German message when the pipeline cannot read a file.
+
+    The full local path is replaced by the file name, so the message stays
+    short and does not show the user's folder structure.
+    """
+    reason = error_text(error)
+    if full_path:
+        reason = reason.replace(str(full_path), file_name)
+    return (
+        f"Die Datei „{file_name}“ konnte nicht geladen werden.\n"
+        f"Grund (Datenpipeline): {reason}\n"
+        "Bitte prüfen, ob es eine gültige GeoPackage-Datei (.gpkg) ist, oder eine "
+        "andere Datei wählen."
+    )
+
+
+def choice_label(text, opened):
+    """Text of a choice button with an arrow that shows whether it is open."""
+    return f"{ARROW_OPEN if opened else ARROW_CLOSED}  {text}"
 
 
 def make_texts_selectable(widget):
@@ -145,13 +202,22 @@ def set_dock_visible(plugin, visible):
 
 def _create_dock(plugin):
     """Build the side panel with progress, pages and one main action per page."""
-    from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsProject
+    from qgis.core import (
+        Qgis,
+        QgsApplication,
+        QgsCoordinateReferenceSystem,
+        QgsProject,
+        QgsSettings,
+        QgsTask,
+    )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
-    from qgis.PyQt.QtCore import Qt, QTimer
+    from qgis.PyQt.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
     from qgis.PyQt.QtWidgets import (
+        QWIDGETSIZE_MAX,
         QButtonGroup,
         QCheckBox,
         QDoubleSpinBox,
+        QFileDialog,
         QFrame,
         QHBoxLayout,
         QLabel,
@@ -197,6 +263,8 @@ def _create_dock(plugin):
             self.settings = {}
             self.draw_tool = None
             self.previous_map_tool = None
+            self.import_task = None  # running background import (step 3)
+            self.closing = False
 
             # The whole plugin shares one style (theme.py).
             self.setStyleSheet(panel_stylesheet())
@@ -346,6 +414,13 @@ def _create_dock(plugin):
             set_role(self.message, kind)
             self.message.setText(text)
             self.message_scroll.show()
+            # Fit the box to the text; longer texts scroll inside the box.
+            width = max(self.message_scroll.viewport().width(), 200)
+            height = self.message.heightForWidth(width)
+            if height <= 0:
+                height = self.message.sizeHint().height()
+            frame = 2 * self.message_scroll.frameWidth()
+            self.message_scroll.setFixedHeight(min(height + frame + 4, MESSAGE_MAX_HEIGHT))
 
         def clear_message(self):
             self.message.clear()
@@ -360,11 +435,13 @@ def _create_dock(plugin):
             self.busy_timer.start()
             self.primary_button.setEnabled(False)
             self.back_button.setEnabled(False)
+            self.stack.setEnabled(False)
 
         def clear_busy(self):
             self.busy_timer.stop()
             self.busy_label.hide()
             self.busy_bar.hide()
+            self.stack.setEnabled(True)
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
 
@@ -405,6 +482,10 @@ def _create_dock(plugin):
 
         def cleanup(self):
             """Called when the plugin is unloaded."""
+            self.closing = True
+            if self.import_task is not None:
+                self.import_task.cancel()
+                self.import_task = None
             self.busy_timer.stop()
             self.stop_drawing()
 
@@ -635,49 +716,175 @@ def _create_dock(plugin):
         )
         return True
 
-    # 3 Daten laden: local GeoPackage (W4) or online search (later extension)
-    def build_data(page):
-        use_local = QRadioButton(SOURCE_LOCAL_LABEL)
-        use_online = QRadioButton(SOURCE_ONLINE_LABEL)
-        use_local.setChecked(True)
-        group = QButtonGroup(page.widget)
-        group.addButton(use_local)
-        group.addButton(use_online)
-        local_hint = QLabel(LOCAL_DATA_HINT)
-        local_hint.setWordWrap(True)
-        set_role(local_hint, "hint")
-        online_hint = QLabel(ONLINE_PENDING_MESSAGE)
-        online_hint.setWordWrap(True)
-        set_role(online_hint, "hint")
+    # 3 Daten laden: two choice buttons on top of each other; the chosen one
+    # opens a panel below it (local: file chooser, online: later extension).
+    def choice_with_panel(page, key, text):
+        button = QPushButton(choice_label(text, False))
+        button.setCheckable(True)
+        button.setCursor(Qt.PointingHandCursor)
+        set_role(button, "choice")
+        panel = QFrame()
+        set_role(panel, "panel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(12, 8, 12, 12)
+        panel.setMaximumHeight(0)
+        panel.hide()
+        page.layout.addWidget(button)
+        page.layout.addWidget(panel)
+        page.widgets[f"{key}_button"] = button
+        page.widgets[f"{key}_panel"] = panel
 
+        def toggled(checked):
+            button.setText(choice_label(text, checked))
+            animate_panel(page, key, panel, checked)
+
+        button.toggled.connect(toggled)
+        return panel_layout
+
+    def animate_panel(page, key, panel, opening):
+        """Open or close a panel with a short height animation."""
+        previous = page.widgets.get(f"{key}_animation")
+        if previous is not None:
+            previous.stop()
+        if opening:
+            panel.show()
+            panel.setMaximumHeight(QWIDGETSIZE_MAX)
+            panel.adjustSize()
+            end = panel.sizeHint().height()
+            if panel.hasHeightForWidth() and panel.width() > 0:
+                end = max(end, panel.heightForWidth(panel.width()))
+            start = 0
+        else:
+            start, end = panel.height(), 0
+        animation = QPropertyAnimation(panel, b"maximumHeight", panel)
+        animation.setDuration(PANEL_ANIMATION_MS)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.setStartValue(start)
+        animation.setEndValue(end)
+
+        def done():
+            if opening:
+                panel.setMaximumHeight(QWIDGETSIZE_MAX)  # may grow (file info)
+            else:
+                panel.hide()
+
+        animation.finished.connect(done)
+        page.widgets[f"{key}_animation"] = animation
+        animation.start()
+
+    def build_data(page):
         question = QLabel("Woher sollen die Daten kommen?")
         question.setWordWrap(True)
         page.layout.addWidget(question)
-        page.layout.addWidget(use_local)
-        page.layout.addWidget(indented(local_hint))
-        page.layout.addWidget(use_online)
-        page.layout.addWidget(indented(online_hint))
+
+        local = choice_with_panel(page, "local", SOURCE_LOCAL_LABEL)
+        local_hint = QLabel(LOCAL_DATA_HINT)
+        local_hint.setWordWrap(True)
+        set_role(local_hint, "hint")
+        choose_button = QPushButton("Datei wählen …")
+        set_role(choose_button, "secondary")
+        choose_button.setCursor(Qt.PointingHandCursor)
+        file_info = QLabel("Noch keine Datei gewählt.")
+        file_info.setWordWrap(True)
+        set_role(file_info, "hint")
+        local.addWidget(local_hint)
+        local.addWidget(choose_button)
+        local.addWidget(file_info)
+
+        online = choice_with_panel(page, "online", SOURCE_ONLINE_LABEL)
+        online_hint = QLabel(ONLINE_PENDING_MESSAGE)
+        online_hint.setWordWrap(True)
+        set_role(online_hint, "hint")
+        online.addWidget(online_hint)
+
+        group = QButtonGroup(page.widget)
+        group.setExclusive(True)
+        group.addButton(page.widgets["local_button"])
+        group.addButton(page.widgets["online_button"])
         page.widgets.update(
-            use_local=use_local,
-            use_online=use_online,
-            group=group,
-            local_hint=local_hint,
-            online_hint=online_hint,
+            group=group, choose_button=choose_button, file_info=file_info, path=None
         )
+        choose_button.clicked.connect(lambda: choose_file(page))
 
-        def refresh(*_args):
-            local_hint.setVisible(use_local.isChecked())
-            online_hint.setVisible(use_online.isChecked())
-
-        use_local.toggled.connect(refresh)
-        refresh()
+    def choose_file(page):
+        """Open the system file dialog and remember the chosen GeoPackage."""
+        settings = QgsSettings()
+        start = settings.value(LAST_FOLDER_SETTING, str(Path.home()))
+        path, _filter = QFileDialog.getOpenFileName(
+            dock, FILE_DIALOG_TITLE, str(start), FILE_DIALOG_FILTER
+        )
+        if not path:
+            return  # dialog closed without a choice; keep the previous file
+        chosen = Path(path)
+        settings.setValue(LAST_FOLDER_SETTING, str(chosen.parent))
+        page.widgets["path"] = chosen
+        info = page.widgets["file_info"]
+        info.setText(file_summary_text(chosen.name, chosen.parent, chosen.stat().st_size))
+        info.setToolTip(str(chosen))
+        set_role(info, "status")
+        dock.clear_message()
 
     def validate_data(page):
-        if page.widgets["use_online"].isChecked():
-            return reject(ONLINE_PENDING_MESSAGE)
-        if plugin.workflow is None:
-            return reject(NO_DATA_MESSAGE)
-        return True
+        widgets = page.widgets
+        if widgets["online_button"].isChecked():
+            dock.show_message(ONLINE_PENDING_MESSAGE, kind="info")
+            return False
+        if not widgets["local_button"].isChecked():
+            if plugin.workflow is not None:
+                return True  # data already passed in via the Python console
+            return reject(CHOOSE_SOURCE_MESSAGE)
+        if widgets["path"] is None:
+            if plugin.workflow is not None:
+                return True
+            return reject(CHOOSE_FILE_MESSAGE)
+        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
+            return reject(MISSING_AREA_MESSAGE)
+        start_import(widgets["path"])
+        return False  # the page changes when the background import is done
+
+    def start_import(path):
+        """Run the pipeline (S1) as a QGIS background task with a busy bar."""
+        settings = dict(dock.settings)
+        dock.set_busy(f"Lade „{path.name}“ … Das kann bei großen Dateien etwas dauern.")
+
+        def run_import(_task):
+            return GeoPackageImporter().import_file(
+                path,
+                project_crs=settings["project_crs"],
+                study_area_wkt=settings["study_area_wkt"],
+                buffer_meters=settings["buffer_meters"],
+            )
+
+        def finished(exception, result=None):
+            dock.import_task = None
+            if dock.closing:
+                return
+            try:
+                dock.clear_busy()
+                if exception is not None:
+                    if isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
+                        dock.show_message(import_error_text(path.name, exception, path))
+                    else:
+                        dock.show_unexpected_error(UI_LABELS["load_data"], exception)
+                    return
+                if result is None:
+                    dock.show_message("Das Laden wurde abgebrochen.", kind="info")
+                    return
+                plugin.start_workflow(result)
+                dock.show_page(3)
+                dock.show_message(
+                    f"„{path.name}“ geladen: {len(result.layers)} Layer. "
+                    "Bitte die Prüfhinweise ansehen.",
+                    kind="info",
+                )
+            except Exception as error:  # show every program error visibly
+                dock.show_unexpected_error(UI_LABELS["load_data"], error)
+
+        task = QgsTask.fromFunction(
+            f"Urban Analysis: {path.name} laden", run_import, on_finished=finished
+        )
+        dock.import_task = task
+        QgsApplication.taskManager().addTask(task)
 
     # 4 Layer prüfen
     def build_review(page):

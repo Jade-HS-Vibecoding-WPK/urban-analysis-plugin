@@ -51,6 +51,8 @@ RADIUS_PX = 4
 ROLES = (
     "primary",    # one main action per page
     "secondary",  # other buttons
+    "choice",     # large choice button that opens a panel below it
+    "panel",      # panel that opens below a choice button
     "heading",    # step title
     "hint",       # explanatory text
     "status",     # live feedback such as the area summary
@@ -155,6 +157,41 @@ QPushButton[uaRole="primary"]:pressed {{
     background-color: {c['accent_pressed']};
     {pressed_padding}
 }}
+/* Choice buttons: full width, left aligned; the chosen one is highlighted
+   and its panel opens directly below it. */
+QPushButton[uaRole="choice"] {{
+    background-color: {c['surface']};
+    border: 1px solid {c['border_strong']};
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: bold;
+}}
+QPushButton[uaRole="choice"]:hover {{
+    background-color: {c['accent_light']};
+    border-color: {c['accent']};
+}}
+QPushButton[uaRole="choice"]:pressed {{
+    background-color: {c['button_pressed']};
+    padding: 11px 12px 9px 12px;
+}}
+QPushButton[uaRole="choice"]:checked {{
+    background-color: {c['accent_light']};
+    border: 2px solid {c['accent']};
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
+    color: {c['accent_pressed']};
+}}
+QFrame[uaRole="panel"] {{
+    background-color: {c['surface']};
+    border: 2px solid {c['accent']};
+    border-top: none;
+    border-bottom-left-radius: {r}px;
+    border-bottom-right-radius: {r}px;
+}}
+QFrame[uaRole="panel"] QLabel, QFrame[uaRole="panel"] QWidget {{
+    background-color: {c['surface']};
+}}
+
 QPushButton:disabled, QPushButton[uaRole="primary"]:disabled {{
     background-color: {c['disabled']};
     color: {c['disabled_text']};
@@ -186,6 +223,36 @@ QComboBox QAbstractItemView {{
 QRadioButton, QCheckBox {{
     background: transparent;
     spacing: 6px;
+}}
+/* Clearly visible circles and boxes, filled blue when chosen. */
+QRadioButton::indicator, QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    background-color: {c['surface']};
+    border: 2px solid {c['border_strong']};
+}}
+QRadioButton::indicator {{
+    border-radius: 9px;
+}}
+QCheckBox::indicator {{
+    border-radius: 3px;
+}}
+QRadioButton::indicator:hover, QCheckBox::indicator:hover {{
+    border-color: {c['accent']};
+}}
+QRadioButton::indicator:checked {{
+    background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {c['accent']}, stop:0.55 {c['accent']}, stop:0.65 {c['surface']},
+        stop:1 {c['surface']});
+    border-color: {c['accent']};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {c['accent']};
+    border-color: {c['accent']};
+}}
+QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
+    background-color: {c['disabled']};
+    border-color: {c['border']};
 }}
 QRadioButton:disabled, QCheckBox:disabled {{
     color: {c['disabled_text']};
