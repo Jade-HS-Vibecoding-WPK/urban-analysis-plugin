@@ -54,7 +54,9 @@ def test_overview_shows_facts_instead_of_coordinates():
 
 
 def test_planned_layers_list_only_selected_layers_with_counts():
-    rows = [value for _label, value in planned_layer_rows(make_workflow(), NAMES)]
+    planned = planned_layer_rows(make_workflow(), NAMES)
+    assert [row[2] for row in planned] == ["gebaeude", "strassen"]  # layer icons
+    rows = [row[1] for row in planned]
     assert rows == ["Gebäude – 1 200 Objekte", "Straßen – 1 Objekt"]
 
 
@@ -68,7 +70,9 @@ def test_outputs_say_what_is_not_connected_yet():
 def test_result_rows_list_created_layers_and_skipped_objects():
     report = ResultLayerReport("gebaeude", "Gebäude", feature_count=18930)
     report.skip("ohne Geometrie")
-    rows = [value for _label, value in result_rows([report])]
+    created = result_rows([report], {"gebaeude": "Gebäude"})
+    assert created[0][2] == "gebaeude"  # layer icon
+    rows = [row[1] for row in created]
     assert rows == ["Gebäude – 18 930 Objekte", "Gebäude: 1 nicht übernommen (ohne Geometrie)"]
 
 

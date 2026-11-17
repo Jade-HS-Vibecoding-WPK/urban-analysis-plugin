@@ -34,11 +34,13 @@ from .theme import (
     set_role,
 )
 from .ui_contract import UI_LABELS
+from .ui.layer_icons import LAYER_ICONS, icon_key
 from .user_guidance import (
     DECIDED_IN_HARMONIZATION,
     SEVERITY_LABELS,
     SEVERITY_ORDER,
     describe_group,
+    issue_table_name,
 )
 
 
@@ -169,15 +171,32 @@ def overview_rows(flow, area_ha, names):
 
 
 def planned_layer_rows(flow, names):
-    """One row per result layer that will be created, with its object count."""
+    """One row per result layer that will be created, with its object count
+    and its icon key as third element."""
     counts = {}
     for record in flow.result.harmonized_records:
         counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
     rows = []
     for descriptor in flow.result.selected_layers():
         name = result_layer_name(descriptor, names.layer)
-        rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}"))
+        rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}",
+                     icon_key(descriptor.layer_id, descriptor.category)))
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
+
+
+def layer_icon_key(flow, layer_id):
+    """Icon key of a layer from its descriptor (category) or its id."""
+    for descriptor in flow.result.layers:
+        if descriptor.layer_id == layer_id:
+            return icon_key(layer_id, descriptor.category)
+    return icon_key(layer_id)
+
+
+def issue_icon_key(flow, issue):
+    """Icon key for a review hint, or None if it belongs to no single layer."""
+    candidates = set(LAYER_ICONS) | {d.layer_id for d in flow.result.layers}
+    table = issue_table_name(issue.message, sorted(candidates))
+    return layer_icon_key(flow, table) if table else None
 
 
 def output_rows(output):
@@ -193,9 +212,15 @@ def output_rows(output):
     )
 
 
-def result_rows(reports):
-    """Rows for the 'Fertig' view: created layers and anything not taken over."""
-    rows = [(None, f"{report.name} – {objects_text(report.feature_count)}") for report in reports]
+def result_rows(reports, categories=None):
+    """Rows for the 'Fertig' view: created layers (with icon key) and anything
+    not taken over.  ``categories`` maps layer_id -> category."""
+    categories = categories or {}
+    rows = [
+        (None, f"{report.name} – {objects_text(report.feature_count)}",
+         icon_key(report.layer_id, categories.get(report.layer_id)))
+        for report in reports
+    ]
     for report in reports:
         for reason, count in report.skipped.items():
             rows.append((None, f"{report.name}: {format_count(count)} nicht übernommen ({reason})"))
@@ -463,6 +488,7 @@ def _create_dock(plugin):
 
     from .ui.widgets.pixel_button import PixelButton
     from .ui.widgets.pixel_scene import PixelScene
+    from .ui.widgets.icons import icon_size, layer_icon, with_icon
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
@@ -1304,7 +1330,8 @@ def _create_dock(plugin):
         card_layout.setContentsMargins(10, 6, 8, 6)
         text = QLabel(issue.message)
         text.setWordWrap(True)
-        card_layout.addWidget(text)
+        key = issue_icon_key(flow, issue)
+        card_layout.addWidget(with_icon(key, text) if key else text)
         details = []
         if issue.rule:
             details.append(f"Regel: {issue.rule}")
@@ -1359,7 +1386,7 @@ def _create_dock(plugin):
             font = title.font()
             font.setBold(True)
             title.setFont(font)
-            card_layout.addWidget(title)
+            card_layout.addWidget(with_icon(layer_icon_key(flow, layer_id), title))
             for suggestion in suggestions:
                 accepted = QCheckBox(names.field(suggestion.source_field))
                 accepted.setChecked(suggestion.accepted is not False)
@@ -1452,7 +1479,7 @@ def _create_dock(plugin):
         font = title.font()
         font.setBold(True)
         title.setFont(font)
-        card_layout.addWidget(title)
+        card_layout.addWidget(with_icon(layer_icon_key(flow, layer.table_name), title))
         for group, records in layer.groups[:DUPLICATE_EXAMPLES]:
             example = QLabel(f"• {describe_group(records, result_label)}")
             example.setWordWrap(True)
@@ -1518,11 +1545,15 @@ def _create_dock(plugin):
     def build_topic(page):
         topic_input = QLineEdit(workflow().result.selected_topic or "Siedlungsstruktur")
         category_list = QListWidget()
+        category_list.setIconSize(icon_size())
         for category in workflow().recognized_categories():
-            item = QListWidgetItem(category)
+            item = QListWidgetItem(layer_icon(icon_key(category=category)), category)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)
             category_list.addItem(item)
+        # show all categories at once (no inner scrolling)
+        rows = max(category_list.count(), 1)
+        category_list.setMinimumHeight(rows * (icon_size().height() + 4) + 8)
         confirm_missing = QCheckBox(UI_LABELS["continue_incomplete"])
         page.layout.addWidget(QLabel(UI_LABELS["topic"]))
         page.layout.addWidget(topic_input)
@@ -1582,10 +1613,12 @@ def _create_dock(plugin):
         font.setBold(True)
         heading.setFont(font)
         card_layout.addWidget(heading)
-        for label, value in rows:
+        for row in rows:
+            label, value = row[0], row[1]
             line = QLabel(f"{label}: {value}" if label else value)
             line.setWordWrap(True)
-            card_layout.addWidget(line)
+            # optional third element: icon key of a layer
+            card_layout.addWidget(with_icon(row[2], line) if len(row) > 2 and row[2] else line)
         return card
 
     def study_area_hectares(result):
@@ -1603,7 +1636,9 @@ def _create_dock(plugin):
             set_role(done, "status")
             page.layout.addWidget(done)
             page.layout.addWidget(summary_card(
-                "Angelegte Ergebnis-Layer", result_rows(dock.last_reports)))
+                "Angelegte Ergebnis-Layer",
+                result_rows(dock.last_reports,
+                            {d.layer_id: d.category for d in flow.result.layers})))
             hint = QLabel(done_hint_text(result_group_name(flow.result.selected_topic)))
             hint.setWordWrap(True)
             set_role(hint, "hint")

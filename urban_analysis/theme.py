@@ -334,6 +334,22 @@ QCheckBox::indicator {{
 QCheckBox::indicator:hover {{
     background-color: {c['selected_light']};
 }}
+QListView::indicator {{
+    width: 14px;
+    height: 14px;
+    background-color: {c['surface']};
+    border: 2px solid {c['outline']};
+    border-radius: {r}px;
+}}
+QListView::indicator:checked {{
+    background-color: {c['selected']};
+    border-color: {c['selected']};
+    image: url("{check_icon}");
+}}
+QListView::item:selected {{
+    background-color: {c['selected_light']};
+    color: {c['text']};
+}}
 QCheckBox::indicator:checked {{
     background-color: {c['selected']};
     border-color: {c['selected']};
