@@ -366,6 +366,7 @@ class GeoPackageImporter:
             (field for field in layer.fields if _normalized(field) in {"fid", "id", "rowid"}),
             None,
         )
+        duplicate_count = 0
         for index, row in enumerate(layer.rows, start=1):
             attributes: Dict[str, Any] = {
                 "source_name": str(file_path),
@@ -378,14 +379,7 @@ class GeoPackageImporter:
             }
             duplicate_key = tuple(attributes[field] for field in TARGET_FIELDS)
             if duplicate_key in seen:
-                issues.append(
-                    ValidationIssue(
-                        code="duplicate-row",
-                        message=f"Exakte Dublette in Layer {layer.table_name} wurde entfernt.",
-                        severity="warning",
-                        rule="Exakte Attribute",
-                    )
-                )
+                duplicate_count += 1
                 continue
             seen.add(duplicate_key)
             records.append(
@@ -394,6 +388,18 @@ class GeoPackageImporter:
                     source_row_id=row.get(row_id_column, index) if row_id_column else index,
                     attributes=attributes,
                     geometry=row.get(geometry_column) if geometry_column else None,
+                )
+            )
+        if duplicate_count:
+            issues.append(
+                ValidationIssue(
+                    code="duplicate-row",
+                    message=(
+                        f"{duplicate_count} exakte Dublette(n) in Layer "
+                        f"{layer.table_name} wurden entfernt."
+                    ),
+                    severity="warning",
+                    rule="Exakte Attribute",
                 )
             )
         return records
