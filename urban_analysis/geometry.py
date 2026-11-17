@@ -16,7 +16,7 @@ import math
 import re
 import struct
 from dataclasses import dataclass
-from typing import Iterator, List, Optional, Sequence, Tuple
+from typing import Iterator, List, Optional, Sequence, Tuple, Union
 
 
 Point = Tuple[float, float]
@@ -341,6 +341,42 @@ def read_geometry(value: object) -> Optional[Geometry]:
         if not value.strip():
             return None
         return parse_wkt(value)
+    raise GeometryError(f"Nicht lesbarer Geometriewert vom Typ {type(value).__name__}")
+
+
+def plain_geometry(value: object) -> Optional[Union[bytes, str]]:
+    """Return a stored geometry in a form QGIS can read directly.
+
+    Interface S6 for the user-guidance branch:
+
+    * GeoPackage binary (``GP`` header) -> plain WKB ``bytes`` without header,
+      for ``QgsGeometry.fromWkb``,
+    * plain WKB -> the same ``bytes``,
+    * WKT text -> the stripped ``str``, for ``QgsGeometry.fromWkt``,
+    * no geometry (``None``, empty text, empty GeoPackage geometry) -> ``None``.
+
+    Raises ``GeometryError`` for a damaged GeoPackage header.
+    """
+    if value is None:
+        return None
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        data = bytes(value)
+        if data[:2] != b"GP":
+            return data
+        if len(data) < 8:
+            raise GeometryError("GeoPackage-Geometrie ist unvollständig")
+        flags = data[3]
+        envelope_size = _GPKG_ENVELOPE_SIZES.get((flags >> 1) & 0b111)
+        if envelope_size is None or len(data) < 8 + envelope_size:
+            raise GeometryError("Ungültiger GeoPackage-Envelope")
+        if flags & 0b10000:
+            return None
+        return data[8 + envelope_size :]
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
     raise GeometryError(f"Nicht lesbarer Geometriewert vom Typ {type(value).__name__}")
 
 

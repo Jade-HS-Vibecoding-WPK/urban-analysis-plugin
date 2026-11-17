@@ -7,7 +7,9 @@ from urban_analysis.geometry import (
     GeometryError,
     distance,
     parse_gpkg_geometry,
+    parse_wkb,
     parse_wkt,
+    plain_geometry,
     read_geometry,
     validate_study_area,
     within_distance,
@@ -96,3 +98,30 @@ def test_validates_study_area_polygon():
     assert validate_study_area(SQUARE) is None
     assert validate_study_area(parse_wkt("LINESTRING (0 0, 1 1)"))
     assert validate_study_area(parse_wkt("POLYGON ((0 0, 1 0, 1 1, 0 1))"))
+
+
+def test_plain_geometry_strips_the_geopackage_header():
+    wkb = wkb_polygon([(0, 0), (1, 0), (1, 1), (0, 0)])
+    assert plain_geometry(gpkg_blob(wkb, envelope=(0, 1, 0, 1))) == wkb
+    assert plain_geometry(gpkg_blob(wkb_point(3, 4))) == wkb_point(3, 4)
+    assert parse_wkb(plain_geometry(gpkg_blob(wkb))).polygons == parse_gpkg_geometry(gpkg_blob(wkb)).polygons
+
+
+def test_plain_geometry_passes_wkb_and_wkt_through():
+    assert plain_geometry(wkb_point(1, 2)) == wkb_point(1, 2)
+    assert plain_geometry(memoryview(wkb_point(1, 2))) == wkb_point(1, 2)
+    assert plain_geometry("  Point (1 2) ") == "Point (1 2)"
+
+
+def test_plain_geometry_returns_none_without_geometry():
+    assert plain_geometry(None) is None
+    assert plain_geometry("   ") is None
+    empty_flag = b"GP\x00" + bytes([0b10001]) + struct.pack("<i", 25832) + wkb_point(0, 0)
+    assert plain_geometry(empty_flag) is None
+
+
+def test_plain_geometry_rejects_damaged_header():
+    with pytest.raises(GeometryError):
+        plain_geometry(b"GP\x00\x03" + b"\x00" * 6)
+    with pytest.raises(GeometryError):
+        plain_geometry(12345)
