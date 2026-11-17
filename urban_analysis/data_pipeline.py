@@ -13,7 +13,7 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .contracts import (
     AttributeSuggestion,
@@ -228,6 +228,29 @@ def _coerce_year(value: Any) -> Optional[int]:
         return None
 
 
+#: Share of the progress bar used for reading and clipping; the rest is
+#: harmonisation, which is much faster.
+READ_SHARE = 0.9
+#: Report clipping progress after this many rows.
+PROGRESS_EVERY_ROWS = 1000
+
+
+class _Progress:
+    """Forward a 0..1 fraction to an optional callback, rising and throttled."""
+
+    def __init__(self, callback: Optional[Callable[[float], None]]):
+        self.callback = callback
+        self.last = -1.0
+
+    def report(self, fraction: float) -> None:
+        if self.callback is None:
+            return
+        fraction = min(1.0, max(self.last, fraction, 0.0))
+        if fraction - self.last >= 0.01 or (fraction == 1.0 and self.last < 1.0):
+            self.last = fraction
+            self.callback(fraction)
+
+
 class GeoPackageImporter:
     """Import and harmonize local GeoPackage feature layers."""
 
@@ -242,8 +265,15 @@ class GeoPackageImporter:
         project_crs: str,
         study_area_wkt: str,
         buffer_meters: float = MVP_DEFAULT_BUFFER_METERS,
+        progress: Optional[Callable[[float], None]] = None,
     ) -> PipelineResult:
-        """Return a contract result for all feature tables in ``path``."""
+        """Return a contract result for all feature tables in ``path``.
+
+        ``progress`` is called with a rising fraction from 0.0 to 1.0, e.g.
+        to drive a progress bar.  It is called from the thread that runs the
+        import, at most about a hundred times.
+        """
+        tracker = _Progress(progress)
         file_path = Path(path)
         if not project_crs.strip():
             raise ValueError("A project CRS is required")
@@ -254,6 +284,7 @@ class GeoPackageImporter:
         if not file_path.is_file():
             raise GeoPackageImportError(f"GeoPackage does not exist: {file_path}")
 
+        tracker.report(0.0)
         study_area, area_error = self._study_area(study_area_wkt, buffer_meters)
         issues: List[ValidationIssue] = []
         if area_error:
@@ -272,7 +303,7 @@ class GeoPackageImporter:
 
         try:
             with _open_read_only(file_path) as connection:
-                layers = self._read_layers(connection, study_area, project_crs.strip(), issues)
+                layers = self._read_layers(connection, study_area, project_crs.strip(), issues, tracker)
         except sqlite3.Error as exc:
             raise GeoPackageImportError(f"Unable to read GeoPackage {file_path}: {exc}") from exc
 
@@ -293,7 +324,8 @@ class GeoPackageImporter:
         records: List[HarmonizedRecord] = []
         layers_without_source: List[str] = []
         layers_without_category: List[str] = []
-        for layer in layers:
+        for layer_index, layer in enumerate(layers, start=1):
+            tracker.report(READ_SHARE + (1 - READ_SHARE) * (layer_index - 1) / len(layers))
             profile = self.mapping_rules.profile_for(layer.table_name, layer.fields)
             category = (
                 profile.category if profile is not None
@@ -359,6 +391,7 @@ class GeoPackageImporter:
                 )
             )
 
+        tracker.report(1.0)
         return PipelineResult(
             contract_version=self.contract_version,
             project_crs=project_crs.strip(),
@@ -389,8 +422,13 @@ class GeoPackageImporter:
         study_area: Optional[StudyArea],
         project_crs: str,
         issues: List[ValidationIssue],
+        tracker: Optional[_Progress] = None,
     ) -> List[GeoPackageLayer]:
+        tracker = tracker or _Progress(None)
         tables = self._feature_tables(connection)
+        row_counts = self._row_counts(connection, tables) if tracker.callback else {}
+        total_rows = sum(row_counts.values()) or 1
+        rows_before = 0
         layers: List[GeoPackageLayer] = []
         for table_name, geometry_type, srs_id in tables:
             quoted_table = '"' + table_name.replace('"', '""') + '"'
@@ -421,7 +459,16 @@ class GeoPackageImporter:
                     )
                 )
             elif study_area is not None and crs_usable:
-                rows = self._clip_rows(connection, quoted_table, display_name, geometry_column, study_area, issues)
+                start = rows_before
+
+                def on_rows(done: int, start: int = start) -> None:
+                    tracker.report(READ_SHARE * (start + done) / total_rows)
+
+                rows = self._clip_rows(
+                    connection, quoted_table, display_name, geometry_column, study_area, issues, on_rows
+                )
+            rows_before += row_counts.get(table_name, 0)
+            tracker.report(READ_SHARE * rows_before / total_rows)
             layers.append(
                 GeoPackageLayer(
                     table_name, geometry_type, source_srs, columns, tuple(rows), geometry_column, primary_key
@@ -437,6 +484,7 @@ class GeoPackageImporter:
         geometry_column: str,
         study_area: StudyArea,
         issues: List[ValidationIssue],
+        on_rows: Optional[Callable[[int], None]] = None,
     ) -> List[Mapping[str, Any]]:
         """Keep rows whose geometry lies within the buffered study area."""
         buffer = study_area.buffer_meters
@@ -447,6 +495,8 @@ class GeoPackageImporter:
         names = tuple(column[0] for column in cursor.description or ())
         for row in cursor:
             total += 1
+            if on_rows is not None and total % PROGRESS_EVERY_ROWS == 0:
+                on_rows(total)
             values = dict(zip(names, row))
             raw_geometry = values.get(geometry_column)
             if isinstance(raw_geometry, bytes):
@@ -564,6 +614,20 @@ class GeoPackageImporter:
             )
             return False
         return True
+
+    @staticmethod
+    def _row_counts(
+        connection: sqlite3.Connection, tables: Sequence[Tuple[str, str, Optional[int]]]
+    ) -> Dict[str, int]:
+        """Number of rows per feature table, to weight the progress."""
+        counts: Dict[str, int] = {}
+        for table_name, _geometry_type, _srs_id in tables:
+            quoted_table = '"' + table_name.replace('"', '""') + '"'
+            try:
+                counts[table_name] = connection.execute(f"SELECT count(*) FROM {quoted_table}").fetchone()[0]
+            except sqlite3.Error:
+                counts[table_name] = 0
+        return counts
 
     @staticmethod
     def _feature_tables(connection: sqlite3.Connection) -> List[Tuple[str, str, Optional[int]]]:
