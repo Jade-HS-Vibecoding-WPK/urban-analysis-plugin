@@ -33,13 +33,20 @@ class LayerDescriptor:
 
 @dataclass
 class AttributeSuggestion:
-    """A visible, user-editable proposal for mapping a source attribute."""
+    """A visible, user-editable proposal for mapping a source attribute.
+
+    ``layer_id`` names the input layer the source field belongs to, so equal
+    field names in different layers can be shown and confirmed separately.
+    ``examples`` holds up to two sample values from the data for display.
+    """
 
     source_field: str
     target_field: str
     confidence: float
     accepted: Optional[bool] = None
     user_value: Optional[str] = None
+    layer_id: Optional[str] = None
+    examples: Tuple[str, ...] = ()
 
 
 @dataclass

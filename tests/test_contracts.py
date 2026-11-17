@@ -2,6 +2,7 @@
 
 from urban_analysis.contracts import (
     MVP_DEFAULT_BUFFER_METERS,
+    AttributeSuggestion,
     LayerDescriptor,
     PipelineResult,
 )
@@ -38,3 +39,15 @@ def test_ui_contract_is_stable():
         )
     )
     assert "Gebäude" in MVP_REQUIRED_TOPIC_SUGGESTIONS
+
+
+def test_attribute_suggestion_knows_its_layer_and_examples():
+    old_style = AttributeSuggestion("type", "object_type", 0.9)
+    assert old_style.layer_id is None
+    assert old_style.examples == ()
+
+    suggestion = AttributeSuggestion(
+        "gfk__bez", "object_type", 1.0, layer_id="gebaeude", examples=("Wohngebäude", "Garage")
+    )
+    assert suggestion.layer_id == "gebaeude"
+    assert suggestion.examples == ("Wohngebäude", "Garage")
