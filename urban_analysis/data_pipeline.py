@@ -21,6 +21,16 @@ from .contracts import (
     PipelineResult,
     ValidationIssue,
 )
+from .geometry import (
+    Geometry,
+    GeometryError,
+    bboxes_within,
+    gpkg_envelope,
+    parse_wkt,
+    read_geometry,
+    validate_study_area,
+    within_distance,
+)
 
 
 TARGET_FIELDS = ("source_name", "object_type", "category", "status", "area_m2", "year", "source")
@@ -79,55 +89,55 @@ class GeoPackageLayer:
     source_srs: Optional[str]
     fields: Tuple[str, ...]
     rows: Tuple[Mapping[str, Any], ...]
+    geometry_column: Optional[str] = None
 
 
 def _normalized(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.casefold())
 
 
-def _parse_wkt_bbox(wkt: str) -> Optional[Tuple[float, float, float, float]]:
-    values = [float(value) for value in re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", wkt)]
-    if len(values) < 4 or len(values) % 2:
+@dataclass(frozen=True)
+class StudyArea:
+    """Parsed study-area polygon with the buffer used for clipping."""
+
+    geometry: Geometry
+    buffer_meters: float
+    bbox: Tuple[float, float, float, float]
+
+
+# CRS names written by GDAL/QGIS when a GeoPackage stores no EPSG authority.
+KNOWN_CRS_NAMES: Mapping[str, str] = {
+    "etrs89utmzone32n": "EPSG:25832",
+    "etrs89utmzone33n": "EPSG:25833",
+    "wgs84": "EPSG:4326",
+    "wgs84geodetic": "EPSG:4326",
+    "wgs84pseudomercator": "EPSG:3857",
+    "dhdn3degreegausskrugerzone2": "EPSG:31466",
+    "dhdn3degreegausskrugerzone3": "EPSG:31467",
+    "dhdn3degreegausskrugerzone4": "EPSG:31468",
+}
+
+
+def _epsg_code(value: Optional[str]) -> Optional[str]:
+    """Return ``EPSG:<n>`` for strings such as ``epsg:25832``, else ``None``."""
+    if not value:
         return None
-    points = list(zip(values[::2], values[1::2]))
-    xs, ys = zip(*points)
-    return min(xs), min(ys), max(xs), max(ys)
+    match = re.fullmatch(r"\s*epsg\s*:\s*(\d+)\s*", value, flags=re.IGNORECASE)
+    return f"EPSG:{match.group(1)}" if match else None
 
 
-def _geometry_bbox(blob: Any) -> Optional[Tuple[float, float, float, float]]:
-    """Read the GeoPackage envelope when the geometry is stored as a blob."""
-    if not isinstance(blob, bytes) or len(blob) < 8 or blob[:2] != b"GP":
+def _epsg_from_definition(definition: Optional[str]) -> Optional[str]:
+    """Identify the EPSG code from a WKT CRS definition, if it is unambiguous."""
+    if not definition:
         return None
-    flags = blob[3]
-    envelope_indicator = (flags >> 1) & 0b111
-    envelope_sizes = {1: 32, 2: 48, 3: 48, 4: 64}
-    envelope_size = envelope_sizes.get(envelope_indicator)
-    if envelope_size is None or len(blob) < 8 + envelope_size:
-        return None
-    byte_order = "little" if flags & 1 else "big"
-    import struct
-
-    doubles = struct.unpack(
-        ("<" if byte_order == "little" else ">") + ("d" * (envelope_size // 8)),
-        blob[8 : 8 + envelope_size],
-    )
-    return doubles[0], doubles[2], doubles[1], doubles[3]
-
-
-def _intersects(
-    geometry_bbox: Optional[Tuple[float, float, float, float]],
-    area_bbox: Optional[Tuple[float, float, float, float]],
-) -> bool:
-    if geometry_bbox is None or area_bbox is None:
-        return True
-    min_x, min_y, max_x, max_y = geometry_bbox
-    area_min_x, area_min_y, area_max_x, area_max_y = area_bbox
-    return not (
-        max_x < area_min_x
-        or min_x > area_max_x
-        or max_y < area_min_y
-        or min_y > area_max_y
-    )
+    text = definition.strip()
+    top_level = re.search(r'(?:AUTHORITY\["EPSG",\s*"(\d+)"\]|ID\["EPSG",\s*(\d+)\])\]\s*$', text)
+    if top_level:
+        return f"EPSG:{top_level.group(1) or top_level.group(2)}"
+    name = re.match(r'\s*(?:PROJCS|GEOGCS|PROJCRS|GEOGCRS|GEODCRS)\["([^"]+)"', text)
+    if name:
+        return KNOWN_CRS_NAMES.get(_normalized(name.group(1)))
+    return None
 
 
 def _infer_category(table_name: str, values: Iterable[Any]) -> Optional[str]:
@@ -187,27 +197,21 @@ class GeoPackageImporter:
         if not file_path.is_file():
             raise GeoPackageImportError(f"GeoPackage does not exist: {file_path}")
 
-        area_bbox = _parse_wkt_bbox(study_area_wkt)
+        study_area, area_error = self._study_area(study_area_wkt, buffer_meters)
         issues: List[ValidationIssue] = []
-        if area_bbox is None:
+        if area_error:
             issues.append(
                 ValidationIssue(
                     code="invalid-study-area",
-                    message="Das Untersuchungsgebiet konnte nicht als WKT-Polygon gelesen werden.",
+                    message=f"{area_error} Es wurden keine Objekte übernommen.",
                     severity="error",
+                    rule="Untersuchungsgebiet",
                 )
-            )
-        elif buffer_meters:
-            area_bbox = (
-                area_bbox[0] - buffer_meters,
-                area_bbox[1] - buffer_meters,
-                area_bbox[2] + buffer_meters,
-                area_bbox[3] + buffer_meters,
             )
 
         try:
             with sqlite3.connect(f"file:{file_path}?mode=ro", uri=True) as connection:
-                layers = self._read_layers(connection, area_bbox, issues)
+                layers = self._read_layers(connection, study_area, project_crs.strip(), issues)
         except sqlite3.Error as exc:
             raise GeoPackageImportError(f"Unable to read GeoPackage {file_path}: {exc}") from exc
 
@@ -244,17 +248,6 @@ class GeoPackageImporter:
                 )
             records.extend(self._harmonize(layer, file_path, category, issues))
 
-            if layer.source_srs and _normalized(layer.source_srs) != _normalized(project_crs):
-                issues.append(
-                    ValidationIssue(
-                        code="crs-mismatch",
-                        message=f"Layer {layer.table_name} verwendet {layer.source_srs}; Projekt-CRS ist {project_crs}.",
-                        severity="warning",
-                        requires_confirmation=True,
-                        rule="Projekt-CRS",
-                    )
-                )
-
         return PipelineResult(
             contract_version=self.contract_version,
             project_crs=project_crs.strip(),
@@ -266,10 +259,24 @@ class GeoPackageImporter:
             harmonized_records=records,
         )
 
+    @staticmethod
+    def _study_area(wkt: str, buffer_meters: float) -> Tuple[Optional[StudyArea], Optional[str]]:
+        try:
+            geometry = parse_wkt(wkt)
+        except GeometryError as exc:
+            return None, f"Das Untersuchungsgebiet konnte nicht als WKT gelesen werden ({exc})."
+        message = validate_study_area(geometry)
+        if message:
+            return None, message
+        bbox = geometry.bbox()
+        assert bbox is not None  # validate_study_area rejects empty geometries
+        return StudyArea(geometry, buffer_meters, bbox), None
+
     def _read_layers(
         self,
         connection: sqlite3.Connection,
-        area_bbox: Optional[Tuple[float, float, float, float]],
+        study_area: Optional[StudyArea],
+        project_crs: str,
         issues: List[ValidationIssue],
     ) -> List[GeoPackageLayer]:
         tables = self._feature_tables(connection)
@@ -280,25 +287,153 @@ class GeoPackageImporter:
             if not columns:
                 continue
             geometry_column = self._geometry_column(connection, table_name)
+            if geometry_column not in columns:
+                geometry_column = None
+            source_srs, source_epsg, is_geographic = self._srs(connection, srs_id)
+            crs_usable = self._check_crs(
+                table_name, source_srs, source_epsg, is_geographic, project_crs, study_area, issues
+            )
             rows: List[Mapping[str, Any]] = []
-            cursor = connection.execute(f"SELECT * FROM {quoted_table}")
-            names = tuple(column[0] for column in cursor.description or ())
-            for row in cursor:
-                values = dict(zip(names, row))
-                geometry = values.get(geometry_column) if geometry_column else None
-                if _intersects(_geometry_bbox(geometry), area_bbox):
-                    rows.append(values)
-            source_srs = self._srs_name(connection, srs_id)
-            layers.append(GeoPackageLayer(table_name, geometry_type, source_srs, columns, tuple(rows)))
             if geometry_column is None:
                 issues.append(
                     ValidationIssue(
                         code="missing-geometry-column",
-                        message=f"Layer {table_name} hat keine Geometriespalte.",
+                        message=f"Layer {table_name} hat keine Geometriespalte und wurde nicht übernommen.",
                         severity="warning",
                     )
                 )
+            elif study_area is not None and crs_usable:
+                rows = self._clip_rows(connection, quoted_table, table_name, geometry_column, study_area, issues)
+            layers.append(
+                GeoPackageLayer(table_name, geometry_type, source_srs, columns, tuple(rows), geometry_column)
+            )
         return layers
+
+    @staticmethod
+    def _clip_rows(
+        connection: sqlite3.Connection,
+        quoted_table: str,
+        table_name: str,
+        geometry_column: str,
+        study_area: StudyArea,
+        issues: List[ValidationIssue],
+    ) -> List[Mapping[str, Any]]:
+        """Keep rows whose geometry lies within the buffered study area."""
+        buffer = study_area.buffer_meters
+        rows: List[Mapping[str, Any]] = []
+        total = missing = unreadable = 0
+        first_error: Optional[str] = None
+        cursor = connection.execute(f"SELECT * FROM {quoted_table}")
+        names = tuple(column[0] for column in cursor.description or ())
+        for row in cursor:
+            total += 1
+            values = dict(zip(names, row))
+            raw_geometry = values.get(geometry_column)
+            if isinstance(raw_geometry, bytes):
+                envelope = gpkg_envelope(raw_geometry)
+                if envelope is not None and not bboxes_within(envelope, study_area.bbox, buffer):
+                    continue
+            try:
+                geometry = read_geometry(raw_geometry)
+            except GeometryError as exc:
+                unreadable += 1
+                first_error = first_error or str(exc)
+                continue
+            if geometry is None or geometry.is_empty:
+                missing += 1
+                continue
+            if within_distance(geometry, study_area.geometry, buffer):
+                rows.append(values)
+
+        if missing:
+            issues.append(
+                ValidationIssue(
+                    code="missing-geometry",
+                    message=f"{missing} Objekt(e) ohne Geometrie in Layer {table_name} wurden nicht übernommen.",
+                    severity="warning",
+                    rule="Räumliche Begrenzung",
+                )
+            )
+        if unreadable:
+            issues.append(
+                ValidationIssue(
+                    code="unreadable-geometry",
+                    message=(
+                        f"{unreadable} Objekt(e) mit nicht lesbarer Geometrie in Layer {table_name} "
+                        f"wurden nicht übernommen (z. B.: {first_error})."
+                    ),
+                    severity="warning",
+                    rule="Räumliche Begrenzung",
+                )
+            )
+        issues.append(
+            ValidationIssue(
+                code="clip-summary",
+                message=(
+                    f"Layer {table_name}: {len(rows)} von {total} Objekten liegen im "
+                    f"Untersuchungsgebiet inklusive {buffer:g} m Puffer."
+                ),
+                severity="info",
+                rule="Räumliche Begrenzung",
+            )
+        )
+        return rows
+
+    @staticmethod
+    def _check_crs(
+        table_name: str,
+        source_srs: Optional[str],
+        source_epsg: Optional[str],
+        is_geographic: bool,
+        project_crs: str,
+        study_area: Optional[StudyArea],
+        issues: List[ValidationIssue],
+    ) -> bool:
+        """Report CRS problems; return whether the layer can be clipped."""
+        project_epsg = _epsg_code(project_crs)
+        if source_epsg and project_epsg and source_epsg != project_epsg:
+            issues.append(
+                ValidationIssue(
+                    code="crs-mismatch",
+                    message=(
+                        f"Layer {table_name} verwendet {source_epsg}; Projekt-CRS ist {project_epsg}. "
+                        "Die Pipeline rechnet keine Koordinaten um, der Layer wurde nicht übernommen. "
+                        "Bitte den Layer in QGIS ins Projekt-CRS umprojizieren."
+                    ),
+                    severity="error",
+                    rule="Projekt-CRS",
+                )
+            )
+            return False
+        if not (source_epsg and project_epsg):
+            issues.append(
+                ValidationIssue(
+                    code="crs-unverified",
+                    message=(
+                        f"Das Koordinatensystem von Layer {table_name} ({source_srs or 'unbekannt'}) "
+                        f"kann nicht eindeutig mit dem Projekt-CRS {project_crs} verglichen werden. "
+                        "Die räumliche Begrenzung nimmt an, dass beide übereinstimmen."
+                    ),
+                    severity="warning",
+                    requires_confirmation=True,
+                    rule="Projekt-CRS",
+                )
+            )
+        if is_geographic and study_area is not None and study_area.buffer_meters:
+            issues.append(
+                ValidationIssue(
+                    code="geographic-crs-buffer",
+                    message=(
+                        f"Layer {table_name} liegt in einem geografischen CRS (Grad). Ein Puffer in "
+                        "Metern ist dort nicht anwendbar, der Layer wurde nicht übernommen. "
+                        "Bitte ein metrisches Projekt-CRS wie EPSG:25832 verwenden."
+                    ),
+                    severity="error",
+                    rule="Projekt-CRS",
+                )
+            )
+            return False
+        return True
 
     @staticmethod
     def _feature_tables(connection: sqlite3.Connection) -> List[Tuple[str, str, Optional[int]]]:
@@ -320,16 +455,34 @@ class GeoPackageImporter:
         return str(row[0]) if row else None
 
     @staticmethod
-    def _srs_name(connection: sqlite3.Connection, srs_id: Optional[int]) -> Optional[str]:
+    def _srs(
+        connection: sqlite3.Connection, srs_id: Optional[int]
+    ) -> Tuple[Optional[str], Optional[str], bool]:
+        """Return (label, EPSG code if identifiable, is geographic) for ``srs_id``."""
         if srs_id is None:
-            return None
+            return None, None, False
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(gpkg_spatial_ref_sys)")}
+        definition_column = "definition" if "definition" in columns else "NULL"
+        name_column = "srs_name" if "srs_name" in columns else "NULL"
         row = connection.execute(
-            "SELECT organization, organization_coordsys_id FROM gpkg_spatial_ref_sys WHERE srs_id = ?",
+            f"SELECT organization, organization_coordsys_id, {name_column}, {definition_column} "
+            "FROM gpkg_spatial_ref_sys WHERE srs_id = ?",
             (srs_id,),
         ).fetchone()
         if not row:
-            return None
-        return f"{row[0]}:{row[1]}"
+            return None, None, False
+        organization, code, name, definition = row
+        label = f"{organization}:{code}"
+        if name:
+            label = f"{label} ({name})"
+        if str(organization).casefold() == "epsg":
+            epsg: Optional[str] = f"EPSG:{code}"
+        else:
+            epsg = _epsg_from_definition(definition) or (KNOWN_CRS_NAMES.get(_normalized(name)) if name else None)
+        is_geographic = bool(definition) and str(definition).lstrip().upper().startswith(
+            ("GEOGCS", "GEOGCRS", "GEODCRS")
+        )
+        return label, epsg, is_geographic
 
     @staticmethod
     def _mapping_rules(fields: Sequence[str]) -> Tuple[MappingRule, ...]:
@@ -354,7 +507,7 @@ class GeoPackageImporter:
         rules = {rule.target_field: rule.source_field for rule in GeoPackageImporter._mapping_rules(layer.fields)}
         seen: set[Tuple[Any, ...]] = set()
         records: List[HarmonizedRecord] = []
-        geometry_column = next(
+        geometry_column = layer.geometry_column or next(
             (
                 field
                 for field in layer.fields
