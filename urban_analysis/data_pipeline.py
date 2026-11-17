@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
@@ -83,13 +83,23 @@ class MappingRule:
 
 @dataclass(frozen=True)
 class HarmonizedRecord:
-    """A normalized row retained for later QGIS or export processing."""
+    """A normalized row retained for later QGIS or export processing.
+
+    ``source_layer`` is the input table (``layer_id`` may name a split result
+    layer such as ``nutzung_gruen``), ``source_attributes`` the original row
+    and ``pipeline_attributes`` the target fields as the pipeline first
+    suggested them.  ``apply_attribute_decisions`` rebuilds ``attributes``
+    from these, so user decisions can be changed without losing data.
+    """
 
     layer_id: str
     source_row_id: Any
     attributes: Mapping[str, Any]
     geometry: Any = None
     duplicate_group: Optional[str] = None
+    source_layer: Optional[str] = None
+    source_attributes: Mapping[str, Any] = field(default_factory=dict)
+    pipeline_attributes: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -809,6 +819,9 @@ class GeoPackageImporter:
                     source_row_id=row.get(row_id_column, index) if row_id_column else index,
                     attributes=attributes,
                     geometry=row.get(geometry_column) if geometry_column else None,
+                    source_layer=layer.table_name,
+                    source_attributes=row,
+                    pipeline_attributes=attributes,
                 )
             )
             kept_rows.append(row)
@@ -976,4 +989,110 @@ def apply_data_source(records: Sequence[HarmonizedRecord], data_source: str) -> 
             attributes["source"] = text
             record = replace(record, attributes=attributes)
         updated.append(record)
+    return updated
+
+
+def _target_field(value: str, mapping_rules: MappingRules) -> str:
+    """Resolve a target chosen in step 5: ``object_type`` or ``Objektart``."""
+    text = value.strip()
+    if text in TARGET_FIELDS:
+        return text
+    for target in TARGET_FIELDS:
+        if mapping_rules.target_field_name(target).casefold() == text.casefold():
+            return target
+    allowed = ", ".join(mapping_rules.target_field_name(target) for target in TARGET_FIELDS)
+    raise ValueError(f"Unbekanntes Zielfeld „{text}“. Möglich sind: {allowed}.")
+
+
+def _decided_rules(
+    suggestions: Sequence[AttributeSuggestion], mapping_rules: MappingRules
+) -> Tuple[Dict[str, str], set]:
+    """Target -> source field after the user's decisions, plus all suggested targets."""
+    decided: Dict[str, str] = {}
+    suggested_targets = set()
+    for suggestion in suggestions:
+        suggested_targets.add(suggestion.target_field)
+        if suggestion.accepted is False:
+            continue
+        target = (
+            _target_field(suggestion.user_value, mapping_rules)
+            if suggestion.user_value
+            else suggestion.target_field
+        )
+        if target in decided and decided[target] != suggestion.source_field:
+            raise ValueError(
+                f"Das Zielfeld „{mapping_rules.target_field_name(target)}“ ist zweimal zugeordnet "
+                f"({decided[target]} und {suggestion.source_field}). Bitte nur eine Spalte wählen."
+            )
+        decided[target] = suggestion.source_field
+    return decided, suggested_targets
+
+
+def apply_attribute_decisions(
+    result: PipelineResult, mapping_rules: Optional[MappingRules] = None
+) -> List[HarmonizedRecord]:
+    """Rebuild the target fields from the decisions made in step 5 (S5, M4).
+
+    For every suggestion of a layer (``AttributeSuggestion.layer_id``):
+
+    * ``accepted is False`` -> the suggested target field becomes empty,
+    * ``user_value`` set -> the source field fills that target instead
+      (``object_type`` or the German name such as ``Objektart``),
+    * otherwise the suggestion stays as the pipeline proposed it.
+
+    It always starts from the values the pipeline delivered, so calling it
+    again with other decisions loses nothing.  Category and result layer of
+    a record do not change.  Call it before ``apply_data_source``.
+    Raises ``ValueError`` for an unknown target or a target chosen twice.
+    """
+    rules = mapping_rules or default_mapping_rules()
+    by_layer: Dict[Optional[str], List[AttributeSuggestion]] = {}
+    for suggestion in result.attribute_suggestions:
+        by_layer.setdefault(suggestion.layer_id, []).append(suggestion)
+    layer_categories = {layer.layer_id: layer.category for layer in result.layers}
+    decisions: Dict[str, Tuple[Dict[str, str], set]] = {}
+    updated: List[HarmonizedRecord] = []
+
+    for record in result.harmonized_records:
+        table = record.source_layer or record.layer_id
+        row = record.source_attributes
+        original = record.pipeline_attributes or record.attributes
+        if not row:
+            updated.append(record)
+            continue
+        if table not in decisions:
+            suggestions = by_layer.get(table, []) + [
+                s for s in by_layer.get(None, []) if s.source_field in row
+            ]
+            decisions[table] = _decided_rules(suggestions, rules)
+        decided, suggested_targets = decisions[table]
+        profile = rules.profile_for(table, tuple(row))
+
+        attributes = dict(original)
+        if "source" not in decided and "source" not in suggested_targets:
+            attributes["source"] = record.attributes.get("source")
+        for target in TARGET_FIELDS:
+            if target in decided:
+                value = row.get(decided[target])
+                if target == "area_m2":
+                    value = _coerce_area(value)
+                elif target == "year":
+                    value = _coerce_year(value)
+                attributes[target] = value
+            elif target in suggested_targets:
+                attributes[target] = layer_categories.get(record.layer_id) if target == "category" else None
+
+        if "object_type" in decided:
+            source_field = decided["object_type"]
+            raw = row.get(source_field)
+            if profile is not None and source_field == profile.object_type_field and raw not in (None, ""):
+                attributes["object_type"], detail = profile.split_type(str(raw).strip())
+            else:
+                detail = None
+            if "object_detail" not in decided:
+                attributes["object_detail"] = detail
+        elif "object_type" in suggested_targets and "object_detail" not in decided:
+            attributes["object_detail"] = None
+
+        updated.append(replace(record, attributes=attributes))
     return updated
