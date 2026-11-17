@@ -1,10 +1,231 @@
 """User-controlled QGIS and PDF outputs for the guided workflow."""
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .contracts import LayerDescriptor
+from .data_pipeline import TARGET_FIELDS
 from .user_guidance import OutputPlan
+
+
+# --- W6: result layers in QGIS (interface S6) ------------------------------
+
+RESULT_LAYER_PROPERTY = "urban_analysis/result_layer"
+RESULT_GROUP_PROPERTY = "urban_analysis/result_group"
+DOUBLE_FIELDS = ("area_m2",)
+INTEGER_FIELDS = ("year",)
+SKIP_NO_GEOMETRY = "ohne Geometrie"
+SKIP_UNREADABLE = "Geometrie nicht lesbar"
+SKIP_OTHER_TYPE = "anderer Geometrietyp als der Layer"
+
+
+def result_field_specs() -> Tuple[Tuple[str, str], ...]:
+    """(field name, kind) for the 8 target fields; kind is text/double/int."""
+    specs = []
+    for name in TARGET_FIELDS:
+        if name in DOUBLE_FIELDS:
+            specs.append((name, "double"))
+        elif name in INTEGER_FIELDS:
+            specs.append((name, "int"))
+        else:
+            specs.append((name, "text"))
+    return tuple(specs)
+
+
+def field_value(kind: str, value):
+    """Value for a result field; empty values stay NULL instead of ''."""
+    if value in (None, ""):
+        return None
+    if kind == "double":
+        return float(value)
+    if kind == "int":
+        return int(value)
+    return str(value)
+
+
+def result_group_name(topic: Optional[str]) -> str:
+    return f"Urban Analysis – {topic or 'Ergebnis'}"
+
+
+def result_layer_name(descriptor: LayerDescriptor, readable=None) -> str:
+    """Readable layer name: pipeline name, else the category, else the id."""
+    if readable is not None:
+        try:
+            name = readable(descriptor.layer_id)
+        except Exception:  # a missing name must not stop the output
+            name = None
+        if name and name != descriptor.layer_id:
+            return str(name)
+    return descriptor.category or descriptor.name or descriptor.layer_id
+
+
+@dataclass
+class ResultLayerReport:
+    """What was written into one result layer."""
+
+    layer_id: str
+    name: str
+    feature_count: int = 0
+    skipped: Dict[str, int] = field(default_factory=dict)
+
+    def skip(self, reason: str) -> None:
+        self.skipped[reason] = self.skipped.get(reason, 0) + 1
+
+
+def format_count(count: int) -> str:
+    """German thousands separator, e.g. 25 140."""
+    return f"{count:,}".replace(",", " ")
+
+
+def result_layers_text(reports: Sequence[ResultLayerReport]) -> str:
+    """Feedback after 'Verarbeitung starten'; skipped objects are always named."""
+    total = sum(report.feature_count for report in reports)
+    lines = [
+        f"{len(reports)} Ergebnis-Layer in QGIS angelegt ({format_count(total)} Objekte)."
+    ]
+    for report in reports:
+        for reason, count in report.skipped.items():
+            lines.append(
+                f"{report.name}: {format_count(count)} Objekt(e) nicht übernommen – {reason}."
+            )
+    return "\n".join(lines)
+
+
+def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], readable=None):
+    """Create one memory layer per selected descriptor from the harmonized records.
+
+    Returns ``(layer_objects, reports)``: ``layer_objects`` maps layer_id to
+    the new QgsVectorLayer (for S7), ``reports`` says what was written and
+    what was skipped and why.  Input data and project layers stay unchanged.
+    """
+    from qgis.core import (
+        QgsCoordinateReferenceSystem,
+        QgsFeature,
+        QgsField,
+        QgsGeometry,
+        QgsVectorLayer,
+        QgsWkbTypes,
+    )
+    from qgis.PyQt.QtCore import QMetaType
+
+    from .geometry import GeometryError, plain_geometry
+
+    meta = getattr(QMetaType, "Type", QMetaType)
+    field_types = {"text": meta.QString, "double": meta.Double, "int": meta.Int}
+    specs = result_field_specs()
+    crs = QgsCoordinateReferenceSystem(result.project_crs)
+
+    records_by_layer: Dict[str, List[object]] = {}
+    for record in result.harmonized_records:
+        records_by_layer.setdefault(record.layer_id, []).append(record)
+
+    layer_objects = {}
+    reports: List[ResultLayerReport] = []
+    used_names = set()
+    for descriptor in selected_layers:
+        name = result_layer_name(descriptor, readable)
+        if name in used_names:
+            name = f"{name} ({descriptor.layer_id})"
+        used_names.add(name)
+        report = ResultLayerReport(descriptor.layer_id, name)
+
+        geometries = []
+        for record in records_by_layer.get(descriptor.layer_id, ()):
+            try:
+                raw = plain_geometry(record.geometry)
+            except GeometryError:
+                report.skip(SKIP_UNREADABLE)
+                continue
+            if raw is None:
+                report.skip(SKIP_NO_GEOMETRY)
+                continue
+            if isinstance(raw, bytes):
+                geometry = QgsGeometry()
+                geometry.fromWkb(raw)
+            else:
+                geometry = QgsGeometry.fromWkt(raw)
+            if geometry.isNull() or geometry.isEmpty():
+                report.skip(SKIP_UNREADABLE)
+                continue
+            geometry.convertToMultiType()  # one layer type for single and multi parts
+            geometries.append((record, geometry))
+
+        if geometries:
+            wkb_type = QgsWkbTypes.multiType(geometries[0][1].wkbType())
+        else:
+            wkb_type = QgsWkbTypes.multiType(QgsWkbTypes.parseType(descriptor.geometry_type or ""))
+        type_name = QgsWkbTypes.displayString(wkb_type) or "MultiPolygon"
+        layer = QgsVectorLayer(f"{type_name}?crs={crs.authid()}", name, "memory")
+        layer.setCrs(crs)
+        provider = layer.dataProvider()
+        provider.addAttributes([QgsField(field_name, field_types[kind]) for field_name, kind in specs])
+        layer.updateFields()
+        if readable is not None:
+            _set_field_aliases(layer, specs)
+
+        features = []
+        for record, geometry in geometries:
+            if geometry.wkbType() != wkb_type:
+                report.skip(SKIP_OTHER_TYPE)
+                continue
+            feature = QgsFeature(layer.fields())
+            feature.setGeometry(geometry)
+            feature.setAttributes(
+                [field_value(kind, record.attributes.get(field_name)) for field_name, kind in specs]
+            )
+            features.append(feature)
+        ok, _added = provider.addFeatures(features)
+        if not ok:
+            raise RuntimeError(f"Der Ergebnis-Layer „{name}“ konnte nicht gefüllt werden.")
+        layer.updateExtents()
+        layer.setCustomProperty(RESULT_LAYER_PROPERTY, True)
+        report.feature_count = layer.featureCount()
+        layer_objects[descriptor.layer_id] = layer
+        reports.append(report)
+    return layer_objects, reports
+
+
+def _set_field_aliases(layer, specs) -> None:
+    """German field names (aliases) in the attribute table, if available."""
+    try:
+        from .mapping import readable_target_field
+    except ImportError:
+        return
+    for index, (field_name, _kind) in enumerate(specs):
+        try:
+            layer.setFieldAlias(index, readable_target_field(field_name))
+        except Exception:  # an alias is only cosmetic
+            pass
+
+
+def add_result_layers(layer_objects: Mapping[str, object], group_name: str, project=None):
+    """Put the result layers into their own group at the top of the layer tree.
+
+    A group created earlier by the plugin (and only its layers) is replaced,
+    so starting the processing again does not duplicate results.
+    """
+    from qgis.core import QgsProject
+
+    project = project or QgsProject.instance()
+    root = project.layerTreeRoot()
+    for group in list(root.findGroups()):
+        if group.customProperty(RESULT_GROUP_PROPERTY):
+            layer_ids = [
+                node.layerId()
+                for node in group.findLayers()
+                if node.layer() is not None
+                and node.layer().customProperty(RESULT_LAYER_PROPERTY)
+            ]
+            root.removeChildNode(group)
+            if layer_ids:
+                project.removeMapLayers(layer_ids)
+    group = root.insertGroup(0, group_name)
+    group.setCustomProperty(RESULT_GROUP_PROPERTY, True)
+    for layer in layer_objects.values():
+        project.addMapLayer(layer, False)
+        group.addLayer(layer)
+    return group
 
 
 def load_qgis_layers(iface, selected_layers: Iterable[LayerDescriptor], layer_objects):

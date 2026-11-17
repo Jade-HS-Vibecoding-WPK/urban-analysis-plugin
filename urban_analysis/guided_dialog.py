@@ -12,6 +12,12 @@ from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
 from .data_pipeline import GeoPackageImporter, GeoPackageImportError
+from .outputs import (
+    add_result_layers,
+    build_result_layers,
+    result_group_name,
+    result_layers_text,
+)
 from .study_area import (
     DRAW_INSTRUCTIONS,
     StudyAreaError,
@@ -39,9 +45,9 @@ from .user_guidance import (
 
 DOCK_OBJECT_NAME = "UrbanAnalysisDock"
 NO_DATA_MESSAGE = "Noch keine Daten geladen. Bitte zuerst ein GeoPackage laden."
-OUTPUT_PENDING_MESSAGE = (
-    "Die Ausgabe in QGIS (Ergebnis-Layer, GeoPackage, PDF) wird in einem "
-    "späteren Schritt angeschlossen (ARBEITSPLAN W6/W8)."
+EXPORT_PENDING_MESSAGE = (
+    "GeoPackage- und PDF-Ausgabe werden in einem späteren Schritt angeschlossen "
+    "(ARBEITSPLAN W8)."
 )
 CRS_HINT = (
     "Das CRS muss zu den Daten im GeoPackage passen. Layer mit einem anderen CRS "
@@ -298,6 +304,7 @@ def _create_dock(plugin):
     from qgis.PyQt.QtGui import QIcon
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
+        QApplication,
         QButtonGroup,
         QCheckBox,
         QDoubleSpinBox,
@@ -351,6 +358,7 @@ def _create_dock(plugin):
             self.import_task = None  # running background import (step 3)
             self.closing = False
             self.next_message = None  # info shown after the next page change
+            self.all_done = False  # all lamps on after "Verarbeitung starten"
 
             # The whole plugin shares one style (theme.py).
             self.setStyleSheet(panel_stylesheet())
@@ -479,6 +487,7 @@ def _create_dock(plugin):
             if page.on_show is not None:
                 page.on_show(page)
             self.current = index
+            self.all_done = False
             self.scroll.verticalScrollBar().setValue(0)
             self.scroll.horizontalScrollBar().setValue(0)
             for page_index, other in enumerate(self.pages):
@@ -535,9 +544,17 @@ def _create_dock(plugin):
             self.message_scroll.hide()
 
         def update_lamps(self):
-            """Lamps before the current step are on, the current one glows."""
+            """Lamps before the current step are on, the current one glows.
+
+            After a successful processing run all lamps are on.
+            """
+            current = len(self.step_lamps) if self.all_done else self.current
             for index, lamp in enumerate(self.step_lamps):
-                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, self.current, self.pulse_on)])
+                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current, self.pulse_on)])
+
+        def mark_all_done(self):
+            self.all_done = True
+            self.update_lamps()
 
         def set_busy(self, text):
             """Show the busy bar and lock the panel while a step runs."""
@@ -1305,8 +1322,31 @@ def _create_dock(plugin):
         page.layout.addWidget(summary)
 
     def validate_summary(_page):
-        dock.show_message(OUTPUT_PENDING_MESSAGE, kind="info")
-        return False
+        """'Verarbeitung starten': build the result layers and add them to QGIS."""
+        flow = workflow()
+        selected = flow.result.selected_layers()
+        if not selected:
+            return reject(
+                "Für das Kartenthema ist kein Layer ausgewählt. Bitte in Schritt 7 "
+                "mindestens eine Kategorie ankreuzen."
+            )
+        try:
+            from .mapping import readable_layer
+        except ImportError:
+            readable_layer = None
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            layer_objects, reports = build_result_layers(flow.result, selected, readable_layer)
+            add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
+        finally:
+            QApplication.restoreOverrideCursor()
+        plugin.result_layers = layer_objects
+        text = result_layers_text(reports)
+        if flow.result.output.save_cleaned_geopackage or flow.result.output.create_pdf:
+            text += "\n" + EXPORT_PENDING_MESSAGE
+        dock.show_message(text, kind="info")
+        dock.mark_all_done()
+        return False  # last step: stay here
 
     crs_page = dock.add_page(build_crs, validate_crs)
     dock.add_page(build_area, validate_area, on_show=update_area_status)
