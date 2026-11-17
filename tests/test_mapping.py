@@ -1,0 +1,42 @@
+import json
+
+import pytest
+
+from urban_analysis.mapping import MappingRulesError, default_mapping_rules, load_mapping_rules
+
+
+def test_rules_file_loads_and_knows_alkis_layers():
+    rules = default_mapping_rules()
+
+    assert rules.profile_for("gebaeude", ["objid", "gfk__bez"]).category == "Gebäude"
+    assert rules.profile_for("gebaeude", ["gfk__bez"]) is None
+    assert rules.profile_for("unbekannt", ["objid"]) is None
+    assert rules.label("hnr") == "Hausnummer (hnr)"
+    assert rules.label("xyz") == "xyz"
+
+
+def test_category_from_layer_name_only():
+    rules = default_mapping_rules()
+
+    assert rules.category_from_name("buildings") == "Gebäude"
+    assert rules.category_from_name("Strassen_2024") == "Straßen"
+    assert rules.category_from_name("bodenschaetzung") is None
+
+
+def test_split_type_uses_known_main_types():
+    nutzung = default_mapping_rules().profile_for("nutzung", ["objid", "tn__bez"])
+
+    assert nutzung.split_type("Wohnbaufläche, Offen") == ("Wohnbaufläche", "Offen")
+    assert nutzung.split_type("Hafenbecken") == ("Hafenbecken", None)
+    assert nutzung.split_type("Etwas Neues, Detail") == ("Etwas Neues, Detail", None)
+
+
+def test_broken_rules_file_is_reported(tmp_path):
+    path = tmp_path / "rules.json"
+    path.write_text("{ kein json", encoding="utf-8")
+    with pytest.raises(MappingRulesError):
+        load_mapping_rules(path)
+
+    path.write_text(json.dumps({"profiles": [{"layers": {"x": {"category_rules": [{"category": "A"}]}}}]}), encoding="utf-8")
+    with pytest.raises(MappingRulesError):
+        load_mapping_rules(path)

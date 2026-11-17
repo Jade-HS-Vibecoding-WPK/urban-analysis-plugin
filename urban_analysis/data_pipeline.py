@@ -32,9 +32,19 @@ from .geometry import (
     validate_study_area,
     within_distance,
 )
+from .mapping import LayerProfile, MappingRules, default_mapping_rules
 
 
-TARGET_FIELDS = ("source_name", "object_type", "category", "status", "area_m2", "year", "source")
+TARGET_FIELDS = (
+    "source_name",
+    "object_type",
+    "object_detail",
+    "category",
+    "status",
+    "area_m2",
+    "year",
+    "source",
+)
 TARGET_FIELD_ALIASES: Mapping[str, Tuple[str, ...]] = {
     "object_type": (
         "object_type",
@@ -170,20 +180,6 @@ def _open_read_only(file_path: Path) -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
-def _infer_category(table_name: str, values: Iterable[Any]) -> Optional[str]:
-    text = " ".join([table_name, *(str(value) for value in values if value is not None)]).casefold()
-    category_terms = {
-        "Gebäude": ("gebäude", "gebaeude", "building", "buildings", "haus"),
-        "Straßen": ("straße", "strasse", "street", "road", "roads"),
-        "Nutzungsflächen": ("nutzung", "landuse", "land use", "fläche", "flaeche"),
-        "Grünflächen": ("grün", "gruen", "green", "park", "vegetation"),
-    }
-    for category, terms in category_terms.items():
-        if any(term in text for term in terms):
-            return category
-    return None
-
-
 def _coerce_area(value: Any) -> Optional[float]:
     if value in (None, ""):
         return None
@@ -205,8 +201,9 @@ def _coerce_year(value: Any) -> Optional[int]:
 class GeoPackageImporter:
     """Import and harmonize local GeoPackage feature layers."""
 
-    def __init__(self, *, contract_version: str = "1.0"):
+    def __init__(self, *, contract_version: str = "1.0", mapping_rules: Optional[MappingRules] = None):
         self.contract_version = contract_version
+        self.mapping_rules = mapping_rules or default_mapping_rules()
 
     def import_file(
         self,
@@ -258,21 +255,19 @@ class GeoPackageImporter:
         suggestions: List[AttributeSuggestion] = []
         records: List[HarmonizedRecord] = []
         layers_without_source: List[str] = []
+        layers_without_category: List[str] = []
         for layer in layers:
-            category = _infer_category(layer.table_name, (value for row in layer.rows for value in row.values()))
-            descriptors.append(
-                LayerDescriptor(
-                    layer_id=layer.table_name,
-                    name=layer.table_name,
-                    geometry_type=layer.geometry_type,
-                    source_name=file_path.name,
-                    category=category,
-                )
+            profile = self.mapping_rules.profile_for(layer.table_name, layer.fields)
+            category = (
+                profile.category if profile is not None
+                else self.mapping_rules.category_from_name(layer.table_name)
             )
-            layer_rules = self._mapping_rules(layer.fields)
-            if layer.rows and not any(rule.target_field == "source" for rule in layer_rules):
+            field_rules = self._layer_field_rules(layer.fields, profile)
+            if layer.rows and not any(rule.target_field == "source" for rule in field_rules):
                 layers_without_source.append(layer.table_name)
-            for rule in layer_rules:
+            if layer.rows and profile is None and category is None:
+                layers_without_category.append(layer.table_name)
+            for rule in field_rules:
                 suggestions.append(
                     AttributeSuggestion(
                         source_field=rule.source_field,
@@ -280,7 +275,22 @@ class GeoPackageImporter:
                         confidence=rule.confidence,
                     )
                 )
-            records.extend(self._harmonize(layer, file_path, category, issues))
+            layer_records = self._harmonize(layer, file_path, category, issues, profile, field_rules, self.mapping_rules)
+            records.extend(layer_records)
+            descriptors.extend(self._layer_descriptors(layer, file_path, category, profile, layer_records))
+
+        if layers_without_category:
+            issues.append(
+                ValidationIssue(
+                    code="missing-category",
+                    message=(
+                        f"Für die Layer {', '.join(layers_without_category)} wurde keine Kategorie "
+                        "erkannt. Sie stehen beim Kartenthema nicht zur Auswahl."
+                    ),
+                    severity="warning",
+                    rule="Kategorie aus Layername",
+                )
+            )
 
         if layers_without_source:
             issues.append(
@@ -536,6 +546,58 @@ class GeoPackageImporter:
         )
         return label, epsg, is_geographic
 
+    @classmethod
+    def _layer_field_rules(
+        cls, fields: Sequence[str], profile: Optional[LayerProfile]
+    ) -> Tuple[MappingRule, ...]:
+        """Alias rules, with object type and category taken over by a profile."""
+        rules = cls._mapping_rules(fields)
+        if profile is None:
+            return rules
+        kept = [rule for rule in rules if rule.target_field not in ("object_type", "category")]
+        if profile.uses_field(fields):
+            kept.insert(0, MappingRule(str(profile.object_type_field), "object_type", 1.0))
+        return tuple(kept)
+
+    @staticmethod
+    def _layer_descriptors(
+        layer: GeoPackageLayer,
+        file_path: Path,
+        category: Optional[str],
+        profile: Optional[LayerProfile],
+        records: Sequence[HarmonizedRecord],
+    ) -> List[LayerDescriptor]:
+        """One descriptor per layer, or per category for layers a profile splits."""
+        if profile is None or not profile.splits_layer or not records:
+            return [
+                LayerDescriptor(
+                    layer_id=layer.table_name,
+                    name=layer.table_name,
+                    geometry_type=layer.geometry_type,
+                    source_name=file_path.name,
+                    category=category,
+                )
+            ]
+        rule_order = [*profile.category_rules, *([profile.default_rule] if profile.default_rule else [])]
+        suffix_order: Dict[str, str] = {}
+        for rule in rule_order:
+            suffix_order.setdefault(rule.layer_suffix, rule.category)
+        present = {record.layer_id for record in records}
+        descriptors = []
+        for suffix, rule_category in suffix_order.items():
+            layer_id = f"{layer.table_name}_{suffix}"
+            if layer_id in present:
+                descriptors.append(
+                    LayerDescriptor(
+                        layer_id=layer_id,
+                        name=f"{layer.table_name} – {rule_category}",
+                        geometry_type=layer.geometry_type,
+                        source_name=file_path.name,
+                        category=rule_category,
+                    )
+                )
+        return descriptors
+
     @staticmethod
     def _mapping_rules(fields: Sequence[str]) -> Tuple[MappingRule, ...]:
         normalized_fields = {_normalized(field): field for field in fields}
@@ -555,8 +617,13 @@ class GeoPackageImporter:
         file_path: Path,
         category: Optional[str],
         issues: List[ValidationIssue],
+        profile: Optional[LayerProfile] = None,
+        field_rules: Optional[Sequence[MappingRule]] = None,
+        mapping_rules: Optional[MappingRules] = None,
     ) -> List[HarmonizedRecord]:
-        rules = {rule.target_field: rule.source_field for rule in GeoPackageImporter._mapping_rules(layer.fields)}
+        if field_rules is None:
+            field_rules = GeoPackageImporter._mapping_rules(layer.fields)
+        rules = {rule.target_field: rule.source_field for rule in field_rules}
         geometry_column = layer.geometry_column or next(
             (
                 field
@@ -582,18 +649,28 @@ class GeoPackageImporter:
                 duplicate_count += 1
                 continue
             seen.add(duplicate_key)
+            layer_id = layer.table_name
             attributes: Dict[str, Any] = {
                 "source_name": file_path.name,
                 "object_type": row.get(rules["object_type"]) if "object_type" in rules else layer.table_name,
+                "object_detail": None,
                 "category": row.get(rules["category"]) if "category" in rules else category,
                 "status": row.get(rules["status"]) if "status" in rules else None,
                 "area_m2": _coerce_area(row.get(rules["area_m2"])) if "area_m2" in rules else None,
                 "year": _coerce_year(row.get(rules["year"])) if "year" in rules else None,
                 "source": row.get(rules["source"]) if "source" in rules else None,
             }
+            if profile is not None:
+                classification = profile.classify(row, layer.fields)
+                if profile.uses_field(layer.fields):
+                    attributes["object_type"] = classification.object_type
+                    attributes["object_detail"] = classification.object_detail
+                attributes["category"] = classification.category
+                if classification.layer_suffix:
+                    layer_id = f"{layer.table_name}_{classification.layer_suffix}"
             records.append(
                 HarmonizedRecord(
-                    layer_id=layer.table_name,
+                    layer_id=layer_id,
                     source_row_id=row.get(row_id_column, index) if row_id_column else index,
                     attributes=attributes,
                     geometry=row.get(geometry_column) if geometry_column else None,
@@ -614,7 +691,8 @@ class GeoPackageImporter:
             )
         if geometry_column:
             records = GeoPackageImporter._mark_uncertain_duplicates(
-                layer.table_name, records, kept_rows, compared_fields, geometry_column, issues
+                layer.table_name, records, kept_rows, compared_fields, geometry_column, issues,
+                mapping_rules.label if mapping_rules is not None else str,
             )
         return records
 
@@ -626,6 +704,7 @@ class GeoPackageImporter:
         compared_fields: Sequence[str],
         geometry_column: str,
         issues: List[ValidationIssue],
+        label: Any = str,
     ) -> List[HarmonizedRecord]:
         """Group records that share a geometry but differ in other attributes.
 
@@ -656,11 +735,10 @@ class GeoPackageImporter:
             ValidationIssue(
                 code="uncertain-duplicate",
                 message=(
-                    f"{len(groups)} Gruppe(n) mit insgesamt {row_count} Objekten in Layer {table_name} "
-                    f"haben dieselbe Geometrie, unterscheiden sich aber in "
-                    f"{', '.join(top_fields) or 'einzelnen Attributen'}. Alle wurden behalten. "
-                    "Bitte entscheiden, ob jede Gruppe zu einem Objekt zusammengeführt werden soll – "
-                    "etwa wenn dasselbe Objekt mehrfach mit unterschiedlichen Angaben gespeichert ist."
+                    f"{table_name}: {len(groups)} Gruppe(n) mit {row_count} Objekten – gleiche Geometrie, "
+                    f"aber unterschiedliche Angaben in "
+                    f"{', '.join(label(field) for field in top_fields) or 'einzelnen Attributen'}. "
+                    "Alle wurden behalten. Zusammenführen?"
                 ),
                 severity="warning",
                 requires_confirmation=True,
