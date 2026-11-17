@@ -641,9 +641,9 @@ class GeoPackageImporter:
                 message=(
                     f"{len(groups)} Gruppe(n) mit insgesamt {row_count} Objekten in Layer {table_name} "
                     f"haben dieselbe Geometrie, unterscheiden sich aber in "
-                    f"{', '.join(top_fields) or 'einzelnen Attributen'}. Sie wurden behalten. "
-                    "Bitte bestätigen, ob sie je Gruppe zu einem Objekt zusammengeführt werden sollen "
-                    "(z. B. ein Gebäude mit mehreren Hausnummern)."
+                    f"{', '.join(top_fields) or 'einzelnen Attributen'}. Alle wurden behalten. "
+                    "Bitte entscheiden, ob jede Gruppe zu einem Objekt zusammengeführt werden soll – "
+                    "etwa wenn dasselbe Objekt mehrfach mit unterschiedlichen Angaben gespeichert ist."
                 ),
                 severity="warning",
                 requires_confirmation=True,

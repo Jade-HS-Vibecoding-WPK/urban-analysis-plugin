@@ -382,6 +382,8 @@ def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
     assert uncertain.severity == "warning"
     assert "hnr" in uncertain.message
     assert "1 Gruppe(n) mit insgesamt 2 Objekten" in uncertain.message
+    assert "Alle wurden behalten" in uncertain.message
+    assert "Hausnummer" not in uncertain.message
 
 
 def test_merge_confirmed_duplicates_keeps_first_record_per_group(tmp_path):
