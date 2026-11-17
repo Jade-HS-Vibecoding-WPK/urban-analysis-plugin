@@ -60,6 +60,34 @@ def test_decisions_only_apply_when_the_pipeline_supports_it(monkeypatch):
     assert flow.result.harmonized_records == ["neu"]
 
 
+def test_going_back_to_step_5_after_step_6_keeps_the_merge(monkeypatch):
+    from urban_analysis.data_pipeline import HarmonizedRecord
+
+    flow = make_workflow()
+    flow.result.harmonized_records = [
+        HarmonizedRecord("gebaeude", 1, {"object_type": "A"}, duplicate_group="gebaeude:1"),
+        HarmonizedRecord("gebaeude", 2, {"object_type": "B"}, duplicate_group="gebaeude:1"),
+        HarmonizedRecord("gebaeude", 3, {"object_type": "C"}),
+    ]
+    flow.set_duplicate_decision("gebaeude", True)
+    assert flow.apply_duplicate_decisions() == 1
+
+    # fake M4: marks every record it gets, so we can see what it worked on
+    seen = []
+
+    def fake_apply(result):
+        seen.append(len(result.harmonized_records))
+        return list(result.harmonized_records)
+
+    monkeypatch.setattr(data_pipeline, "apply_attribute_decisions", fake_apply, raising=False)
+    assert flow.apply_attribute_decisions() is True
+    assert seen == [3]  # mapping applied to the original records
+    assert [r.source_row_id for r in flow.result.harmonized_records] == [1, 3]  # merge kept
+
+    flow.set_duplicate_decision("gebaeude", False)
+    assert flow.apply_duplicate_decisions() == 0  # still reversible
+
+
 def test_detail_line_shows_examples_and_column():
     assert mapping_detail_text("gfk__bez", ("Wohngebäude", "Garage")) == (
         "z. B. „Wohngebäude“, „Garage“ · Spalte gfk__bez"

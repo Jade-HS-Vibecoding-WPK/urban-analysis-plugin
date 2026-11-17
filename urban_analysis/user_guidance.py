@@ -269,9 +269,17 @@ class GuidedWorkflow:
         apply = getattr(data_pipeline, "apply_attribute_decisions", None)
         if apply is None:
             return False
-        self.result.harmonized_records = apply(self.result)
-        # Step 6 starts again from the newly harmonized records.
-        self._records_before_merge = None
+        if self._records_before_merge is None:
+            self.result.harmonized_records = apply(self.result)
+            return True
+        # Step 6 already merged duplicates: re-map the original records and
+        # apply the duplicate decisions again, so nothing is lost when the
+        # user goes back to step 5 after step 6.
+        self.result.harmonized_records = list(self._records_before_merge)
+        self._records_before_merge = list(apply(self.result))
+        self.result.harmonized_records = list(self._records_before_merge)
+        if self.duplicate_decisions and not self.open_duplicate_decisions():
+            self.apply_duplicate_decisions()
         return True
 
     # --- Step 4 "Layer prüfen" (W5): all hints, grouped and confirmable ---

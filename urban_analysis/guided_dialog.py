@@ -1431,7 +1431,10 @@ def _create_dock(plugin):
             flow.confirm_attribute_suggestions(decisions)
         except (KeyError, ValueError) as error:
             return reject(error_text(error))
-        applied = flow.apply_attribute_decisions()
+        try:
+            applied = flow.apply_attribute_decisions()
+        except ValueError as error:  # e.g. a target field chosen twice
+            return reject(error_text(error))
         dock.next_message = MAPPING_APPLIED_TEXT if applied else MAPPING_SAVED_TEXT
         return True
 
@@ -1643,6 +1646,11 @@ def _create_dock(plugin):
                 "Für das Kartenthema ist kein Layer ausgewählt. Bitte in Schritt 7 "
                 "mindestens eine Kategorie ankreuzen."
             )
+        try:
+            # Current decisions of step 5 (and step 6) on the data (S5).
+            flow.apply_attribute_decisions()
+        except ValueError as error:
+            return reject(error_text(error))
         try:
             from .mapping import readable_layer
         except ImportError:
