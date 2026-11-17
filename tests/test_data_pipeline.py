@@ -381,10 +381,9 @@ def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
     uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
     assert uncertain.requires_confirmation
     assert uncertain.severity == "warning"
-    assert "hnr" in uncertain.message
-    assert "1 Gruppe(n) mit insgesamt 2 Objekten" in uncertain.message
+    assert uncertain.message.startswith("gebaeude: 1 Gruppe(n) mit 2 Objekten")
+    assert "Hausnummer (hnr)" in uncertain.message
     assert "Alle wurden behalten" in uncertain.message
-    assert "Hausnummer" not in uncertain.message
 
 
 def test_merge_confirmed_duplicates_keeps_first_record_per_group(tmp_path):
@@ -507,3 +506,142 @@ def test_apply_data_source_fills_only_empty_sources(tmp_path):
     assert records[1].attributes["source"] is None
     with pytest.raises(ValueError):
         apply_data_source(records, "   ")
+
+
+NUTZUNG_ROWS = [
+    ("Strassenverkehr, Begleitfläche Straßenverkehr", "Straßen", "nutzung_strassen"),
+    ("Platz, Parkplatz", "Straßen", "nutzung_strassen"),
+    ("Weg, Rad- und Fußweg", "Fuß- und Radwege", "nutzung_fuss_radwege"),
+    ("Weg", "Fuß- und Radwege", "nutzung_fuss_radwege"),
+    ("Strassenverkehr, Fußgängerzone", "Fuß- und Radwege", "nutzung_fuss_radwege"),
+    ("Platz, Marktplatz", "Plätze", "nutzung_plaetze"),
+    ("Sport-, Freizeit- und Erholungsfläche, Park", "Grünflächen", "nutzung_gruen"),
+    ("Landwirtschaft, Grünland", "Grünflächen", "nutzung_gruen"),
+    ("Unland, Vegetationslose Fläche, Sukzessionsfläche", "Grünflächen", "nutzung_gruen"),
+    ("Fliessgewässer, Graben", "Wasserflächen", "nutzung_wasser"),
+    ("Bahnverkehr", "Bahnflächen", "nutzung_bahn"),
+    ("Schiffsverkehr, Hafenanlage (Landfläche)", "Schiffsverkehrsflächen", "nutzung_schiff"),
+    ("Wohnbaufläche, Offen", "Nutzungsflächen", "nutzung_flaechen"),
+    ("Sport-, Freizeit- und Erholungsfläche, Sportanlage", "Nutzungsflächen", "nutzung_flaechen"),
+    ("Landwirtschaft, Ackerland", "Nutzungsflächen", "nutzung_flaechen"),
+]
+
+
+def make_alkis_geopackage(path, *, with_objid=True):
+    """Small ALKIS-like GeoPackage: nutzung, gebaeude and an unrelated layer."""
+    objid = "objid TEXT," if with_objid else ""
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            f"""
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER
+            );
+            INSERT INTO gpkg_spatial_ref_sys VALUES
+                ('ETRS89 / UTM zone 32N', 25832, 'EPSG', 25832);
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT,
+                srs_id INTEGER
+            );
+            INSERT INTO gpkg_geometry_columns VALUES
+                ('nutzung', 'geom', 'MULTIPOLYGON', 25832),
+                ('gebaeude', 'geom', 'MULTIPOLYGON', 25832),
+                ('bodenschaetzung', 'geom', 'MULTIPOLYGON', 25832);
+            CREATE TABLE nutzung (fid INTEGER PRIMARY KEY, geom BLOB, {objid} tn__bez TEXT);
+            CREATE TABLE gebaeude (fid INTEGER PRIMARY KEY, geom BLOB, {objid} gfk__bez TEXT);
+            CREATE TABLE bodenschaetzung (fid INTEGER PRIMARY KEY, geom BLOB, {objid} kul__bez TEXT);
+            """
+        )
+        columns = "(fid, geom, objid, tn__bez)" if with_objid else "(fid, geom, tn__bez)"
+        for index, (value, _category, _layer) in enumerate(NUTZUNG_ROWS, start=1):
+            square = gpkg_polygon([(index, 1), (index + 0.5, 1), (index + 0.5, 2), (index, 2), (index, 1)])
+            values = (index, square, f"N{index}", value) if with_objid else (index, square, value)
+            marks = ", ".join("?" * len(values))
+            connection.execute(f"INSERT INTO nutzung {columns} VALUES ({marks})", values)
+        house = gpkg_polygon([(1, 5), (2, 5), (2, 6), (1, 6), (1, 5)])
+        if with_objid:
+            connection.execute("INSERT INTO gebaeude VALUES (1, ?, 'G1', 'Wohngebäude')", (house,))
+            connection.execute("INSERT INTO bodenschaetzung VALUES (1, ?, 'B1', 'Grünland')", (house,))
+        else:
+            connection.execute("INSERT INTO gebaeude VALUES (1, ?, 'Wohngebäude')", (house,))
+            connection.execute("INSERT INTO bodenschaetzung VALUES (1, ?, 'Grünland')", (house,))
+
+
+def import_alkis(path):
+    return GeoPackageImporter().import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 30 0, 30 10, 0 10, 0 0))",
+        buffer_meters=0,
+    )
+
+
+def test_alkis_nutzung_is_split_into_one_result_layer_per_category(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+
+    result = import_alkis(path)
+
+    by_row = {
+        record.source_row_id: record
+        for record in result.harmonized_records
+        if record.layer_id.startswith("nutzung")
+    }
+    for index, (value, category, layer_id) in enumerate(NUTZUNG_ROWS, start=1):
+        assert by_row[index].attributes["category"] == category, value
+        assert by_row[index].layer_id == layer_id, value
+    nutzung_layers = {layer.layer_id: layer.category for layer in result.layers if layer.layer_id.startswith("nutzung")}
+    assert nutzung_layers == {layer_id: category for _value, category, layer_id in NUTZUNG_ROWS}
+    assert "nutzung" not in {layer.layer_id for layer in result.layers}
+
+
+def test_alkis_values_keep_main_type_and_detail(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+
+    result = import_alkis(path)
+
+    def attributes_for(value):
+        index = [row[0] for row in NUTZUNG_ROWS].index(value) + 1
+        return next(
+            record.attributes for record in result.harmonized_records
+            if record.layer_id.startswith("nutzung") and record.source_row_id == index
+        )
+
+    assert attributes_for("Wohnbaufläche, Offen")["object_type"] == "Wohnbaufläche"
+    assert attributes_for("Wohnbaufläche, Offen")["object_detail"] == "Offen"
+    park = attributes_for("Sport-, Freizeit- und Erholungsfläche, Park")
+    assert (park["object_type"], park["object_detail"]) == ("Sport-, Freizeit- und Erholungsfläche", "Park")
+    unland = attributes_for("Unland, Vegetationslose Fläche, Sukzessionsfläche")
+    assert (unland["object_type"], unland["object_detail"]) == ("Unland, Vegetationslose Fläche", "Sukzessionsfläche")
+    assert attributes_for("Bahnverkehr")["object_detail"] is None
+
+
+def test_alkis_buildings_and_unrelated_layers(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+
+    result = import_alkis(path)
+
+    categories = {layer.layer_id: layer.category for layer in result.layers}
+    assert categories["gebaeude"] == "Gebäude"
+    assert categories["bodenschaetzung"] is None
+    building = next(record for record in result.harmonized_records if record.layer_id == "gebaeude")
+    assert building.attributes["object_type"] == "Wohngebäude"
+    assert building.attributes["category"] == "Gebäude"
+    assert "missing-category" not in {issue.code for issue in result.issues}
+    suggestion = next(s for s in result.attribute_suggestions if s.source_field == "gfk__bez")
+    assert (suggestion.target_field, suggestion.confidence) == ("object_type", 1.0)
+
+
+def test_without_alkis_profile_only_the_layer_name_decides(tmp_path):
+    path = tmp_path / "other.gpkg"
+    make_alkis_geopackage(path, with_objid=False)
+
+    result = import_alkis(path)
+
+    categories = {layer.layer_id: layer.category for layer in result.layers}
+    assert categories == {"nutzung": "Nutzungsflächen", "gebaeude": "Gebäude", "bodenschaetzung": None}
+    hint = next(issue for issue in result.issues if issue.code == "missing-category")
+    assert "bodenschaetzung" in hint.message
+    assert all(record.attributes["object_detail"] is None for record in result.harmonized_records)

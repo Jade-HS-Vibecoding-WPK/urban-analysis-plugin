@@ -1,0 +1,141 @@
+{
+  "_hinweis": "Regeln, wie die Datenpipeline Layer und Objekte Kategorien zuordnet. Änderungen hier brauchen keinen neuen Code. Reihenfolge der category_rules ist wichtig: die erste passende Regel gewinnt. Ein Wert passt zu einem Eintrag, wenn er genau gleich ist oder mit dem Eintrag gefolgt von ', ' beginnt.",
+  "version": 1,
+
+  "name_categories": {
+    "_hinweis": "Für Daten ohne passendes Profil: Kategorie nur aus dem Layernamen. Erster Treffer gewinnt.",
+    "Gebäude": ["gebäude", "gebaeude", "building", "buildings", "haus", "häuser"],
+    "Straßen": ["straße", "strasse", "straßen", "strassen", "street", "streets", "road", "roads"],
+    "Grünflächen": ["grünfläche", "gruenflaeche", "grün", "gruen", "green", "park", "vegetation"],
+    "Nutzungsflächen": ["nutzung", "landuse", "land_use", "flächennutzung", "flaechennutzung"]
+  },
+
+  "field_labels": {
+    "_hinweis": "Verständliche Namen für Spalten in Prüfhinweisen.",
+    "objid": "ALKIS-Objekt-ID",
+    "gfk": "Gebäudefunktion (Schlüssel)",
+    "gfk__bez": "Gebäudefunktion",
+    "baw": "Bauweise (Schlüssel)",
+    "baw__bez": "Bauweise",
+    "ofl": "Lage zur Erdoberfläche (Schlüssel)",
+    "ofl__bez": "Lage zur Erdoberfläche",
+    "bez": "Lagebezeichnung",
+    "hnr": "Hausnummer",
+    "tn": "Tatsächliche Nutzung (Schlüssel)",
+    "tn__bez": "Tatsächliche Nutzung",
+    "bwf": "Bauwerksfunktion (Schlüssel)",
+    "bwf__bez": "Bauwerksfunktion",
+    "ken": "Kennzeichnung (Schlüssel)",
+    "ken__bez": "Kennzeichnung",
+    "abm": "Abmarkung",
+    "untermerkmal": "Untermerkmal"
+  },
+
+  "profiles": [
+    {
+      "name": "ALKIS",
+      "_hinweis": "ALKIS-Export (z. B. lkr_03403_Stadt_Oldenburg_kon.gpkg). Ein Layer gehört zum Profil, wenn sein Name hier steht und er alle requires_fields hat.",
+      "requires_fields": ["objid"],
+      "layers": {
+        "gebaeude": {
+          "category": "Gebäude",
+          "object_type_field": "gfk__bez"
+        },
+        "nutzung": {
+          "object_type_field": "tn__bez",
+          "main_types": [
+            "Wohnbaufläche",
+            "Industrie- und Gewerbefläche",
+            "Fläche gemischter Nutzung",
+            "Flächen besonderer funktionaler Prägung",
+            "Sport-, Freizeit- und Erholungsfläche",
+            "Friedhof",
+            "Strassenverkehr",
+            "Weg",
+            "Platz",
+            "Bahnverkehr",
+            "Schiffsverkehr",
+            "Landwirtschaft",
+            "Wald",
+            "Gehölz",
+            "Heide",
+            "Moor",
+            "Sumpf",
+            "Unland, Vegetationslose Fläche",
+            "Fliessgewässer",
+            "Stehendes Gewässer",
+            "Hafenbecken"
+          ],
+          "category_rules": [
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["Strassenverkehr, Fußgängerzone", "Platz, Fußgängerzone"]
+            },
+            {
+              "category": "Straßen",
+              "layer_suffix": "strassen",
+              "values": ["Platz, Parkplatz", "Platz, Rastplatz", "Strassenverkehr"]
+            },
+            {
+              "category": "Plätze",
+              "layer_suffix": "plaetze",
+              "values": ["Platz"]
+            },
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["Weg"]
+            },
+            {
+              "category": "Grünflächen",
+              "layer_suffix": "gruen",
+              "values": [
+                "Sport-, Freizeit- und Erholungsfläche, Siedlungsgrünfläche",
+                "Sport-, Freizeit- und Erholungsfläche, Park",
+                "Sport-, Freizeit- und Erholungsfläche, Grünanlage",
+                "Sport-, Freizeit- und Erholungsfläche, Kleingarten",
+                "Sport-, Freizeit- und Erholungsfläche, Spielplatz",
+                "Sport-, Freizeit- und Erholungsfläche, Botanischer Garten",
+                "Friedhof",
+                "Wald",
+                "Gehölz",
+                "Heide",
+                "Moor",
+                "Sumpf",
+                "Landwirtschaft, Grünland",
+                "Unland"
+              ]
+            },
+            {
+              "category": "Wasserflächen",
+              "layer_suffix": "wasser",
+              "values": ["Fliessgewässer", "Stehendes Gewässer", "Hafenbecken"]
+            },
+            {
+              "category": "Bahnflächen",
+              "layer_suffix": "bahn",
+              "values": ["Bahnverkehr"]
+            },
+            {
+              "category": "Schiffsverkehrsflächen",
+              "layer_suffix": "schiff",
+              "values": ["Schiffsverkehr"]
+            }
+          ],
+          "default_rule": {
+            "category": "Nutzungsflächen",
+            "layer_suffix": "flaechen"
+          }
+        },
+        "bauwerke_f": {"category": null, "object_type_field": "bwf__bez"},
+        "bauwerke_p": {"category": null, "object_type_field": "bwf__bez"},
+        "bauwerke_l": {"category": null, "object_type_field": "bwf__bez"},
+        "flurstuecke": {"category": null},
+        "grenzpunkte": {"category": null},
+        "bodenschaetzung": {"category": null},
+        "bewertung": {"category": null}
+      }
+    }
+  ]
+}
