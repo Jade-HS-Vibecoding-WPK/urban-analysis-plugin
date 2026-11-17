@@ -5,11 +5,11 @@ from qgis.PyQt.QtWidgets import QAction
 from .contracts import PipelineResult
 from .guided_dialog import report_unexpected_error, set_dock_visible
 from .outputs import export_selected_outputs
+from .theme import icon_path
 from .user_guidance import GuidedWorkflow, OutputPlan
 
 
 MENU_NAME = "&Urban Analysis"
-TOOLBAR_ICON = "/mLayoutItemMap.svg"
 
 
 class UrbanAnalysisPlugin:
@@ -23,10 +23,10 @@ class UrbanAnalysisPlugin:
 
     def initGui(self):
         """Add a toggle action for the side panel to the menu and toolbar."""
-        from qgis.core import QgsApplication
+        from qgis.PyQt.QtGui import QIcon
 
         self.action = QAction(
-            QgsApplication.getThemeIcon(TOOLBAR_ICON),
+            QIcon(icon_path()),
             "Urban Analysis",
             self.iface.mainWindow(),
         )

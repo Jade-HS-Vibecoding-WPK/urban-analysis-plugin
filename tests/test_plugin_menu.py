@@ -60,13 +60,11 @@ class FakeIface:
 
 def load_plugin_module(monkeypatch):
     qtwidgets = types.SimpleNamespace(QAction=FakeAction)
-    core = types.SimpleNamespace(
-        QgsApplication=types.SimpleNamespace(getThemeIcon=lambda name: name)
-    )
+    qtgui = types.SimpleNamespace(QIcon=lambda path: path)
     monkeypatch.setitem(sys.modules, "qgis", types.ModuleType("qgis"))
-    monkeypatch.setitem(sys.modules, "qgis.core", core)
     monkeypatch.setitem(sys.modules, "qgis.PyQt", types.ModuleType("qgis.PyQt"))
     monkeypatch.setitem(sys.modules, "qgis.PyQt.QtWidgets", qtwidgets)
+    monkeypatch.setitem(sys.modules, "qgis.PyQt.QtGui", qtgui)
     from urban_analysis import urban_analysis_plugin
 
     monkeypatch.setattr(urban_analysis_plugin, "QAction", FakeAction)

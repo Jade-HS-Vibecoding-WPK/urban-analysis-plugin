@@ -5,6 +5,8 @@ pipeline receives it as WKT (ARBEITSPLAN W3 / interface S1).  QGIS is only
 imported inside the functions, so the text helpers stay testable without QGIS.
 """
 
+from .theme import DRAW_FILL_RGBA, DRAW_STROKE_RGBA
+
 DRAWN_LAYER_NAME = "Untersuchungsgebiet (gezeichnet)"
 DRAW_INSTRUCTIONS = (
     "Linksklick setzt einen Punkt, Rücktaste entfernt den letzten Punkt, "
@@ -139,8 +141,8 @@ def create_polygon_draw_tool(canvas, on_finished, on_canceled):
             super().__init__(canvas)
             self.points = []
             self.band = QgsRubberBand(canvas, Qgis.GeometryType.Polygon)
-            self.band.setStrokeColor(QColor(31, 111, 178, 220))
-            self.band.setFillColor(QColor(31, 111, 178, 60))
+            self.band.setStrokeColor(QColor(*DRAW_STROKE_RGBA))
+            self.band.setFillColor(QColor(*DRAW_FILL_RGBA))
             self.band.setWidth(2)
             self.setCursor(Qt.CrossCursor)
 

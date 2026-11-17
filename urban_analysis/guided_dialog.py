@@ -17,6 +17,7 @@ from .study_area import (
     create_polygon_draw_tool,
     study_area_from_layer,
 )
+from .theme import panel_stylesheet, set_role
 from .ui_contract import UI_LABELS
 
 
@@ -37,43 +38,46 @@ PAGE_ACTIONS = (
     "CRS übernehmen",
     "Gebiet übernehmen",
     UI_LABELS["load_data"],
-    "Weiter zur Attributzuordnung",
+    "Hinweise geprüft",
     "Zuordnung bestätigen",
-    "Weiter zum Kartenthema",
+    "Weiter",
     "Thema übernehmen",
     "Ausgabe übernehmen",
     UI_LABELS["start_processing"],
 )
 
-# Minimal styling: the main action stands out and reacts to hover and click.
-# The overall look of the panel is designed in a later step.
-PRIMARY_BUTTON_STYLE = """
-QPushButton#uaPrimaryButton {
-    background-color: #1f6fb2;
-    color: white;
-    border: 1px solid #17558a;
-    border-radius: 4px;
-    padding: 6px 14px;
-    font-weight: bold;
-}
-QPushButton#uaPrimaryButton:hover {
-    background-color: #2b83cf;
-}
-QPushButton#uaPrimaryButton:pressed {
-    background-color: #17558a;
-    padding-top: 7px;
-    padding-bottom: 5px;
-}
-QPushButton#uaPrimaryButton:disabled {
-    background-color: #9bb7cf;
-    border-color: #9bb7cf;
-}
-"""
-MESSAGE_STYLES = {
-    "error": "color: #b00020;",
-    "info": "color: #1f4e79;",
-}
+SOURCE_LOCAL_LABEL = "Lokale Daten"
+SOURCE_ONLINE_LABEL = "Online-Suche"
+ONLINE_PENDING_MESSAGE = (
+    "Die Online-Suche nach offenen Daten wird in einem späteren Schritt gebaut. "
+    "Bitte vorerst „Lokale Daten“ verwenden."
+)
+LOCAL_DATA_HINT = (
+    "Eigene GeoPackage-Datei (.gpkg) von deinem Rechner. Dateiauswahl und Start "
+    "der Datenpipeline folgen im nächsten Schritt (ARBEITSPLAN W4)."
+)
+BUSY_TICK_MS = 120
+INDENT_PX = 22
+MIN_CONTENT_WIDTH = 300
+MESSAGE_MAX_HEIGHT = 140
 
+
+def make_texts_selectable(widget):
+    """Let the user select and copy every text label inside ``widget``.
+
+    Selectable labels also get Qt's context menu with "Kopieren" and
+    "Alles auswählen".
+    """
+    from qgis.PyQt.QtCore import Qt
+    from qgis.PyQt.QtWidgets import QLabel
+
+    labels = widget.findChildren(QLabel)
+    if isinstance(widget, QLabel):
+        labels.append(widget)
+    for label in labels:
+        label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
 
 LOG_TAG = "Urban Analysis"
 
@@ -143,10 +147,12 @@ def _create_dock(plugin):
     """Build the side panel with progress, pages and one main action per page."""
     from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsProject
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
-    from qgis.PyQt.QtCore import Qt
+    from qgis.PyQt.QtCore import Qt, QTimer
     from qgis.PyQt.QtWidgets import (
+        QButtonGroup,
         QCheckBox,
         QDoubleSpinBox,
+        QFrame,
         QHBoxLayout,
         QLabel,
         QLineEdit,
@@ -156,7 +162,7 @@ def _create_dock(plugin):
         QPushButton,
         QRadioButton,
         QScrollArea,
-        QStackedWidget,
+        QSizePolicy,
         QVBoxLayout,
         QWidget,
     )
@@ -167,7 +173,7 @@ def _create_dock(plugin):
         def __init__(self, builder=None, validator=None, rebuild=False, on_show=None):
             self.widget = QWidget()
             self.layout = QVBoxLayout(self.widget)
-            self.layout.setAlignment(Qt.AlignTop)
+            self.layout.setContentsMargins(0, 0, 0, 0)
             self.builder = builder
             self.validator = validator
             self.rebuild = rebuild
@@ -192,40 +198,78 @@ def _create_dock(plugin):
             self.draw_tool = None
             self.previous_map_tool = None
 
+            # The whole plugin shares one style (theme.py).
+            self.setStyleSheet(panel_stylesheet())
             body = QWidget()
             layout = QVBoxLayout(body)
 
             self.step_label = QLabel()
-            font = self.step_label.font()
-            font.setBold(True)
-            self.step_label.setFont(font)
-            self.progress = QProgressBar()
-            self.progress.setRange(0, len(MVP_UI_STEPS))
-            self.progress.setTextVisible(False)
+            self.step_label.setWordWrap(True)
+            set_role(self.step_label, "heading")
 
-            # Busy indicator for long steps (used from W4 on). Range 0..0 makes
-            # Qt animate the bar, so it is visible that QGIS is still working.
+            # Overall progress: one block per step up to the map.
+            self.step_blocks = []
+            progress_row = QHBoxLayout()
+            progress_row.setSpacing(3)
+            for index, step in enumerate(MVP_UI_STEPS):
+                block = QFrame()
+                block.setFixedSize(26, 8)
+                block.setToolTip(f"{index + 1}. {step}")
+                set_role(block, "step-todo")
+                progress_row.addWidget(block)
+                self.step_blocks.append(block)
+            progress_row.addStretch()
+
+            # Busy indicator for long steps (used from W4 on). A timer moves
+            # the blocks, so it is visible that QGIS is still working.
             self.busy_label = QLabel()
+            set_role(self.busy_label, "status")
             self.busy_bar = QProgressBar()
-            self.busy_bar.setRange(0, 0)
+            self.busy_bar.setRange(0, 12)
+            self.busy_bar.setTextVisible(False)
+            self.busy_timer = QTimer(self)
+            self.busy_timer.setInterval(BUSY_TICK_MS)
+            self.busy_timer.timeout.connect(self._advance_busy)
             self.busy_label.hide()
             self.busy_bar.hide()
 
-            self.stack = QStackedWidget()
+            # Only the current page is visible. A plain box layout (instead of
+            # QStackedWidget) gives wrapped texts their full height.
+            self.stack = QWidget()
+            self.stack_layout = QVBoxLayout(self.stack)
+            self.stack_layout.setContentsMargins(8, 8, 8, 8)
+            # A stretch (not AlignTop) keeps pages at the top; AlignTop would make
+            # Qt ignore the height of wrapped texts and cut them off.
+            self.stack_layout.addStretch(1)
+            # Pages take the panel width, so long texts wrap instead of being cut.
+            # Below MIN_CONTENT_WIDTH a horizontal scroll bar appears instead.
+            self.stack.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            self.stack.setMinimumWidth(MIN_CONTENT_WIDTH)
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             scroll.setWidget(self.stack)
+            self.scroll = scroll
 
+            # Messages get their own small scroll area, so long texts (e.g. an
+            # unexpected error) stay readable without pushing the buttons away.
             self.message = QLabel()
             self.message.setWordWrap(True)
-            self.message.hide()
+            self.message.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            self.message_scroll = QScrollArea()
+            self.message_scroll.setWidgetResizable(True)
+            self.message_scroll.setWidget(self.message)
+            self.message_scroll.setMaximumHeight(MESSAGE_MAX_HEIGHT)
+            self.message_scroll.hide()
 
             self.back_button = QPushButton("Zurück")
+            set_role(self.back_button, "secondary")
             self.back_button.setCursor(Qt.PointingHandCursor)
             self.back_button.clicked.connect(self.go_back)
             self.primary_button = QPushButton()
             self.primary_button.setObjectName("uaPrimaryButton")
-            self.primary_button.setStyleSheet(PRIMARY_BUTTON_STYLE)
+            set_role(self.primary_button, "primary")
             self.primary_button.setCursor(Qt.PointingHandCursor)
             self.primary_button.clicked.connect(self.run_primary_action)
             buttons = QHBoxLayout()
@@ -234,12 +278,13 @@ def _create_dock(plugin):
             buttons.addWidget(self.primary_button)
 
             layout.addWidget(self.step_label)
-            layout.addWidget(self.progress)
+            layout.addLayout(progress_row)
             layout.addWidget(self.busy_label)
             layout.addWidget(self.busy_bar)
             layout.addWidget(scroll, 1)
-            layout.addWidget(self.message)
+            layout.addWidget(self.message_scroll)
             layout.addLayout(buttons)
+            make_texts_selectable(body)
             self.setWidget(body)
 
         def add_page(self, builder=None, validator=None, rebuild=False, on_show=None):
@@ -247,7 +292,8 @@ def _create_dock(plugin):
             if builder is not None and not rebuild:
                 page.build()
             self.pages.append(page)
-            self.stack.addWidget(page.widget)
+            page.widget.hide()
+            self.stack_layout.insertWidget(self.stack_layout.count() - 1, page.widget)
             return page
 
         def show_page(self, index):
@@ -255,12 +301,22 @@ def _create_dock(plugin):
             page = self.pages[index]
             if page.rebuild:
                 page.build()
+            make_texts_selectable(page.widget)
             if page.on_show is not None:
                 page.on_show(page)
             self.current = index
-            self.stack.setCurrentIndex(index)
+            self.scroll.verticalScrollBar().setValue(0)
+            self.scroll.horizontalScrollBar().setValue(0)
+            for page_index, other in enumerate(self.pages):
+                other.widget.setVisible(page_index == index)
             self.step_label.setText(progress_text(index))
-            self.progress.setValue(index + 1)
+            for block_index, block in enumerate(self.step_blocks):
+                if block_index < index:
+                    set_role(block, "step-done")
+                elif block_index == index:
+                    set_role(block, "step-current")
+                else:
+                    set_role(block, "step-todo")
             self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
@@ -287,27 +343,34 @@ def _create_dock(plugin):
             self.show_message(report_unexpected_error(plugin, context, error))
 
         def show_message(self, text, kind="error"):
-            self.message.setStyleSheet(MESSAGE_STYLES[kind])
+            set_role(self.message, kind)
             self.message.setText(text)
-            self.message.show()
+            self.message_scroll.show()
 
         def clear_message(self):
             self.message.clear()
-            self.message.hide()
+            self.message_scroll.hide()
 
         def set_busy(self, text):
-            """Show the animated busy bar and block navigation."""
+            """Show the moving busy bar and block navigation."""
             self.busy_label.setText(text)
+            self.busy_bar.setValue(0)
             self.busy_label.show()
             self.busy_bar.show()
+            self.busy_timer.start()
             self.primary_button.setEnabled(False)
             self.back_button.setEnabled(False)
 
         def clear_busy(self):
+            self.busy_timer.stop()
             self.busy_label.hide()
             self.busy_bar.hide()
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
+
+        def _advance_busy(self):
+            value = self.busy_bar.value() + 1
+            self.busy_bar.setValue(0 if value > self.busy_bar.maximum() else value)
 
         def start_drawing(self, on_finished, on_canceled):
             """Activate the polygon drawing tool in the QGIS map."""
@@ -342,12 +405,22 @@ def _create_dock(plugin):
 
         def cleanup(self):
             """Called when the plugin is unloaded."""
+            self.busy_timer.stop()
             self.stop_drawing()
 
     dock = GuidedDock()
 
     def workflow():
         return plugin._require_workflow()
+
+    def indented(*widgets):
+        """Group sub-options below a choice, indented to show they belong to it."""
+        box = QWidget()
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(INDENT_PX, 0, 0, 4)
+        for widget in widgets:
+            box_layout.addWidget(widget)
+        return box
 
     def reject(text):
         dock.show_message(text)
@@ -367,6 +440,7 @@ def _create_dock(plugin):
         )
         hint = QLabel(CRS_HINT)
         hint.setWordWrap(True)
+        set_role(hint, "hint")
         page.layout.addWidget(QLabel(UI_LABELS["project_crs"]))
         page.layout.addWidget(crs_widget)
         page.layout.addWidget(hint)
@@ -391,26 +465,35 @@ def _create_dock(plugin):
 
     # 2 Untersuchungsgebiet: existing polygon layer or a polygon drawn in the map
     def build_area(page):
-        use_layer = QRadioButton("Vorhandenen Polygon-Layer verwenden")
-        use_drawing = QRadioButton("Neues Polygon in der Karte zeichnen")
+        use_layer = QRadioButton("Vorhandener Layer")
+        use_layer.setToolTip("Vorhandenen Polygon-Layer aus dem Projekt verwenden")
+        use_drawing = QRadioButton("Neu zeichnen")
+        use_drawing.setToolTip("Neues Polygon in der Karte zeichnen")
         use_layer.setChecked(True)
 
         layer_box = QgsMapLayerComboBox()
         layer_box.setFilters(Qgis.LayerFilter.PolygonLayer)
+        layer_box.setSizeAdjustPolicy(layer_box.AdjustToMinimumContentsLengthWithIcon)
+        layer_box.setMinimumContentsLength(12)
         selected_only = QCheckBox("Nur ausgewählte Objekte")
         no_layer_hint = QLabel(
             "Im Projekt gibt es noch keinen Polygon-Layer. Bitte einen Layer laden "
             "oder ein neues Polygon zeichnen."
         )
         no_layer_hint.setWordWrap(True)
+        set_role(no_layer_hint, "hint")
 
-        draw_button = QPushButton("Polygon in der Karte zeichnen")
+        draw_button = QPushButton("Polygon zeichnen")
+        draw_button.setToolTip("Polygon in der Karte zeichnen")
+        set_role(draw_button, "secondary")
         draw_button.setCursor(Qt.PointingHandCursor)
         draw_hint = QLabel(DRAW_INSTRUCTIONS)
         draw_hint.setWordWrap(True)
+        set_role(draw_hint, "hint")
 
         status = QLabel()
         status.setWordWrap(True)
+        set_role(status, "hint")
         buffer_input = QDoubleSpinBox()
         buffer_input.setRange(0, 1000000)
         buffer_input.setValue(
@@ -419,12 +502,9 @@ def _create_dock(plugin):
 
         page.layout.addWidget(QLabel(UI_LABELS["study_area"]))
         page.layout.addWidget(use_layer)
-        page.layout.addWidget(layer_box)
-        page.layout.addWidget(selected_only)
-        page.layout.addWidget(no_layer_hint)
+        page.layout.addWidget(indented(layer_box, selected_only, no_layer_hint))
         page.layout.addWidget(use_drawing)
-        page.layout.addWidget(draw_button)
-        page.layout.addWidget(draw_hint)
+        page.layout.addWidget(indented(draw_button, draw_hint))
         page.layout.addWidget(status)
         page.layout.addWidget(QLabel(UI_LABELS["buffer"]))
         page.layout.addWidget(buffer_input)
@@ -510,8 +590,8 @@ def _create_dock(plugin):
             layer = QgsProject.instance().mapLayer(layer_id) if layer_id else None
             if layer is None:
                 raise StudyAreaError(
-                    "Es ist noch kein Polygon gezeichnet. Bitte auf „Polygon in der "
-                    "Karte zeichnen“ klicken."
+                    "Es ist noch kein Polygon gezeichnet. Bitte auf „Polygon "
+                    "zeichnen“ klicken."
                 )
             return study_area_from_layer(layer, target_crs(), selected_only=False)
         return study_area_from_layer(
@@ -525,10 +605,10 @@ def _create_dock(plugin):
         try:
             geometry, count = chosen_area(page)
         except StudyAreaError as error:
-            status.setStyleSheet("color: #666666;")
+            set_role(status, "hint")
             status.setText(str(error))
             return
-        status.setStyleSheet("")
+        set_role(status, "status")
         status.setText(area_summary_text(count, geometry.area(), target_crs().authid()))
 
     def validate_area(page):
@@ -555,13 +635,46 @@ def _create_dock(plugin):
         )
         return True
 
-    # 3 Daten laden
+    # 3 Daten laden: local GeoPackage (W4) or online search (later extension)
     def build_data(page):
-        label = QLabel("Die Daten werden von der Datenpipeline bereitgestellt.")
-        label.setWordWrap(True)
-        page.layout.addWidget(label)
+        use_local = QRadioButton(SOURCE_LOCAL_LABEL)
+        use_online = QRadioButton(SOURCE_ONLINE_LABEL)
+        use_local.setChecked(True)
+        group = QButtonGroup(page.widget)
+        group.addButton(use_local)
+        group.addButton(use_online)
+        local_hint = QLabel(LOCAL_DATA_HINT)
+        local_hint.setWordWrap(True)
+        set_role(local_hint, "hint")
+        online_hint = QLabel(ONLINE_PENDING_MESSAGE)
+        online_hint.setWordWrap(True)
+        set_role(online_hint, "hint")
 
-    def validate_data(_page):
+        question = QLabel("Woher sollen die Daten kommen?")
+        question.setWordWrap(True)
+        page.layout.addWidget(question)
+        page.layout.addWidget(use_local)
+        page.layout.addWidget(indented(local_hint))
+        page.layout.addWidget(use_online)
+        page.layout.addWidget(indented(online_hint))
+        page.widgets.update(
+            use_local=use_local,
+            use_online=use_online,
+            group=group,
+            local_hint=local_hint,
+            online_hint=online_hint,
+        )
+
+        def refresh(*_args):
+            local_hint.setVisible(use_local.isChecked())
+            online_hint.setVisible(use_online.isChecked())
+
+        use_local.toggled.connect(refresh)
+        refresh()
+
+    def validate_data(page):
+        if page.widgets["use_online"].isChecked():
+            return reject(ONLINE_PENDING_MESSAGE)
         if plugin.workflow is None:
             return reject(NO_DATA_MESSAGE)
         return True
