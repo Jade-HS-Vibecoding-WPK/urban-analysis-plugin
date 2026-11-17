@@ -9,6 +9,14 @@ they always reflect the data that is currently loaded.
 """
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
+from .study_area import (
+    DRAW_INSTRUCTIONS,
+    StudyAreaError,
+    add_drawn_area_layer,
+    area_summary_text,
+    create_polygon_draw_tool,
+    study_area_from_layer,
+)
 from .ui_contract import UI_LABELS
 
 
@@ -133,8 +141,8 @@ def set_dock_visible(plugin, visible):
 
 def _create_dock(plugin):
     """Build the side panel with progress, pages and one main action per page."""
-    from qgis.core import QgsCoordinateReferenceSystem, QgsProject
-    from qgis.gui import QgsDockWidget, QgsProjectionSelectionWidget
+    from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsProject
+    from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
     from qgis.PyQt.QtCore import Qt
     from qgis.PyQt.QtWidgets import (
         QCheckBox,
@@ -144,9 +152,9 @@ def _create_dock(plugin):
         QLineEdit,
         QListWidget,
         QListWidgetItem,
-        QPlainTextEdit,
         QProgressBar,
         QPushButton,
+        QRadioButton,
         QScrollArea,
         QStackedWidget,
         QVBoxLayout,
@@ -156,13 +164,14 @@ def _create_dock(plugin):
     class Page:
         """One step of the guidance: widgets, optional builder and validator."""
 
-        def __init__(self, builder=None, validator=None, rebuild=False):
+        def __init__(self, builder=None, validator=None, rebuild=False, on_show=None):
             self.widget = QWidget()
             self.layout = QVBoxLayout(self.widget)
             self.layout.setAlignment(Qt.AlignTop)
             self.builder = builder
             self.validator = validator
             self.rebuild = rebuild
+            self.on_show = on_show
             self.widgets = {}
 
         def build(self):
@@ -178,6 +187,10 @@ def _create_dock(plugin):
             self.setObjectName(DOCK_OBJECT_NAME)
             self.pages = []
             self.current = 0
+            # Values confirmed in steps 1-2; step 3 (W4) passes them to the pipeline.
+            self.settings = {}
+            self.draw_tool = None
+            self.previous_map_tool = None
 
             body = QWidget()
             layout = QVBoxLayout(body)
@@ -229,8 +242,8 @@ def _create_dock(plugin):
             layout.addLayout(buttons)
             self.setWidget(body)
 
-        def add_page(self, builder=None, validator=None, rebuild=False):
-            page = Page(builder, validator, rebuild)
+        def add_page(self, builder=None, validator=None, rebuild=False, on_show=None):
+            page = Page(builder, validator, rebuild, on_show)
             if builder is not None and not rebuild:
                 page.build()
             self.pages.append(page)
@@ -238,9 +251,12 @@ def _create_dock(plugin):
             return page
 
         def show_page(self, index):
+            self.stop_drawing()
             page = self.pages[index]
             if page.rebuild:
                 page.build()
+            if page.on_show is not None:
+                page.on_show(page)
             self.current = index
             self.stack.setCurrentIndex(index)
             self.step_label.setText(progress_text(index))
@@ -293,6 +309,41 @@ def _create_dock(plugin):
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
 
+        def start_drawing(self, on_finished, on_canceled):
+            """Activate the polygon drawing tool in the QGIS map."""
+            canvas = plugin.iface.mapCanvas()
+            self.stop_drawing()
+
+            def finished(geometry):
+                self.stop_drawing()
+                on_finished(geometry, canvas.mapSettings().destinationCrs())
+
+            def canceled(message):
+                self.stop_drawing()
+                on_canceled(message)
+
+            self.previous_map_tool = canvas.mapTool()
+            self.draw_tool = create_polygon_draw_tool(canvas, finished, canceled)
+            canvas.setMapTool(self.draw_tool)
+            canvas.setFocus()
+
+        def stop_drawing(self):
+            """Deactivate the drawing tool and restore the previous map tool."""
+            if self.draw_tool is None:
+                return
+            canvas = plugin.iface.mapCanvas()
+            tool, self.draw_tool = self.draw_tool, None
+            if canvas.mapTool() is tool:
+                if self.previous_map_tool is not None:
+                    canvas.setMapTool(self.previous_map_tool)
+                else:
+                    canvas.unsetMapTool(tool)
+            self.previous_map_tool = None
+
+        def cleanup(self):
+            """Called when the plugin is unloaded."""
+            self.stop_drawing()
+
     dock = GuidedDock()
 
     def workflow():
@@ -335,37 +386,173 @@ def _create_dock(plugin):
                 f"{crs.authid()} rechnet in Grad. Für den Puffer in Metern bitte ein "
                 "metrisches CRS wählen, z. B. EPSG:25832."
             )
+        dock.settings["project_crs"] = crs.authid()
         return True
 
-    # 2 Untersuchungsgebiet
+    # 2 Untersuchungsgebiet: existing polygon layer or a polygon drawn in the map
     def build_area(page):
-        area_input = QPlainTextEdit(existing.study_area_wkt if existing else "")
+        use_layer = QRadioButton("Vorhandenen Polygon-Layer verwenden")
+        use_drawing = QRadioButton("Neues Polygon in der Karte zeichnen")
+        use_layer.setChecked(True)
+
+        layer_box = QgsMapLayerComboBox()
+        layer_box.setFilters(Qgis.LayerFilter.PolygonLayer)
+        selected_only = QCheckBox("Nur ausgewählte Objekte")
+        no_layer_hint = QLabel(
+            "Im Projekt gibt es noch keinen Polygon-Layer. Bitte einen Layer laden "
+            "oder ein neues Polygon zeichnen."
+        )
+        no_layer_hint.setWordWrap(True)
+
+        draw_button = QPushButton("Polygon in der Karte zeichnen")
+        draw_button.setCursor(Qt.PointingHandCursor)
+        draw_hint = QLabel(DRAW_INSTRUCTIONS)
+        draw_hint.setWordWrap(True)
+
+        status = QLabel()
+        status.setWordWrap(True)
         buffer_input = QDoubleSpinBox()
         buffer_input.setRange(0, 1000000)
         buffer_input.setValue(
             existing.buffer_meters if existing else MVP_DEFAULT_BUFFER_METERS
         )
-        page.layout.addWidget(QLabel("Untersuchungsgebiet (WKT-Polygon)"))
-        page.layout.addWidget(area_input)
+
+        page.layout.addWidget(QLabel(UI_LABELS["study_area"]))
+        page.layout.addWidget(use_layer)
+        page.layout.addWidget(layer_box)
+        page.layout.addWidget(selected_only)
+        page.layout.addWidget(no_layer_hint)
+        page.layout.addWidget(use_drawing)
+        page.layout.addWidget(draw_button)
+        page.layout.addWidget(draw_hint)
+        page.layout.addWidget(status)
         page.layout.addWidget(QLabel(UI_LABELS["buffer"]))
         page.layout.addWidget(buffer_input)
-        page.widgets.update(area=area_input, buffer=buffer_input)
+        page.widgets.update(
+            use_layer=use_layer,
+            use_drawing=use_drawing,
+            layer=layer_box,
+            selected_only=selected_only,
+            no_layer_hint=no_layer_hint,
+            draw_button=draw_button,
+            draw_hint=draw_hint,
+            status=status,
+            buffer=buffer_input,
+            drawn_layer_id=None,
+            watched_layer=None,
+        )
+
+        def refresh(*_args):
+            drawing = use_drawing.isChecked()
+            has_layers = layer_box.count() > 0
+            layer_box.setEnabled(not drawing)
+            selected_only.setEnabled(not drawing)
+            no_layer_hint.setVisible(not drawing and not has_layers)
+            draw_button.setEnabled(drawing)
+            draw_hint.setVisible(drawing)
+            watch_selection()
+            update_area_status(page)
+
+        def watch_selection():
+            """Update the status when objects are (de)selected in the layer."""
+            layer = layer_box.currentLayer()
+            previous = page.widgets["watched_layer"]
+            if previous is layer:
+                return
+            if previous is not None:
+                try:
+                    previous.selectionChanged.disconnect(refresh_status)
+                except (RuntimeError, TypeError):
+                    pass  # layer was already removed from the project
+            if layer is not None:
+                layer.selectionChanged.connect(refresh_status)
+            page.widgets["watched_layer"] = layer
+
+        def refresh_status(*_args):
+            update_area_status(page)
+
+        def drawing_finished(geometry, canvas_crs):
+            try:
+                layer = add_drawn_area_layer(geometry, canvas_crs)
+            except StudyAreaError as error:
+                dock.show_message(str(error))
+                return
+            page.widgets["drawn_layer_id"] = layer.id()
+            dock.show_message(
+                f"Polygon gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt.",
+                kind="info",
+            )
+            update_area_status(page)
+
+        def drawing_canceled(message):
+            dock.show_message(message, kind="info")
+
+        def start_drawing():
+            dock.clear_message()
+            dock.show_message(DRAW_INSTRUCTIONS, kind="info")
+            dock.start_drawing(drawing_finished, drawing_canceled)
+
+        use_layer.toggled.connect(refresh)
+        layer_box.layerChanged.connect(refresh)
+        selected_only.toggled.connect(refresh_status)
+        buffer_input.valueChanged.connect(refresh_status)
+        draw_button.clicked.connect(start_drawing)
+        refresh()
+
+    def target_crs():
+        return crs_page.widgets["crs"].crs()
+
+    def chosen_area(page):
+        """Return (geometry, polygon_count) or raise StudyAreaError."""
+        widgets = page.widgets
+        if widgets["use_drawing"].isChecked():
+            layer_id = widgets["drawn_layer_id"]
+            layer = QgsProject.instance().mapLayer(layer_id) if layer_id else None
+            if layer is None:
+                raise StudyAreaError(
+                    "Es ist noch kein Polygon gezeichnet. Bitte auf „Polygon in der "
+                    "Karte zeichnen“ klicken."
+                )
+            return study_area_from_layer(layer, target_crs(), selected_only=False)
+        return study_area_from_layer(
+            widgets["layer"].currentLayer(),
+            target_crs(),
+            selected_only=widgets["selected_only"].isChecked(),
+        )
+
+    def update_area_status(page):
+        status = page.widgets["status"]
+        try:
+            geometry, count = chosen_area(page)
+        except StudyAreaError as error:
+            status.setStyleSheet("color: #666666;")
+            status.setText(str(error))
+            return
+        status.setStyleSheet("")
+        status.setText(area_summary_text(count, geometry.area(), target_crs().authid()))
 
     def validate_area(page):
-        project_crs = crs_page.widgets["crs"].crs().authid()
-        study_area_wkt = page.widgets["area"].toPlainText()
+        try:
+            geometry, _count = chosen_area(page)
+        except StudyAreaError as error:
+            return reject(str(error))
+        project_crs = target_crs().authid()
+        study_area_wkt = geometry.asWkt()
+        buffer_meters = page.widgets["buffer"].value()
         if plugin.workflow is not None:
             try:
                 plugin.workflow.configure_project(
                     project_crs=project_crs,
                     study_area_wkt=study_area_wkt,
-                    buffer_meters=page.widgets["buffer"].value(),
+                    buffer_meters=buffer_meters,
                 )
             except ValueError as error:
                 return reject(str(error))
-            return True
-        if not study_area_wkt.strip():
-            return reject("Bitte ein Untersuchungsgebiet angeben.")
+        dock.settings.update(
+            project_crs=project_crs,
+            study_area_wkt=study_area_wkt,
+            buffer_meters=buffer_meters,
+        )
         return True
 
     # 3 Daten laden
@@ -490,7 +677,7 @@ def _create_dock(plugin):
         return False
 
     crs_page = dock.add_page(build_crs, validate_crs)
-    dock.add_page(build_area, validate_area)
+    dock.add_page(build_area, validate_area, on_show=update_area_status)
     dock.add_page(build_data, validate_data)
     dock.add_page(build_review, rebuild=True)
     dock.add_page(build_mapping, validate_mapping, rebuild=True)

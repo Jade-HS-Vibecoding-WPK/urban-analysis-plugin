@@ -40,6 +40,7 @@ class UrbanAnalysisPlugin:
     def unload(self):
         """Remove the side panel, menu entry and toolbar button."""
         if self.dock is not None:
+            self.dock.cleanup()
             self.iface.removeDockWidget(self.dock)
             self.dock.deleteLater()
             self.dock = None
