@@ -190,6 +190,15 @@ QDockWidget::title {{
 QScrollArea {{
     border: none;
 }}
+/* Slim own title bar of the side panel (same colour as the scene's sky) */
+QToolButton {{
+    background: transparent;
+    border: none;
+    padding: 2px;
+}}
+QToolButton:hover {{
+    background-color: {c['button_hover']};
+}}
 QLabel {{
     background: transparent;
 }}

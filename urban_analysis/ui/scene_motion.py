@@ -2,11 +2,14 @@
 
 Phases of the rabbit's line:
     idle     float rests in front of the rabbit, bobs now and then
-    cast     rod swings back and forward, the float lands (then -> next phase)
-    loading  float follows the REAL progress from left to right
-    snap     line breaks: float sinks, loose end whips back to the rod
-    reel     after an error the float is pulled back (no sinking)
-After snap/reel the rabbit casts again and the scene returns to idle.
+    cast     rod swings back and forward; the long cast lands far right
+    loading  the rabbit pulls the float in: it follows the REAL progress
+             from the right (0 %) to the rabbit (100 %)
+    catch    at 100 % a fish bites, jumps out and hangs wriggling on the
+             line; the rabbit is happy (ears wiggle, a twinkle), then the
+             fish is put away and the float rests again
+    reel     after an error the float is pulled back without a catch
+The rabbit never loses a fish.
 
 The step fish swims along the bottom to the current step (1 of 9 ... 9 of 9),
 in pixel steps, with light current lines behind it.
@@ -23,8 +26,16 @@ FRAME_MS = 100
 # then forward).  The last entry is the resting position.
 ROD_REST = (30, -20)
 CAST_FRAMES = ((22, -30), (6, -34), (-8, -28), (8, -34), (26, -28), (33, -17), ROD_REST)
-SNAP_FRAMES = 4            # float sinks and the loose end flies back
-SNAP_ROD = ((30, -24), (31, -18), (30, -21), ROD_REST)
+ROD_LIFT = (31, -25)       # rod pulled up when the fish jumps
+ROD_BENT = (27, -15)       # rod bends under the weight of the fish
+
+# Catch, frame by frame (about 1.4 s)
+CATCH_DIP = (3, 6)         # float dips twice (px under water)
+CATCH_JUMP = 2             # first frame of the jump (float disappears)
+CATCH_HANG = 4             # from here the fish hangs on the line
+CATCH_SPARKLE = (5, 10)    # twinkle above the rabbit (inclusive)
+CATCH_FRAMES = 14          # last two frames: fish put away, float rests
+
 REEL_FRAMES = 4
 SPLASH_FRAMES = 3          # ripples after the float lands
 TWITCH = (2, -1, 1)        # float twitches (px) when something fails
@@ -44,10 +55,15 @@ def step_positions(width, total):
     return [round(left + (right - left) * i / (total - 1)) for i in range(total)]
 
 
+def far_x(width):
+    """Where the long cast lands (right side of the water)."""
+    return max(art.BOBBER_REST_X, width - art.BOBBER_RIGHT_MARGIN)
+
+
 def bobber_x(progress, width):
-    """Float position for a real progress value 0-100."""
-    start = art.BOBBER_REST_X
-    end = max(start, width - art.BOBBER_RIGHT_MARGIN)
+    """Float position for a real progress value 0-100: the rabbit pulls the
+    float in from far right (0 %) to the front of the rabbit (100 %)."""
+    start, end = far_x(width), art.BOBBER_REST_X
     fraction = min(max(progress, 0), 100) / 100
     return round(start + (end - start) * fraction)
 
@@ -68,6 +84,7 @@ class FishingScene:
         self.splash = 0
         self.twitch = 0
         self.bubble = 0
+        self.catches = 0
         self.ticks = 0
         self.cloud_offset = 0
         self.step = 0
@@ -84,16 +101,21 @@ class FishingScene:
             self.fish_x = float(self.fish_target())
 
     def set_step(self, index):
-        """Current step (0-based); index == total means 'all done' (far right)."""
+        """Current step (0-based); index >= total means 'all done' (last step)."""
         self.step = max(0, min(index, self.total_steps - 1))
         if not self.animations:
             self.fish_x = float(self.fish_target())
 
     def start_loading(self):
-        """Rabbit casts the line; then the float follows the progress."""
+        """Rabbit casts far out; then pulls the float in with the progress."""
         self.progress = 0
         self.bubble = 0
-        self._cast(then="loading")
+        self.after_cast = "loading"
+        if self.animations:
+            self._enter("cast")
+        else:
+            self._enter("loading")
+            self.float_x = bobber_x(0, self.width)
 
     def set_progress(self, percent):
         self.progress = min(max(float(percent), 0.0), 100.0)
@@ -101,19 +123,20 @@ class FishingScene:
             self.float_x = bobber_x(self.progress, self.width)
 
     def finish(self):
-        """Loading done: the line breaks, flies back, rabbit casts again."""
-        if self.phase in ("loading", "cast"):
-            self.float_x = bobber_x(100 if self.phase == "loading" else self.progress, self.width)
-            self._enter("snap" if self.animations else "idle")
-            if not self.animations:
-                self.float_x = art.BOBBER_REST_X
+        """Loading done: a fish bites and is caught."""
+        if self.phase not in ("loading", "cast"):
+            return
+        self.progress = 100
+        self.float_x = art.BOBBER_REST_X
+        self.catches += 1
+        self._enter("catch" if self.animations else "idle")
 
     def fail(self):
         """Something went wrong: float twitches, '…' bubble, line is reeled in."""
         self.twitch = len(TWITCH) if self.animations else 0
         self.bubble = BUBBLE_FRAMES
-        if self.phase in ("loading", "cast", "snap"):
-            self.reel_from = self.float_x if self.phase != "cast" else art.BOBBER_REST_X
+        if self.phase in ("loading", "cast"):
+            self.reel_from = self.float_x if self.phase == "loading" else far_x(self.width)
             self._enter("reel" if self.animations else "idle")
             if not self.animations:
                 self.float_x = art.BOBBER_REST_X
@@ -128,14 +151,6 @@ class FishingScene:
 
     # --- animation ---------------------------------------------------------
 
-    def _cast(self, then):
-        self.after_cast = then
-        if self.animations:
-            self._enter("cast")
-        else:
-            self._enter(then)
-            self.float_x = bobber_x(self.progress, self.width) if then == "loading" else art.BOBBER_REST_X
-
     def _enter(self, phase):
         self.phase = phase
         self.frame = 0
@@ -148,7 +163,7 @@ class FishingScene:
 
     def busy(self):
         """True while a short, event-driven animation still runs."""
-        return (self.phase in ("cast", "snap", "reel") or self.splash > 0
+        return (self.phase in ("cast", "catch", "reel") or self.splash > 0
                 or self.twitch > 0 or self.bubble > 0 or self.fish_moving())
 
     def tick(self):
@@ -167,11 +182,10 @@ class FishingScene:
         if self.phase == "cast" and self.frame >= len(CAST_FRAMES):
             self.splash = SPLASH_FRAMES
             self._enter(self.after_cast)
-            self.float_x = (bobber_x(self.progress, self.width) if self.phase == "loading"
-                            else art.BOBBER_REST_X)
-        elif self.phase == "snap" and self.frame >= SNAP_FRAMES:
-            self.progress = 0
-            self._cast(then="idle")
+            self.float_x = bobber_x(self.progress, self.width)
+        elif self.phase == "catch" and self.frame >= CATCH_FRAMES:
+            self.splash = SPLASH_FRAMES
+            self._enter("idle")
         elif self.phase == "reel" and self.frame >= REEL_FRAMES:
             self.float_x = art.BOBBER_REST_X
             self._enter("idle")
@@ -194,16 +208,22 @@ class FishingScene:
         """Rod tip relative to the paw."""
         if self.phase == "cast":
             return CAST_FRAMES[min(self.frame, len(CAST_FRAMES) - 1)]
-        if self.phase == "snap":
-            return SNAP_ROD[min(self.frame, len(SNAP_ROD) - 1)]
+        if self.phase == "catch":
+            if CATCH_JUMP <= self.frame < CATCH_HANG:
+                return ROD_LIFT
+            if CATCH_HANG <= self.frame < CATCH_FRAMES - 2:
+                return ROD_BENT
         return ROD_REST
 
     def float_state(self):
         """(x, dy, visible, sunk_px) of the float; dy = small vertical offset."""
         if self.phase == "cast":
             return self.float_x, 0, False, 0
-        if self.phase == "snap":
-            return self.float_x, 0, True, min(self.frame * 3, 9)
+        if self.phase == "catch":
+            if self.frame < CATCH_JUMP:
+                return self.float_x, 0, True, CATCH_DIP[self.frame]
+            if self.frame < CATCH_FRAMES - 2:
+                return self.float_x, 0, False, 0
         x = self.float_x
         if self.phase == "reel":
             t = min(self.frame / REEL_FRAMES, 1)
@@ -216,20 +236,34 @@ class FishingScene:
         return x, dy, True, 0
 
     def line_mode(self):
-        """'slack' (resting), 'tight' (loading, reeling), 'broken' (snap) or None."""
+        """'slack' (resting), 'tight' (loading, reeling, bite), 'fish' (line
+        ends at the caught fish) or None (line in the air while casting)."""
         if self.phase == "cast":
             return None
-        if self.phase == "snap":
-            return "broken"
+        if self.phase == "catch":
+            if self.frame < CATCH_JUMP:
+                return "tight"
+            if self.frame < CATCH_FRAMES - 2:
+                return "fish"
         if self.phase in ("loading", "reel"):
             return "tight"
         return "slack"
 
-    def broken_end(self, tip, float_point):
-        """Loose line end while it flies back to the rod tip (snap phase)."""
-        t = min((self.frame + 1) / SNAP_FRAMES, 1)
-        return (round(float_point[0] + (tip[0] - float_point[0]) * t),
-                round(float_point[1] + (tip[1] - float_point[1]) * t))
+    def catch_view(self):
+        """Where the caught fish is: None, ('jump', t 0..1) or ('hang', tail_left)."""
+        if self.phase != "catch" or not CATCH_JUMP <= self.frame < CATCH_FRAMES - 2:
+            return None
+        if self.frame < CATCH_HANG:
+            return ("jump", (self.frame - CATCH_JUMP + 1) / (CATCH_HANG - CATCH_JUMP + 1))
+        return ("hang", self.frame % 2 == 0)
+
+    def rabbit_happy(self):
+        """Second rabbit frame (ear tipped) every other frame while it is happy."""
+        return self.phase == "catch" and CATCH_HANG <= self.frame < CATCH_FRAMES - 2 \
+            and self.frame % 2 == 1
+
+    def sparkle(self):
+        return self.phase == "catch" and CATCH_SPARKLE[0] <= self.frame <= CATCH_SPARKLE[1]
 
     def fish_state(self):
         """(x, facing_right, tail_up, wake) for the step fish."""

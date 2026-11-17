@@ -482,6 +482,8 @@ def _create_dock(plugin):
         QRadioButton,
         QScrollArea,
         QSizePolicy,
+        QStyle,
+        QToolButton,
         QVBoxLayout,
         QWidget,
     )
@@ -524,9 +526,20 @@ def _create_dock(plugin):
 
             # The whole plugin shares one style (theme.py), with the bundled
             # fonts if present (otherwise the system monospace font).
-            self.setStyleSheet(panel_stylesheet(load_fonts()))
+            fonts = load_fonts()
+            self.setStyleSheet(panel_stylesheet(fonts))
+            # Slim title bar in sky colour: the title itself stands in the
+            # scene's sky; only "Lösen" and "Schließen" remain here.
+            self.setTitleBarWidget(self._title_bar())
+            # The scene fills the full width at the top (no margins); all
+            # other content gets normal margins below it.
             body = QWidget()
-            layout = QVBoxLayout(body)
+            outer = QVBoxLayout(body)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setSpacing(0)
+            content = QWidget()
+            layout = QVBoxLayout(content)
+            layout.setContentsMargins(9, 6, 9, 9)
 
             # Header: small "Schritt x von 9" next to "Zurücksetzen", below it
             # the step name as heading over the full width.
@@ -548,7 +561,8 @@ def _create_dock(plugin):
 
             # Fishing scene: the step fish shows the overall progress, the
             # rabbit's float follows the real progress while data loads.
-            self.scene = PixelScene(total_steps=len(MVP_UI_STEPS))
+            self.scene = PixelScene(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
+            self.scene.set_title_font(fonts["heading"])
 
             # Text line for long steps ("Lade … 40 %") below the scene.
             self.busy_label = QLabel()
@@ -599,7 +613,8 @@ def _create_dock(plugin):
             buttons.addStretch()
             buttons.addWidget(self.primary_button)
 
-            layout.addWidget(self.scene)
+            outer.addWidget(self.scene)
+            outer.addWidget(content, 1)
             layout.addLayout(header)
             layout.addWidget(self.busy_label)
             layout.addWidget(scroll, 1)
@@ -607,6 +622,30 @@ def _create_dock(plugin):
             layout.addLayout(buttons)
             make_texts_selectable(body)
             self.setWidget(body)
+
+        def _title_bar(self):
+            """Slim bar in the panel colour with 'Lösen' and 'Schließen'.
+
+            Dragging the bar still moves or undocks the panel (Qt handles that
+            for custom title bars)."""
+            bar = QWidget()
+            bar.setObjectName("uaTitleBar")
+            row = QHBoxLayout(bar)
+            row.setContentsMargins(6, 2, 4, 0)
+            row.addStretch()
+            for icon, tip, action in (
+                (QStyle.StandardPixmap.SP_TitleBarNormalButton, "Lösen / andocken",
+                 lambda: self.setFloating(not self.isFloating())),
+                (QStyle.StandardPixmap.SP_TitleBarCloseButton, "Schließen", self.close),
+            ):
+                button = QToolButton()
+                button.setIcon(self.style().standardIcon(icon))
+                button.setToolTip(tip)
+                button.setAutoRaise(True)
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.clicked.connect(action)
+                row.addWidget(button)
+            return bar
 
         def add_page(self, builder=None, validator=None, rebuild=False, on_show=None):
             page = Page(builder, validator, rebuild, on_show)

@@ -14,12 +14,13 @@ from ..theme import COLORS
 
 # Scene layout (logical px). The scene is as wide as the panel; the island
 # stays on the left and the water grows with the width.
-SCENE_HEIGHT = 120
-WATER_Y = 62
+SCENE_HEIGHT = 140
+WATER_Y = 78
 ISLAND_WIDTH = 104
 RABBIT_POS = (70, WATER_Y - 33)       # top-left of the rabbit sprite
 BOBBER_REST_X = 150                   # float in front of the rabbit
-BOBBER_RIGHT_MARGIN = 30              # float stops this far from the right edge
+BOBBER_RIGHT_MARGIN = 30              # the long cast lands this far from the right edge
+TITLE_POS = (124, 24)                 # "Urban Analysis" in the sky (baseline)
 FISH_Y = SCENE_HEIGHT - 20
 STEP_LEFT, STEP_RIGHT_MARGIN = 24, 40  # where the step fish swims
 
@@ -51,6 +52,10 @@ SCENE_COLORS = {
     "line": COLORS["text_muted"],
     "line_tight": "#FFFFFF",
     "bubble": "#FFFFFF",
+    "catch": "#5E8A81",       # caught fish: calm grey-green, never red
+    "catch_belly": "#B9D5CE",
+    "sparkle": "#FFFFFF",
+    "title": COLORS["text"],
 }
 
 
@@ -168,20 +173,22 @@ def cloud(scale=1.0):
     ))
 
 
-def rabbit():
+def rabbit(happy=False):
     """Own sitting rabbit facing right, with a small red-orange scarf.
+    ``happy`` = second frame with the front ear tipped forward (ear wiggle).
     Anchor 'grip' = paw that holds the rod."""
     body = ellipse(9, 20, 7, 7)
     head = ellipse(13, 11, 5, 4.2)
     ear1 = ellipse(10.5, 4, 1.6, 4.5)
-    ear2 = ellipse(14, 4.5, 1.6, 4.5)
+    ear2 = ellipse(15.5, 5, 1.6, 4.2) if happy else ellipse(14, 4.5, 1.6, 4.5)
     tail = ellipse(2, 21, 2, 2)
     shape = body | head | ear1 | ear2 | tail
 
     def shade(x, y):
         if (x, y) in body and x > 11 and y > 21:
             return "fur_sh"
-        if ((x, y) in ear1 and abs(x + 0.5 - 10.5) < 1 or (x, y) in ear2 and abs(x + 0.5 - 14) < 1) \
+        ear2_x = 15.5 if happy else 14
+        if ((x, y) in ear1 and abs(x + 0.5 - 10.5) < 1 or (x, y) in ear2 and abs(x + 0.5 - ear2_x) < 1) \
                 and 2 <= y <= 6:
             return "pink"
         if (x, y) in ellipse(11, 15.5, 6, 1.6):
@@ -225,7 +232,7 @@ def bobber():
     return make_sprite(cells, {"eye": (3, 0), "water": (3, 7)})
 
 
-def fish(facing_right=True, size=1.2, tail_up=False):
+def fish(facing_right=True, size=1.2, tail_up=False, color="shadow"):
     """Dark fish shadow under water, with a small tail.  Two tail frames."""
     body = ellipse(7 * size, 3 * size, 6 * size, 2.6 * size)
     tail = set()
@@ -237,7 +244,31 @@ def fish(facing_right=True, size=1.2, tail_up=False):
     if not facing_right:
         span = max(x for x, _y in shape)
         shape = {(span - x, y) for x, y in shape}
-    return make_sprite(paint(shape, "shadow"))
+    return make_sprite(paint(shape, color))
+
+
+def caught_fish(tail_left=False):
+    """The catch hanging on the line, head up: grey-green with light belly,
+    eye and outline.  Two frames (tail left / right) make it wriggle.
+    Anchor 'mouth' = where the line ends."""
+    body = ellipse(4, 8, 2.8, 6)
+    tail = set()
+    for i in range(4):
+        for x in range(int(4 - i * 0.9 + (-1 if tail_left else 1) * i * 0.4),
+                       int(4 + i * 0.9 + (-1 if tail_left else 1) * i * 0.4) + 1):
+            tail.add((x, 13 + i))
+    shape = body | tail
+    cells = paint(shape, "catch", "outline",
+                  lambda x, y: "catch_belly" if (x, y) in body and x >= 5 and 6 <= y <= 11 else None)
+    cells += [(3, 5, "outline")]
+    return make_sprite(cells, {"mouth": (4, 1)})
+
+
+def sparkle():
+    """Small twinkle above the happy rabbit."""
+    cells = [(3, y, "sparkle") for y in range(7)] + [(x, 3, "sparkle") for x in range(7)]
+    cells += [(1, 1, "accent_hi"), (5, 1, "accent_hi"), (1, 5, "accent_hi"), (5, 5, "accent_hi")]
+    return make_sprite(cells)
 
 
 def bubble():

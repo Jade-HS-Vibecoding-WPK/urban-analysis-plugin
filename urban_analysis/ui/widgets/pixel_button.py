@@ -40,7 +40,8 @@ class PixelButton(QAbstractButton):
         self.variant = variant
         self.setText(text)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Focus (and its dashed frame) only via the Tab key, not after a click.
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._hover = False

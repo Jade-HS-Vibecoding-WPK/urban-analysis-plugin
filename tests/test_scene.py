@@ -5,11 +5,12 @@ import pytest
 from urban_analysis.ui import scene_art as art
 from urban_analysis.ui.scene_motion import (
     CAST_FRAMES,
+    CATCH_FRAMES,
     REEL_FRAMES,
     ROD_REST,
-    SNAP_FRAMES,
     FishingScene,
     bobber_x,
+    far_x,
     step_positions,
 )
 
@@ -22,8 +23,9 @@ def run(scene, frames):
 # --- art --------------------------------------------------------------------
 
 @pytest.mark.parametrize("sprite", [
-    art.pine(50, 22), art.cloud(), art.rabbit(), art.island(), art.bobber(),
-    art.fish(), art.fish(False, tail_up=True), art.bubble(),
+    art.pine(50, 22), art.cloud(), art.rabbit(), art.rabbit(happy=True), art.island(),
+    art.bobber(), art.fish(), art.fish(False, tail_up=True), art.bubble(),
+    art.caught_fish(), art.caught_fish(tail_left=True), art.sparkle(),
 ])
 def test_sprites_start_at_zero_and_use_only_scene_colours(sprite):
     xs = [x for x, _y, _c in sprite.cells]
@@ -36,6 +38,8 @@ def test_sprites_start_at_zero_and_use_only_scene_colours(sprite):
 def test_fish_and_bobber_are_never_red_except_the_float_top():
     for sprite in (art.fish(), art.fish(False)):
         assert {c for _x, _y, c in sprite.cells} == {"shadow"}
+    for sprite in (art.caught_fish(), art.caught_fish(True), art.fish(color="catch")):
+        assert not {c for _x, _y, c in sprite.cells} & {"accent", "accent_dark", "accent_hi"}
     colours = {c for _x, _y, c in art.bobber().cells}
     assert "accent" in colours and "cloud" in colours  # red top, white bottom
 
@@ -55,41 +59,58 @@ def test_line_has_hard_pixels_and_connects_both_ends():
 
 # --- float follows the REAL progress ---------------------------------------
 
-def test_float_follows_progress_from_the_rabbit_to_the_right():
-    assert bobber_x(0, 420) == art.BOBBER_REST_X
-    assert bobber_x(100, 420) == 420 - art.BOBBER_RIGHT_MARGIN
-    assert bobber_x(50, 420) == round((art.BOBBER_REST_X + 390) / 2)
+def test_rabbit_pulls_the_float_in_from_far_right():
+    assert bobber_x(0, 420) == far_x(420) == 420 - art.BOBBER_RIGHT_MARGIN
+    assert bobber_x(100, 420) == art.BOBBER_REST_X
+    assert bobber_x(50, 420) == round((art.BOBBER_REST_X + far_x(420)) / 2)
     assert bobber_x(150, 420) == bobber_x(100, 420)
+    assert bobber_x(30, 420) > bobber_x(60, 420)  # comes closer with progress
 
 
-def test_loading_casts_first_then_moves_with_progress():
+def test_loading_casts_far_out_then_moves_with_progress():
     scene = FishingScene()
     scene.start_loading()
     assert scene.phase == "cast" and scene.float_state()[2] is False  # float in the air
     run(scene, len(CAST_FRAMES))
     assert scene.phase == "loading" and scene.splash > 0
+    assert scene.float_state()[0] == far_x(420)  # landed far right
     scene.set_progress(60)
     assert scene.float_state()[0] == bobber_x(60, 420)
     assert scene.line_mode() == "tight"
 
 
-def test_done_breaks_the_line_and_the_rabbit_casts_again():
+def test_done_always_ends_with_a_caught_fish():
     scene = FishingScene()
     scene.start_loading()
     run(scene, len(CAST_FRAMES))
     scene.set_progress(100)
     scene.finish()
-    assert scene.phase == "snap" and scene.line_mode() == "broken"
-    sunk = [scene.float_state()[3]]
-    run(scene, 1)
-    sunk.append(scene.float_state()[3])
-    assert sunk[1] > sunk[0]  # float sinks
-    run(scene, SNAP_FRAMES - 1)
-    assert scene.phase == "cast"  # new cast
-    run(scene, len(CAST_FRAMES))
-    assert scene.phase == "idle"
+    assert scene.phase == "catch" and scene.catches == 1
+    seen = set()
+    happy = sparkle = False
+    for _ in range(CATCH_FRAMES):
+        view = scene.catch_view()
+        if view:
+            seen.add(view[0])
+        happy |= scene.rabbit_happy()
+        sparkle |= scene.sparkle()
+        scene.tick()
+    assert seen == {"jump", "hang"}  # fish jumps out, then hangs on the line
+    assert happy and sparkle
+    assert scene.phase == "idle" and scene.catch_view() is None
     assert scene.float_state()[0] == art.BOBBER_REST_X
     assert scene.rod_tip() == ROD_REST and scene.line_mode() == "slack"
+
+
+def test_bite_dips_the_float_before_the_jump():
+    scene = FishingScene()
+    scene.start_loading()
+    run(scene, len(CAST_FRAMES))
+    scene.finish()
+    dips = [scene.float_state()[3]]
+    scene.tick()
+    dips.append(scene.float_state()[3])
+    assert 0 < dips[0] < dips[1]
 
 
 def test_error_twitches_shows_bubble_and_reels_in():
@@ -113,7 +134,7 @@ def test_cancel_returns_to_rest_at_once():
     assert scene.phase == "idle" and scene.float_state()[0] == art.BOBBER_REST_X
 
 
-def test_reduced_animations_skip_cast_and_snap():
+def test_reduced_animations_skip_cast_and_catch_animation():
     scene = FishingScene(animations=False)
     scene.start_loading()
     assert scene.phase == "loading"

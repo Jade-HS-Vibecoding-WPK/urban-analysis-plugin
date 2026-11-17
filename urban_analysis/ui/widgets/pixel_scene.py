@@ -1,27 +1,30 @@
 """PixelScene: banner with the fishing rabbit, the float and the step fish.
 
 - Rest: the float lies in front of the rabbit and bobs now and then.
-- Loading: the rabbit casts, the float follows the real progress to the right.
-- Done: the line breaks, flies back, the rabbit casts again.
+- Loading: the rabbit casts far out and pulls the float in with the real
+  progress (right -> rabbit).
+- Done: a fish bites, jumps out and hangs wriggling on the line; the rabbit
+  is happy.  It never loses a fish.
 - Error: the float twitches, a '…' bubble appears, the line is reeled in.
 - The step fish swims along the bottom to the current step.
+- The plugin title stands in the sky.
 
-Performance: sky/water and the island with trees and rabbit are drawn once
-into cached pixmaps (again only when the width changes); per frame only the
-moving parts are painted.  One timer (100 ms) runs only while the scene is
-visible; it stops in ``hideEvent``.  Qt enums in full form (Qt5 and Qt6).
+Performance: sky/water and the island with trees are drawn once into cached
+pixmaps (again only when the width changes); per frame only the moving parts
+are painted.  One timer (100 ms) runs only while the scene is visible; it
+stops in ``hideEvent``.  Qt enums in full form (Qt5 and Qt6).
 """
 
 import math
 
 from qgis.PyQt.QtCore import QSize, Qt, QTimer
-from qgis.PyQt.QtGui import QColor, QImage, QPainter, QPixmap
+from qgis.PyQt.QtGui import QColor, QFont, QImage, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import QSizePolicy, QWidget
 
 from .. import scene_art as art
 from ..scene_motion import FRAME_MS, FishingScene, step_positions
 
-CLOUDS = ((4, 14, 1.0), (250, 4, 0.75), (345, 22, 0.55))  # x, y, scale (x for 420 px)
+CLOUDS = ((4, 24, 1.0), (250, 12, 0.75), (345, 34, 0.55))  # x, y, scale (x for 420 px)
 PINES = ((14, 50, 22), (34, 42, 18), (52, 30, 14))       # x, height, width
 
 
@@ -36,21 +39,31 @@ def _pixmap(sprite):
 class PixelScene(QWidget):
     """Fishing scene banner; the side panel only calls the public methods."""
 
-    def __init__(self, parent=None, total_steps=9, animations=True):
+    def __init__(self, parent=None, total_steps=9, animations=True, title=""):
         super().__init__(parent)
         self.setFixedHeight(art.SCENE_HEIGHT)
         self.setMinimumWidth(260)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.state = FishingScene(420, total_steps, animations)
+        self.title = title
+        self.title_font = QFont(self.font())
+        self.title_font.setBold(True)
+        self.title_font.setPointSize(13)
         self._colors = {name: QColor(value) for name, value in art.SCENE_COLORS.items()}
         # Sprites are turned into pixmaps once.
         self._rabbit_sprite = art.rabbit()
         self._bobber_sprite = art.bobber()
+        self._caught_sprite = art.caught_fish()
         self._sprites = {
             "rabbit": _pixmap(self._rabbit_sprite),
+            "rabbit_happy": _pixmap(art.rabbit(happy=True)),
             "bobber": _pixmap(self._bobber_sprite),
             "bubble": _pixmap(art.bubble()),
             "island": _pixmap(art.island()),
+            "sparkle": _pixmap(art.sparkle()),
+            "caught": _pixmap(self._caught_sprite),
+            "caught_2": _pixmap(art.caught_fish(tail_left=True)),
+            "jumping": _pixmap(art.fish(False, size=1.0, color="catch")),
         }
         self._clouds = [(x, y, _pixmap(art.cloud(scale))) for x, y, scale in CLOUDS]
         self._pines = [(x, art.pine(height, width)) for x, height, width in PINES]
@@ -99,6 +112,13 @@ class PixelScene(QWidget):
 
     def stop(self):
         self._timer.stop()
+
+    def set_title_font(self, family, point_size=13):
+        """Font of the title in the sky (the plugin's heading font)."""
+        self.title_font = QFont(family)
+        self.title_font.setBold(True)
+        self.title_font.setPointSize(point_size)
+        self.update()
 
     # --- Qt events ----------------------------------------------------------
 
@@ -162,7 +182,6 @@ class PixelScene(QWidget):
             base_x, base_y = sprite.anchors["base"]
             p.drawPixmap(x - base_x, water_y - 4 - base_y, pixmap)
         p.drawPixmap(0, water_y - 10, self._sprites["island"])
-        p.drawPixmap(art.RABBIT_POS[0], art.RABBIT_POS[1], self._sprites["rabbit"])
         p.end()
         self._back, self._front = back, front
 
@@ -174,13 +193,28 @@ class PixelScene(QWidget):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         p.drawPixmap(0, 0, self._back)
         self._paint_clouds(p)
+        self._paint_title(p)
         p.drawPixmap(0, 0, self._front)
+        rabbit = "rabbit_happy" if self.state.rabbit_happy() else "rabbit"
+        p.drawPixmap(art.RABBIT_POS[0], art.RABBIT_POS[1], self._sprites[rabbit])
         self._paint_steps(p)
         self._paint_rod_and_float(p)
+        hx, hy = self._rabbit_sprite.anchors["head"]
+        if self.state.sparkle():
+            p.drawPixmap(art.RABBIT_POS[0] + hx - 12, art.RABBIT_POS[1] + hy - 6, self._sprites["sparkle"])
         if self.state.bubble > 0:
-            hx, hy = self._rabbit_sprite.anchors["head"]
             p.drawPixmap(art.RABBIT_POS[0] + hx + 4, art.RABBIT_POS[1] + hy - 10, self._sprites["bubble"])
         p.end()
+
+    def _paint_title(self, p):
+        if not self.title:
+            return
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        p.setFont(self.title_font)
+        p.setPen(self._colors["title"])
+        p.drawText(art.TITLE_POS[0], art.TITLE_POS[1], self.title)
+        p.restore()
 
     def _paint_clouds(self, p):
         width = self.width()
@@ -238,16 +272,38 @@ class PixelScene(QWidget):
             self._pixels(p, points, "line")
         elif mode == "tight":
             self._pixels(p, [tip, eye], "line_tight")
-        elif mode == "broken":
-            self._pixels(p, [tip, state.broken_end(tip, eye)], "line")
+        self._paint_catch(p, tip, float_x)
         if not visible:
             return
         p.save()
-        p.setClipRect(0, 0, self.width(), art.WATER_Y + 4)  # sinking float disappears
+        p.setClipRect(0, 0, self.width(), art.WATER_Y + 4)  # dipping float disappears
         p.drawPixmap(float_x - eye_x, top, self._sprites["bobber"])
         p.restore()
-        if sunk == 0:
-            ripple = "ripple"
-            spread = 2 if state.splash > 0 else 0
-            for rx, ry, w in ((-9 - spread, 2, 4), (6 + spread, 2, 4), (-5, 5, 3), (3, 5, 3)):
-                self._dot(p, float_x + rx, art.WATER_Y + ry, ripple, w, 1)
+        spread = 2 if state.splash > 0 or sunk > 0 else 0
+        for rx, ry, w in ((-9 - spread, 2, 4), (6 + spread, 2, 4), (-5, 5, 3), (3, 5, 3)):
+            self._dot(p, float_x + rx, art.WATER_Y + ry, "ripple", w, 1)
+        if state.phase == "loading":  # the float is pulled to the left: wake on the right
+            for k, (rx, ry, w) in enumerate(((10, 3, 6), (20, 1, 5), (30, 4, 4))):
+                self._dot(p, float_x + rx, art.WATER_Y + ry, "ripple" if k == 0 else "water_hi", w, 1)
+
+    def _paint_catch(self, p, tip, float_x):
+        """The caught fish: jumps out of the water, then hangs on the line."""
+        view = self.state.catch_view()
+        if view is None:
+            return
+        mouth_x, mouth_y = self._caught_sprite.anchors["mouth"]
+        hang = (tip[0] - mouth_x, tip[1] + 8)
+        if view[0] == "jump":
+            t = view[1]
+            jumping = self._sprites["jumping"]
+            start = (float_x - jumping.width() // 2, art.WATER_Y - 8)
+            x = round(start[0] + (hang[0] - start[0]) * t)
+            y = round(start[1] + (hang[1] - start[1]) * t - 12 * math.sin(math.pi * t))
+            self._pixels(p, [tip, (x + 1, y + 3)], "line_tight")
+            p.drawPixmap(x, y, jumping)
+            for rx, w in ((-6, 4), (4, 4), (-2, 3)):  # splash where it jumped out
+                self._dot(p, float_x + rx, art.WATER_Y - 2 - abs(rx) // 3, "ripple", w, 1)
+            return
+        pixmap = self._sprites["caught_2" if view[1] else "caught"]
+        self._pixels(p, [tip, (hang[0] + mouth_x, hang[1] + mouth_y)], "line")
+        p.drawPixmap(hang[0], hang[1], pixmap)
