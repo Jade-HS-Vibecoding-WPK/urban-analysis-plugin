@@ -10,6 +10,31 @@
     "Nutzungsflächen": ["nutzung", "landuse", "land_use", "flächennutzung", "flaechennutzung"]
   },
 
+  "layer_labels": {
+    "_hinweis": "Verständliche Namen für Layer in Hinweisen und Legenden.",
+    "gebaeude": "Gebäude",
+    "nutzung": "Nutzung",
+    "flurstuecke": "Flurstücke",
+    "grenzpunkte": "Grenzpunkte",
+    "bauwerke_f": "Bauwerke (Flächen)",
+    "bauwerke_p": "Bauwerke (Punkte)",
+    "bauwerke_l": "Bauwerke (Linien)",
+    "bodenschaetzung": "Bodenschätzung",
+    "bewertung": "Bewertung"
+  },
+
+  "target_field_labels": {
+    "_hinweis": "Deutsche Namen der Zielfelder für die Benutzerführung.",
+    "source_name": "Dateiname",
+    "object_type": "Objektart",
+    "object_detail": "Nutzungsdetail",
+    "category": "Kategorie",
+    "status": "Status",
+    "area_m2": "Fläche (m²)",
+    "year": "Jahr",
+    "source": "Datenquelle"
+  },
+
   "field_labels": {
     "_hinweis": "Verständliche Namen für Spalten in Prüfhinweisen.",
     "objid": "ALKIS-Objekt-ID",

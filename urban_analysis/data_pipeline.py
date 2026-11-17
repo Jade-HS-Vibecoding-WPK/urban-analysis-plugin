@@ -180,6 +180,36 @@ def _open_read_only(file_path: Path) -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
+def _count(number: int) -> str:
+    """German-style number with a non-breaking space as thousands separator."""
+    return f"{number:,}".replace(",", "\u00a0")
+
+
+def _names(names: Sequence[str]) -> str:
+    """Join names as "A", "A und B" or "A, B und C"."""
+    names = list(names)
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " und " + names[-1]
+
+
+def _examples(rows: Sequence[Mapping[str, Any]], field: str, limit: int = 2) -> Tuple[str, ...]:
+    """Up to ``limit`` different, non-empty sample values of ``field``."""
+    found: List[str] = []
+    for row in rows:
+        value = row.get(field)
+        if value in (None, "") or isinstance(value, (bytes, bytearray, memoryview)):
+            continue
+        text = str(value).strip()
+        if len(text) > 60:
+            text = text[:59] + "…"
+        if text and text not in found:
+            found.append(text)
+            if len(found) == limit:
+                break
+    return tuple(found)
+
+
 def _coerce_area(value: Any) -> Optional[float]:
     if value in (None, ""):
         return None
@@ -230,7 +260,11 @@ class GeoPackageImporter:
             issues.append(
                 ValidationIssue(
                     code="invalid-study-area",
-                    message=f"{area_error} Es wurden keine Objekte übernommen.",
+                    message=(
+                        f"Das Untersuchungsgebiet kann nicht verwendet werden: {area_error} "
+                        "Deshalb wurden keine Daten geladen. So behebst du es: Im Schritt "
+                        "„Untersuchungsgebiet“ eine Polygonfläche wählen."
+                    ),
                     severity="error",
                     rule="Untersuchungsgebiet",
                 )
@@ -246,7 +280,10 @@ class GeoPackageImporter:
             issues.append(
                 ValidationIssue(
                     code="no-feature-layers",
-                    message="Das GeoPackage enthält keine unterstützten Feature-Layer.",
+                    message=(
+                        "In der Datei wurden keine Geodaten-Layer gefunden. Bitte prüfe, ob du "
+                        "die richtige GeoPackage-Datei gewählt hast."
+                    ),
                     severity="error",
                 )
             )
@@ -273,6 +310,8 @@ class GeoPackageImporter:
                         source_field=rule.source_field,
                         target_field=rule.target_field,
                         confidence=rule.confidence,
+                        layer_id=layer.table_name,
+                        examples=_examples(layer.rows, rule.source_field),
                     )
                 )
             layer_records = self._harmonize(layer, file_path, category, issues, profile, field_rules, self.mapping_rules)
@@ -284,8 +323,14 @@ class GeoPackageImporter:
                 ValidationIssue(
                     code="missing-category",
                     message=(
-                        f"Für die Layer {', '.join(layers_without_category)} wurde keine Kategorie "
-                        "erkannt. Sie stehen beim Kartenthema nicht zur Auswahl."
+                        f"{_names([self.mapping_rules.layer_name(name) for name in layers_without_category])}: "
+                        + (
+                            "Für diesen Layer ist unklar, was er darstellt (z. B. Gebäude oder "
+                            "Grünflächen). Er wird geladen, steht beim Kartenthema aber nicht zur Auswahl."
+                            if len(layers_without_category) == 1
+                            else "Für diese Layer ist unklar, was sie darstellen (z. B. Gebäude oder "
+                            "Grünflächen). Sie werden geladen, stehen beim Kartenthema aber nicht zur Auswahl."
+                        )
                     ),
                     severity="warning",
                     rule="Kategorie aus Layername",
@@ -295,16 +340,20 @@ class GeoPackageImporter:
         if layers_without_source:
             layers_with_rows = [layer.table_name for layer in layers if layer.rows]
             if layers_without_source == layers_with_rows:
-                missing_text = "Für keinen Layer gibt es eine Angabe zur Datenquelle."
+                missing_text = "Datenquelle fehlt: In der Datei steht nicht, woher die Daten stammen."
             else:
                 missing_text = (
-                    f"Für die Layer {', '.join(layers_without_source)} gibt es keine Angabe "
-                    "zur Datenquelle."
+                    "Datenquelle fehlt für "
+                    f"{_names([self.mapping_rules.layer_name(name) for name in layers_without_source])}: "
+                    "Dort steht nicht, woher die Daten stammen."
                 )
             issues.append(
                 ValidationIssue(
                     code="missing-data-source",
-                    message=f"{missing_text} Bitte im Schritt „Ausgabe“ eine Datenquelle eintragen.",
+                    message=(
+                        f"{missing_text} Bitte trage die Quelle im Schritt „Ausgabe“ ein, "
+                        "z. B. „ALKIS, © LGLN 2025“."
+                    ),
                     severity="warning",
                     rule="Datenquelle",
                 )
@@ -354,21 +403,25 @@ class GeoPackageImporter:
             geometry_column = self._geometry_column(connection, table_name)
             if geometry_column not in columns:
                 geometry_column = None
+            display_name = self.mapping_rules.layer_name(table_name)
             source_srs, source_epsg, is_geographic = self._srs(connection, srs_id)
             crs_usable = self._check_crs(
-                table_name, source_srs, source_epsg, is_geographic, project_crs, study_area, issues
+                display_name, source_srs, source_epsg, is_geographic, project_crs, study_area, issues
             )
             rows: List[Mapping[str, Any]] = []
             if geometry_column is None:
                 issues.append(
                     ValidationIssue(
                         code="missing-geometry-column",
-                        message=f"Layer {table_name} hat keine Geometriespalte und wurde nicht übernommen.",
+                        message=(
+                            f"{display_name} wurde nicht geladen: Der Layer enthält keine Geometrien, "
+                            "also keine Lage auf der Karte."
+                        ),
                         severity="warning",
                     )
                 )
             elif study_area is not None and crs_usable:
-                rows = self._clip_rows(connection, quoted_table, table_name, geometry_column, study_area, issues)
+                rows = self._clip_rows(connection, quoted_table, display_name, geometry_column, study_area, issues)
             layers.append(
                 GeoPackageLayer(
                     table_name, geometry_type, source_srs, columns, tuple(rows), geometry_column, primary_key
@@ -416,7 +469,13 @@ class GeoPackageImporter:
             issues.append(
                 ValidationIssue(
                     code="missing-geometry",
-                    message=f"{missing} Objekt(e) ohne Geometrie in Layer {table_name} wurden nicht übernommen.",
+                    message=(
+                        f"{table_name}: {_count(missing)} "
+                        + ("Objekt hat" if missing == 1 else "Objekte haben")
+                        + " keine Lage auf der Karte (keine Geometrie) und "
+                        + ("wurde" if missing == 1 else "wurden")
+                        + " weggelassen."
+                    ),
                     severity="warning",
                     rule="Räumliche Begrenzung",
                 )
@@ -426,8 +485,10 @@ class GeoPackageImporter:
                 ValidationIssue(
                     code="unreadable-geometry",
                     message=(
-                        f"{unreadable} Objekt(e) mit nicht lesbarer Geometrie in Layer {table_name} "
-                        f"wurden nicht übernommen (z. B.: {first_error})."
+                        f"{table_name}: {_count(unreadable)} "
+                        + ("Objekt hat eine fehlerhafte Geometrie und wurde" if unreadable == 1
+                           else "Objekte haben eine fehlerhafte Geometrie und wurden")
+                        + f" weggelassen. (Technischer Grund: {first_error})"
                     ),
                     severity="warning",
                     rule="Räumliche Begrenzung",
@@ -437,8 +498,8 @@ class GeoPackageImporter:
             ValidationIssue(
                 code="clip-summary",
                 message=(
-                    f"Layer {table_name}: {len(rows)} von {total} Objekten liegen im "
-                    f"Untersuchungsgebiet inklusive {buffer:g} m Puffer."
+                    f"{table_name}: {_count(len(rows))} von {_count(total)} Objekten liegen im Gebiet "
+                    + (f"(mit {buffer:g} m Puffer)." if buffer else "(ohne Puffer).")
                 ),
                 severity="info",
                 rule="Räumliche Begrenzung",
@@ -463,9 +524,10 @@ class GeoPackageImporter:
                 ValidationIssue(
                     code="crs-mismatch",
                     message=(
-                        f"Layer {table_name} verwendet {source_epsg}; Projekt-CRS ist {project_epsg}. "
-                        "Die Pipeline rechnet keine Koordinaten um, der Layer wurde nicht übernommen. "
-                        "Bitte den Layer in QGIS ins Projekt-CRS umprojizieren."
+                        f"{table_name} wurde nicht geladen: Der Layer nutzt ein anderes "
+                        f"Koordinatensystem ({source_epsg}) als das Projekt ({project_epsg}). "
+                        "So behebst du es: Den Layer in QGIS mit „Exportieren → Objekte speichern "
+                        f"als …“ im Koordinatensystem {project_epsg} speichern und diese Datei laden."
                     ),
                     severity="error",
                     rule="Projekt-CRS",
@@ -477,9 +539,10 @@ class GeoPackageImporter:
                 ValidationIssue(
                     code="crs-unverified",
                     message=(
-                        f"Das Koordinatensystem von Layer {table_name} ({source_srs or 'unbekannt'}) "
-                        f"kann nicht eindeutig mit dem Projekt-CRS {project_crs} verglichen werden. "
-                        "Die räumliche Begrenzung nimmt an, dass beide übereinstimmen."
+                        f"{table_name}: Das Koordinatensystem des Layers ist nicht eindeutig "
+                        f"angegeben ({source_srs or 'unbekannt'}). Es wird angenommen, dass es zum "
+                        f"Projekt ({project_crs}) passt. Bitte prüfe in QGIS, ob der Layer an der "
+                        "richtigen Stelle liegt, und bestätige."
                     ),
                     severity="warning",
                     requires_confirmation=True,
@@ -491,9 +554,9 @@ class GeoPackageImporter:
                 ValidationIssue(
                     code="geographic-crs-buffer",
                     message=(
-                        f"Layer {table_name} liegt in einem geografischen CRS (Grad). Ein Puffer in "
-                        "Metern ist dort nicht anwendbar, der Layer wurde nicht übernommen. "
-                        "Bitte ein metrisches Projekt-CRS wie EPSG:25832 verwenden."
+                        f"{table_name} wurde nicht geladen: Sein Koordinatensystem rechnet in Grad, "
+                        "der Puffer aber in Metern. So behebst du es: Im Schritt „Projekt-CRS“ ein "
+                        "System in Metern wählen, z. B. EPSG:25832, und die Daten darin speichern."
                     ),
                     severity="error",
                     rule="Projekt-CRS",
@@ -628,6 +691,9 @@ class GeoPackageImporter:
     ) -> List[HarmonizedRecord]:
         if field_rules is None:
             field_rules = GeoPackageImporter._mapping_rules(layer.fields)
+        if mapping_rules is None:
+            mapping_rules = default_mapping_rules()
+        display_name = mapping_rules.layer_name(layer.table_name)
         rules = {rule.target_field: rule.source_field for rule in field_rules}
         geometry_column = layer.geometry_column or next(
             (
@@ -687,8 +753,13 @@ class GeoPackageImporter:
                 ValidationIssue(
                     code="duplicate-row",
                     message=(
-                        f"{duplicate_count} exakte Dublette(n) in Layer "
-                        f"{layer.table_name} wurden entfernt."
+                        f"{display_name}: "
+                        + (
+                            "1 Eintrag war doppelt (komplett gleich) und wurde"
+                            if duplicate_count == 1
+                            else f"{_count(duplicate_count)} Einträge waren doppelt (komplett gleich) und wurden"
+                        )
+                        + " automatisch entfernt."
                     ),
                     severity="warning",
                     rule="Alle Attribute und Geometrie identisch",
@@ -697,7 +768,7 @@ class GeoPackageImporter:
         if geometry_column:
             records = GeoPackageImporter._mark_uncertain_duplicates(
                 layer.table_name, records, kept_rows, compared_fields, geometry_column, issues,
-                mapping_rules.label if mapping_rules is not None else str,
+                mapping_rules.field_name, display_name,
             )
         return records
 
@@ -710,6 +781,7 @@ class GeoPackageImporter:
         geometry_column: str,
         issues: List[ValidationIssue],
         label: Any = str,
+        display_name: Optional[str] = None,
     ) -> List[HarmonizedRecord]:
         """Group records that share a geometry but differ in other attributes.
 
@@ -746,10 +818,21 @@ class GeoPackageImporter:
             ValidationIssue(
                 code="uncertain-duplicate",
                 message=(
-                    f"{table_name}: {len(groups)} Gruppe(n) mit {row_count} Objekten – gleiche Geometrie, "
-                    f"aber unterschiedliche Angaben in "
-                    f"{', '.join(label(field) for field in top_fields) or 'einzelnen Attributen'}. "
-                    "Alle wurden behalten. Zusammenführen?"
+                    f"{display_name or table_name}: "
+                    + (
+                        "An einer Stelle liegen"
+                        if len(groups) == 1
+                        else f"An {_count(len(groups))} Stellen liegen"
+                    )
+                    + f" mehrere Objekte genau übereinander ({_count(row_count)} Objekte). "
+                    + "Sie unterscheiden sich nur in "
+                    + (_names([label(field) for field in top_fields]) or "einzelnen Angaben")
+                    + (
+                        " – z. B. ein Haus mit mehreren Hausnummern."
+                        if "hnr" in shown_fields
+                        else " – z. B. dasselbe Objekt mit zwei Einträgen."
+                    )
+                    + " Alle wurden behalten. Sollen sie je Stelle zu einem Objekt zusammengefasst werden?"
                 ),
                 severity="warning",
                 requires_confirmation=True,

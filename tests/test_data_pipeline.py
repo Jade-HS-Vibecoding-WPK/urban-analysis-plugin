@@ -318,7 +318,7 @@ def test_same_attributes_with_different_geometry_are_not_duplicates(tmp_path):
 
     assert [record.source_row_id for record in result.harmonized_records] == [1, 3]
     duplicate = next(issue for issue in result.issues if issue.code == "duplicate-row")
-    assert duplicate.message.startswith("1 exakte")
+    assert duplicate.message == "buildings: 1 Eintrag war doppelt (komplett gleich) und wurde automatisch entfernt."
 
 
 def make_house_number_geopackage(path):
@@ -377,12 +377,15 @@ def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
         None,
     ]
     exact = next(issue for issue in result.issues if issue.code == "duplicate-row")
-    assert exact.message.startswith("1 exakte")
+    assert exact.message == "Gebäude: 1 Eintrag war doppelt (komplett gleich) und wurde automatisch entfernt."
     uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
     assert uncertain.requires_confirmation
     assert uncertain.severity == "warning"
-    assert uncertain.message.startswith("gebaeude: 1 Gruppe(n) mit 2 Objekten")
-    assert "Hausnummer (hnr)" in uncertain.message
+    assert uncertain.message.startswith(
+        "Gebäude: An einer Stelle liegen mehrere Objekte genau übereinander (2 Objekte). "
+        "Sie unterscheiden sich nur in Hausnummer – z. B. ein Haus mit mehreren Hausnummern."
+    )
+    assert uncertain.message.endswith("Sollen sie je Stelle zu einem Objekt zusammengefasst werden?")
     assert "Alle wurden behalten" in uncertain.message
 
 
@@ -467,7 +470,8 @@ def test_source_name_is_only_the_file_name_and_source_stays_empty(tmp_path):
     assert {record.attributes["source"] for record in result.harmonized_records} == {None}
     hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
     assert hint.severity == "warning"
-    assert hint.message.startswith("Für keinen Layer gibt es eine Angabe zur Datenquelle.")
+    assert hint.message.startswith("Datenquelle fehlt: In der Datei steht nicht, woher die Daten stammen.")
+    assert "z. B. „ALKIS, © LGLN 2025“" in hint.message
     assert str(tmp_path) not in hint.message
 
 
@@ -643,7 +647,7 @@ def test_without_alkis_profile_only_the_layer_name_decides(tmp_path):
     categories = {layer.layer_id: layer.category for layer in result.layers}
     assert categories == {"nutzung": "Nutzungsflächen", "gebaeude": "Gebäude", "bodenschaetzung": None}
     hint = next(issue for issue in result.issues if issue.code == "missing-category")
-    assert "bodenschaetzung" in hint.message
+    assert hint.message.startswith("Bodenschätzung: Für diesen Layer ist unklar, was er darstellt")
     assert all(record.attributes["object_detail"] is None for record in result.harmonized_records)
 
 
@@ -657,7 +661,7 @@ def test_data_source_hint_names_only_the_layers_without_source(tmp_path):
     result = import_alkis(path)
 
     hint = next(issue for issue in result.issues if issue.code == "missing-data-source")
-    assert hint.message.startswith("Für die Layer nutzung, bodenschaetzung gibt es keine Angabe")
+    assert hint.message.startswith("Datenquelle fehlt für Nutzung und Bodenschätzung:")
 
 
 def test_uncertain_duplicate_hint_skips_key_column_when_readable_twin_differs(tmp_path):
@@ -670,6 +674,19 @@ def test_uncertain_duplicate_hint_skips_key_column_when_readable_twin_differs(tm
     result = import_houses(path)
 
     uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
-    assert "Gebäudefunktion (gfk__bez)" in uncertain.message
-    assert "(gfk)" not in uncertain.message
-    assert "Schlüssel)" not in uncertain.message
+    assert "nur in Gebäudefunktion und Hausnummer" in uncertain.message
+    assert "Gebäudefunktionsschlüssel" not in uncertain.message
+    assert "(" not in uncertain.message.split("(3 Objekte)")[1].split("–")[0]
+
+
+def test_attribute_suggestions_name_their_layer_and_show_examples(tmp_path):
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+
+    result = import_alkis(path)
+
+    by_layer = {(s.layer_id, s.source_field): s for s in result.attribute_suggestions}
+    nutzung = by_layer[("nutzung", "tn__bez")]
+    assert nutzung.target_field == "object_type"
+    assert nutzung.examples == ("Strassenverkehr, Begleitfläche Straßenverkehr", "Platz, Parkplatz")
+    assert by_layer[("gebaeude", "gfk__bez")].examples == ("Wohngebäude",)
