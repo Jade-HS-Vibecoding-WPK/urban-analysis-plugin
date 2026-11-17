@@ -257,6 +257,7 @@ class GeoPackageImporter:
         descriptors: List[LayerDescriptor] = []
         suggestions: List[AttributeSuggestion] = []
         records: List[HarmonizedRecord] = []
+        layers_without_source: List[str] = []
         for layer in layers:
             category = _infer_category(layer.table_name, (value for row in layer.rows for value in row.values()))
             descriptors.append(
@@ -264,11 +265,14 @@ class GeoPackageImporter:
                     layer_id=layer.table_name,
                     name=layer.table_name,
                     geometry_type=layer.geometry_type,
-                    source_name=str(file_path),
+                    source_name=file_path.name,
                     category=category,
                 )
             )
-            for rule in self._mapping_rules(layer.fields):
+            layer_rules = self._mapping_rules(layer.fields)
+            if layer.rows and not any(rule.target_field == "source" for rule in layer_rules):
+                layers_without_source.append(layer.table_name)
+            for rule in layer_rules:
                 suggestions.append(
                     AttributeSuggestion(
                         source_field=rule.source_field,
@@ -277,6 +281,19 @@ class GeoPackageImporter:
                     )
                 )
             records.extend(self._harmonize(layer, file_path, category, issues))
+
+        if layers_without_source:
+            issues.append(
+                ValidationIssue(
+                    code="missing-data-source",
+                    message=(
+                        f"Für die Layer {', '.join(layers_without_source)} gibt es keine Angabe zur "
+                        "Datenquelle. Bitte im Schritt „Ausgabe“ eine Datenquelle eintragen."
+                    ),
+                    severity="warning",
+                    rule="Datenquelle",
+                )
+            )
 
         return PipelineResult(
             contract_version=self.contract_version,
@@ -566,13 +583,13 @@ class GeoPackageImporter:
                 continue
             seen.add(duplicate_key)
             attributes: Dict[str, Any] = {
-                "source_name": str(file_path),
+                "source_name": file_path.name,
                 "object_type": row.get(rules["object_type"]) if "object_type" in rules else layer.table_name,
                 "category": row.get(rules["category"]) if "category" in rules else category,
                 "status": row.get(rules["status"]) if "status" in rules else None,
                 "area_m2": _coerce_area(row.get(rules["area_m2"])) if "area_m2" in rules else None,
                 "year": _coerce_year(row.get(rules["year"])) if "year" in rules else None,
-                "source": row.get(rules["source"]) if "source" in rules else str(file_path),
+                "source": row.get(rules["source"]) if "source" in rules else None,
             }
             records.append(
                 HarmonizedRecord(
@@ -672,3 +689,23 @@ def merge_confirmed_duplicates(
             seen_groups.add(group)
         merged.append(record)
     return merged
+
+
+def apply_data_source(records: Sequence[HarmonizedRecord], data_source: str) -> List[HarmonizedRecord]:
+    """Fill empty ``source`` attributes with the data source the user entered.
+
+    Interface S8 for the user-guidance branch: call it in the step "Ausgabe"
+    with ``result.output.data_source``.  Values that came from the input data
+    stay unchanged.  An empty data source is rejected instead of ignored.
+    """
+    text = (data_source or "").strip()
+    if not text:
+        raise ValueError("Eine Datenquelle ist erforderlich")
+    updated: List[HarmonizedRecord] = []
+    for record in records:
+        if record.attributes.get("source") in (None, ""):
+            attributes = dict(record.attributes)
+            attributes["source"] = text
+            record = replace(record, attributes=attributes)
+        updated.append(record)
+    return updated
