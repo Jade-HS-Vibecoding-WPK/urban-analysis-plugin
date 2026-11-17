@@ -1,0 +1,28 @@
+# Lokale Geodaten (ALKIS u. a. lizenzpflichtig) – nie committen
+daten/
+*.gpkg
+*.gpkg-shm
+*.gpkg-wal
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qgz
+*.qgs
+
+# Plugin-Builds
+*.zip
+
+# Python / Testläufe
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Betriebssystem / Editoren
+.DS_Store
+__MACOSX/
+Thumbs.db
+.vscode/
+.idea/
