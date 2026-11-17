@@ -392,3 +392,63 @@ def test_merge_confirmed_duplicates_keeps_first_record_per_group(tmp_path):
     assert merge_confirmed_duplicates(records, []) == records
     merged = merge_confirmed_duplicates(records, ["gebaeude:1"])
     assert [record.source_row_id for record in merged] == [1, 4]
+
+
+def switch_to_wal_mode(path):
+    """Store the GeoPackage like QGIS does while editing (journal mode WAL)."""
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    connection.close()
+    assert path.read_bytes()[18:20] == b"\x02\x02"
+
+
+def test_reads_wal_mode_geopackage_without_side_files(tmp_path):
+    path = tmp_path / "places.gpkg"
+    make_clipping_geopackage(path)
+    switch_to_wal_mode(path)
+    original = path.read_bytes()
+
+    result = import_places(path)
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 5]
+    assert path.read_bytes() == original
+
+
+def test_reads_wal_mode_geopackage_while_another_program_writes(tmp_path):
+    path = tmp_path / "places.gpkg"
+    make_clipping_geopackage(path)
+    switch_to_wal_mode(path)
+    writer = sqlite3.connect(path)
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("INSERT INTO places VALUES (8, ?, 'neu gezeichnet')", (gpkg_point(20, 20),))
+        writer.commit()
+        assert (tmp_path / "places.gpkg-wal").exists()
+
+        result = import_places(path)
+    finally:
+        writer.close()
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 5, 8]
+
+
+def test_reads_wal_mode_geopackage_with_unsaved_changes_and_no_shared_memory_file(tmp_path):
+    source = tmp_path / "source.gpkg"
+    make_clipping_geopackage(source)
+    switch_to_wal_mode(source)
+    writer = sqlite3.connect(source)
+    writer.execute("PRAGMA wal_autocheckpoint=0")
+    writer.execute("INSERT INTO places VALUES (8, ?, 'neu gezeichnet')", (gpkg_point(20, 20),))
+    writer.commit()
+    copy_dir = tmp_path / "copy"
+    copy_dir.mkdir()
+    path = copy_dir / "places.gpkg"
+    path.write_bytes(source.read_bytes())
+    (copy_dir / "places.gpkg-wal").write_bytes((tmp_path / "source.gpkg-wal").read_bytes())
+    writer.close()
+    original = path.read_bytes()
+
+    result = import_places(path)
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 5, 8]
+    assert path.read_bytes() == original

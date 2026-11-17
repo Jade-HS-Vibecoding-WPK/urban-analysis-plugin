@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .contracts import (
     AttributeSuggestion,
@@ -142,6 +143,33 @@ def _epsg_from_definition(definition: Optional[str]) -> Optional[str]:
     return None
 
 
+@contextmanager
+def _open_read_only(file_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a GeoPackage without writing to it or creating files next to it.
+
+    QGIS saves GeoPackages in SQLite's WAL journal mode.  Such a file cannot be
+    opened with ``mode=ro`` when its ``-shm`` side file is missing, e.g. after
+    copying it.  If there is no ``-wal`` file either, no unsaved changes are
+    pending and the file can safely be read as immutable.
+    """
+    base_uri = file_path.resolve().as_uri()
+    connection = sqlite3.connect(f"{base_uri}?mode=ro", uri=True)
+    try:
+        connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except sqlite3.OperationalError:
+        connection.close()
+        if file_path.with_name(file_path.name + "-wal").exists():
+            raise
+        connection = sqlite3.connect(f"{base_uri}?immutable=1", uri=True)
+    except sqlite3.Error:
+        connection.close()
+        raise
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
 def _infer_category(table_name: str, values: Iterable[Any]) -> Optional[str]:
     text = " ".join([table_name, *(str(value) for value in values if value is not None)]).casefold()
     category_terms = {
@@ -212,7 +240,7 @@ class GeoPackageImporter:
             )
 
         try:
-            with sqlite3.connect(f"file:{file_path}?mode=ro", uri=True) as connection:
+            with _open_read_only(file_path) as connection:
                 layers = self._read_layers(connection, study_area, project_crs.strip(), issues)
         except sqlite3.Error as exc:
             raise GeoPackageImportError(f"Unable to read GeoPackage {file_path}: {exc}") from exc
