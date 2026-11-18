@@ -3,6 +3,8 @@
 Stand: 18.11.2026 – **E5–E15 von Person Windows bestätigt (G5), ergänzt um
 E16–E19. Person Mac stimmt E16, E17 und E19 zu; E18 auf Wunsch der Person
 Mac geändert (jedes Mal fragen, letzter Ordner als Vorschlag).**
+Neu als Entwurf von Person Mac: soziale Daten und Erreichbarkeit (E22–E27,
+G10, M17–M21, W15–W16), noch nicht mit Person Windows abgestimmt.
 
 Der erste Arbeitsplan (`ARBEITSPLAN.md`) ist im Wesentlichen erledigt: Das
 Plugin läuft in QGIS von Schritt 1 bis 9 mit einer lokalen GeoPackage-Datei.
@@ -68,6 +70,20 @@ bestätigen):
 | --- | --- |
 | E20 | **Zielschema um Objekt-ID und Adresse erweitern:** Die Ergebnis-Layer bekommen zwei neue Felder: `object_id` (Original-ID der Quelle, z. B. ALKIS `objid`, später OSM `osm_id`) und `address` (Straße und Hausnummer, je Adresse zusammengesetzt, mehrere Adressen getrennt mit „; “, z. B. „Hauptstraße 2; Nebenweg 1“). Bisher kennen die Ergebnis-Layer nur die 8 Felder aus `PLAN.md` §3.4; IDs, Straßen und Hausnummern sind dort nicht zu finden, obwohl die Pipeline sie im Hintergrund behält. |
 | E21 | **Schritt 5 verständlich machen:** Schritt 5 soll klar sagen, *was* die Nutzerin entscheidet und *warum*. Heute sieht man nur einzelne vorgeschlagene Spalten, kann nur eines der 8 Zielfelder wählen und versteht Begriffe wie „Nutzungsdetail“ oder „Status“ nicht. Wie Schritt 5 künftig aussieht, legen wir in G9 gemeinsam fest. |
+
+Vorschläge von Person Mac: soziale Daten und Erreichbarkeit (18.11.2026, in
+G10 gemeinsam zu bestätigen). Hintergrund: Für eine Urban-Design-Analyse
+reichen Gebäude und Flächen nicht; man braucht auch, wo Ärzte, Schulen oder
+Haltestellen sind, wie oft der Bus fährt und wie gut man sie erreicht.
+
+| Nr. | Vorschlag |
+| --- | --- |
+| E22 | **Soziale Infrastruktur aus OSM-Punkten:** Neue Kategorien **Gesundheit** (z. B. Arztpraxis, Apotheke), **Bildung und Betreuung** (Schule, Kita), **Nahversorgung** (Supermarkt, Bäckerei), **Freizeit** (Spielplatz, Sportplatz, Bibliothek) und **ÖPNV-Haltestellen**. Sie kommen ohne eigenen Download aus der OSM-Abfrage (M10), die dafür um diese Punkte erweitert wird. Die Zuordnung steht in `mapping_rules.json`. |
+| E23 | **Zusatzfelder je Kategorie:** Die 11 Zielfelder bleiben die gemeinsame Basis für alle Kategorien. Felder, die nur für eine Kategorie Sinn ergeben, kommen **nur dort** dazu (z. B. „Abfahrten pro Stunde“ nur bei Haltestellen, „Weg zur nächsten Haltestelle“ nur bei Gebäuden). Das braucht eine Änderung am Vertrag (→ G10). |
+| E24 | **Takt aus Fahrplandaten (GTFS):** Wie oft ein Bus fährt, steht nicht in OSM. Dafür wird der offene, deutschlandweite GTFS-Fahrplan (DELFI) als neue Quelle geladen. Kennzahl je Haltestelle: **Abfahrten pro Stunde, werktags 6–20 Uhr**. Tag und Zeitfenster stehen in einer Einstellungsdatei und sind änderbar. Quelle, Lizenz und Größe klärt M18. |
+| E25 | **Ausnahme von E15 für große Deutschland-Dateien:** Dateien, die es nur für ganz Deutschland gibt (GTFS, evtl. Zensus), sind zu groß, um sie bei jedem Lauf neu zu laden. Sie werden **einmal** in den gewählten Ordner geladen. Beim nächsten Lauf zeigt das Plugin das Datum der vorhandenen Datei und fragt: „Diese Datei verwenden oder neu laden?“ Ohne Bestätigung wird nichts wiederverwendet (keine stille Wiederverwendung). |
+| E26 | **Erreichbarkeit in drei Stufen**, in dieser Reihenfolge: **1. Luftlinie** – Abstand jedes Gebäudes zum nächsten Ziel (z. B. Haltestelle) und ob es im 300-m- oder 500-m-Radius liegt. **2. Fußweg** – echter Weg über das OSM-Wegenetz, dazu Einzugsbereiche als Flächen („in 5 Minuten zu Fuß“). **3. ÖV-Güteklassen** – Abstand und Takt zusammen, Klassen A (sehr gut) bis F (schlecht), nach der bekannten Methode aus der Raumplanung. Die Rechnung ist für andere Ziele übertragbar (nächster Arzt, nächste Schule, nächster Supermarkt). Radien, Gehgeschwindigkeit und Klassengrenzen stehen in einer Einstellungsdatei. |
+| E27 | **Einwohnerdaten aus dem Zensus 2022** (100-m-Raster) als spätere Quelle, z. B. für „Wie viele Menschen wohnen im Einzugsbereich einer Haltestelle?“. Erst nach der Recherche in M18 entscheiden, ob und wie. |
 
 Weiter gilt unverändert:
 
@@ -158,6 +174,33 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   der `details` aufklappt.
 - Änderung an `contracts.py` → gemeinsamer PR (G6).
 
+### S14 – Takt aus GTFS *(Download Windows, Rechnung Mac)*
+
+- GTFS ist eine ZIP-Datei mit Tabellen (CSV): Haltestellen (`stops.txt`) mit
+  Längen-/Breitengrad, Abfahrten (`stop_times.txt`), Fahrtage
+  (`calendar.txt`).
+- **Windows** lädt die ZIP-Datei (E25) und schreibt die Haltestellen im
+  Gebiet als GeoPackage **im Projekt-CRS** (Umprojektion in QGIS, wie bei
+  OSM).
+- **Mac:** `departures_per_hour(gtfs_zip, stop_ids, settings)` in
+  `urban_analysis/gtfs.py` (neu) zählt die Abfahrten je Haltestelle im
+  Zeitfenster aus E24. Reines Python (`zipfile`, `csv`), liest die große
+  Abfahrten-Tabelle Zeile für Zeile und behält nur die Haltestellen im
+  Gebiet.
+
+### S15 – Erreichbarkeit *(Mac, Oberfläche Windows)*
+
+- Eingabe: Ausgangsobjekte (z. B. Gebäude), Ziele (z. B. Haltestellen) und
+  Einstellungen (Radien, Gehgeschwindigkeit, Klassengrenzen) aus E26.
+- Stufe 1 (Luftlinie) und Stufe 3 (Güteklassen) in reinem Python in
+  `urban_analysis/accessibility.py` (neu). Abstände in Metern; dafür muss das
+  Projekt-CRS metrisch sein (z. B. EPSG:25832), sonst sichtbarer Fehler.
+- Stufe 2 (Fußweg): **wo gerechnet wird, ist offen** (→ §9) – entweder mit
+  den Netzwerk-Werkzeugen von QGIS (Windows) oder mit einer eigenen
+  Wegsuche über die OSM-Linien (Mac).
+- Ausgabe: Zusatzfelder an den Ausgangsobjekten (E23), Stufe 2 außerdem
+  Einzugsbereiche als neue Flächen-Layer.
+
 ---
 
 ## 5. Gemeinsame Schritte
@@ -212,6 +255,16 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
      Vorschläge der Pipeline sind vorausgewählt.
   3. Verständliche deutsche Namen und eine Ein-Satz-Erklärung je Zielfeld.
 - **Warten auf:** nichts. Vor M16 und W14.
+
+### G10 – Soziale Daten und Erreichbarkeit beschließen (E22–E27)
+
+- **Absicht:** Die Vorschläge E22–E27 erweitern das Plugin deutlich. Beide
+  müssen zustimmen, bevor dafür Code entsteht.
+- **Ziel:** E22–E27 bestätigt oder geändert; die Zusatzfelder je Kategorie
+  (E23) in `PLAN.md` §3.4 und, falls nötig, in `contracts.py` festgelegt
+  (eigener PR wie G6); Antwort auf die offenen Fragen zu Stufe 2 und den
+  Haltestellen (§9).
+- **Warten auf:** G9 (Zielschema), damit wir das Schema nur einmal ändern.
 
 ---
 
@@ -317,6 +370,49 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   Abgleich → Vorrang → `output_plan()`.
 - **Warten auf:** M14, Absprache zur gemeinsamen Testdatei.
 
+### M17 – Soziale Infrastruktur aus OSM-Punkten (E22)
+
+- **Absicht:** Ärzte, Schulen, Supermärkte, Spielplätze und Haltestellen
+  liegen schon in den OSM-Punkten, werden aber noch keiner Kategorie
+  zugeordnet.
+- **Ziel:** Kategorie-Regeln und verständliche Namen für den OSM-Layer
+  `points` (und passende Flächen, z. B. Schulgelände) in `mapping_rules.json`;
+  die OSM-Abfrage aus M10 holt diese Punkte mit. Tests mit künstlichen
+  Punkten.
+- **Dateien:** `mapping_rules.json`, `sources.py`, `tests/test_mapping.py`,
+  `tests/test_data_pipeline.py`.
+- **Warten auf:** G10 (Liste der Kategorien); M10 für die Abfrage.
+
+### M18 – Recherche: GTFS und Zensus
+
+- **Absicht:** Vor dem Code wissen, woher Fahrplan- und Einwohnerdaten kommen.
+- **Ziel:** Für GTFS (DELFI) und Zensus 2022: Adresse, Lizenz und
+  Quellenvermerk, Größe der Datei, wie oft aktualisiert, gibt es einen Dienst
+  nur für ein Gebiet? Ergebnis als Einträge in `sources_catalog.json` und
+  Abschnitt in `STATUS_DATENPIPELINE.md`.
+- **Warten auf:** nichts (kann parallel zu M9 laufen).
+
+### M19 – Takt je Haltestelle aus GTFS (S14, E24)
+
+- **Ziel:** `gtfs.py` mit `departures_per_hour`, Tests mit einer kleinen,
+  im Testcode erzeugten GTFS-ZIP-Datei (Werktag/Wochenende, Zeitfenster,
+  Haltestelle ohne Abfahrten). Ergebnis als Zusatzfeld an den Haltestellen.
+- **Warten auf:** M18, G10.
+
+### M20 – Erreichbarkeit Stufe 1: Luftlinie (S15, E26)
+
+- **Ziel:** `accessibility.py`: je Gebäude Abstand zum nächsten Ziel und
+  „im 300-m- / 500-m-Radius ja/nein“, für jede Ziel-Kategorie aus M17
+  nutzbar. Fehler, wenn das Projekt-CRS nicht metrisch ist. Tests.
+- **Warten auf:** M17, G10.
+
+### M21 – Erreichbarkeit Stufe 3: ÖV-Güteklassen (S15, E26)
+
+- **Ziel:** Güteklasse A–F je Gebäude aus Abstand (Stufe 1 oder 2) und Takt
+  (M19); Klassengrenzen in einer Einstellungsdatei. Tests. Später, nach M18:
+  Einwohner im Einzugsbereich aus dem Zensus (E27).
+- **Warten auf:** M19, M20 (bzw. Stufe 2).
+
 ---
 
 ## 7. Schritte Person Windows – Benutzerführung und Integration
@@ -376,6 +472,22 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 
 - **Warten auf:** W11.
 
+### W15 – GTFS herunterladen und Haltestellen-Layer (S14, E25)
+
+- **Ziel:** GTFS-ZIP laden wie in W11 (Ordner fragen, Fortschritt,
+  Abbrechen); ist schon eine Datei im Ordner, Datum zeigen und „verwenden
+  oder neu laden?“ fragen (E25). Haltestellen im Gebiet als GeoPackage im
+  Projekt-CRS schreiben.
+- **Warten auf:** W11, M18.
+
+### W16 – Erreichbarkeit in der Benutzerführung (S15, E26)
+
+- **Ziel:** Auswahl, welche Ziele ausgewertet werden (Haltestellen, Ärzte,
+  Schulen …); Zusatzfelder in Ergebnis-Layern, GeoPackage und PDF;
+  Einzugsbereiche als eigene Layer mit gut lesbarer Darstellung. Falls in
+  G10 so entschieden: Stufe 2 (Fußweg) mit den Netzwerk-Werkzeugen von QGIS.
+- **Warten auf:** M20; Stufe 2: G10.
+
 ---
 
 ## 8. Reihenfolge auf einen Blick
@@ -393,11 +505,21 @@ Etappe   Person Mac                     Gemeinsam              Person Windows
 3        M14 Quellen abgleichen (S12)   G7 Test 2 Länder       W12 Vorrang je Kategorie
          M6, M15 Hinweise                                      W9 ZIP-Test
          M7 Ende-zu-Ende-Test           G8 Abnahme
+4        M18 Recherche GTFS/Zensus      G10 Soziale Daten      W15 GTFS-Download
+         M17 OSM-Punkte einordnen                              W16 Erreichbarkeit (UI)
+         M19 Takt aus GTFS
+         M20 Erreichbarkeit Luftlinie
+         M21 ÖV-Güteklassen
 ```
+
+Etappe 4 baut auf Etappe 2 und 3 auf. M18 (Recherche) und G10 (Beschluss)
+können schon früher laufen.
 
 **Wer auf wen wartet:** G5 vor allem anderen · G6 vor M13, M15, W13 · M9 vor
 M12 und dem ALKIS-Teil von M10 · M10 vor W10/W11 · M14 vor W12 · G9 vor M16
-und W14 · M16 vor M14 (Abgleich braucht die Objekt-ID).
+und W14 · M16 vor M14 (Abgleich braucht die Objekt-ID) · G9 vor G10 · G10 vor
+M17, M19, M20 · M10 vor M17 (Abfrage) · M18 vor M19 und W15 · W11 vor W15 ·
+M17 vor M20 · M19 und M20 vor M21 · M20 vor W16.
 
 ---
 
@@ -413,3 +535,15 @@ Noch offen und erst nach M9 entscheidbar:
 - Reichen die Inhalte der frei nutzbaren Dienste (oft nur Gebäude und
   Flurstücke) für die Kategorien Nutzungsflächen, Straßen und Grünflächen,
   oder kommen diese dann nur aus OSM?
+
+Neu offen zu sozialen Daten und Erreichbarkeit (in G10 klären):
+
+- **Stufe 2 (Fußweg):** Rechnen wir mit den Netzwerk-Werkzeugen von QGIS
+  (Windows, schneller fertig, braucht QGIS) oder mit einer eigenen Wegsuche
+  in der Pipeline (Mac, ohne QGIS testbar, mehr Aufwand)?
+- **Haltestellen doppelt:** Haltestellen gibt es in OSM **und** in GTFS.
+  Nehmen wir nur GTFS (hat den Takt) oder gleichen wir beide über Name und
+  Abstand ab?
+- **Welche Zusatzfelder genau** (E23), und wie heißen sie für die Nutzenden?
+- **Größe von GTFS:** Reicht die Rechenzeit, wenn die deutschlandweite
+  Abfahrten-Tabelle Zeile für Zeile gelesen wird? Wird in M18/M19 gemessen.

@@ -14,12 +14,14 @@ from urban_analysis.outputs import (
 )
 
 
-def test_result_layers_get_all_eight_target_fields_with_types():
+def test_result_layers_get_all_target_fields_with_types():
     specs = dict(result_field_specs())
     assert tuple(specs) == TARGET_FIELDS
-    assert len(specs) == 8
+    assert len(specs) == 11  # G9/M16: + object_id, address, floors
     assert specs["area_m2"] == "double"
     assert specs["year"] == "int"
+    assert specs["floors"] == "int"
+    assert specs["object_id"] == "text" and specs["address"] == "text"
     assert specs["object_detail"] == "text"
 
 

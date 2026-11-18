@@ -14,7 +14,7 @@ from .user_guidance import OutputPlan
 RESULT_LAYER_PROPERTY = "urban_analysis/result_layer"
 RESULT_GROUP_PROPERTY = "urban_analysis/result_group"
 DOUBLE_FIELDS = ("area_m2",)
-INTEGER_FIELDS = ("year",)
+INTEGER_FIELDS = ("year", "floors")
 SKIP_NO_GEOMETRY = "ohne Geometrie"
 SKIP_UNREADABLE = "Geometrie nicht lesbar"
 SKIP_OTHER_TYPE = "anderer Geometrietyp als der Layer"
@@ -250,6 +250,53 @@ def load_qgis_layers(iface, selected_layers: Iterable[LayerDescriptor], layer_ob
     return tuple(loaded)
 
 
+def unique_layer_names(names: Iterable[str]) -> List[str]:
+    """GeoPackage layer names must be unique: 'Gebäude', 'Gebäude (2)' …"""
+    used: Dict[str, int] = {}
+    unique = []
+    for name in names:
+        name = (name or "").strip() or "Ergebnis"
+        count = used.get(name.lower(), 0) + 1
+        used[name.lower()] = count
+        unique.append(name if count == 1 else f"{name} ({count})")
+    return unique
+
+
+def write_result_geopackage(path, layers: Sequence[object]) -> str:
+    """Write the result layers into one new GeoPackage (W8b).
+
+    Each layer keeps its readable name as GeoPackage layer name.  An existing
+    file at ``path`` is replaced (the save dialog already asked); the input
+    data are never touched.  Errors are raised with a readable reason.
+    """
+    from qgis.core import QgsCoordinateTransformContext, QgsVectorFileWriter
+
+    if not layers:
+        raise ValueError("Es gibt keine Ergebnis-Layer, die gespeichert werden können.")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    names = unique_layer_names(layer.name() for layer in layers)
+    for index, (layer, name) in enumerate(zip(layers, names)):
+        options = QgsVectorFileWriter.SaveVectorOptions()
+        options.driverName = "GPKG"
+        options.fileEncoding = "UTF-8"
+        options.layerName = name
+        options.actionOnExistingFile = (
+            QgsVectorFileWriter.CreateOrOverwriteLayer
+            if index
+            else QgsVectorFileWriter.CreateOrOverwriteFile
+        )
+        written = QgsVectorFileWriter.writeAsVectorFormatV3(
+            layer, str(target), QgsCoordinateTransformContext(), options
+        )
+        # QGIS returns (error, message, new file, new layer); only the first
+        # two matter here.
+        error, message = written[0], written[1]
+        if error != QgsVectorFileWriter.NoError:
+            raise RuntimeError(f"Layer „{name}“: {message or 'unbekannter Fehler'}")
+    return str(target)
+
+
 def _pdf_escape(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -259,7 +306,9 @@ def write_minimal_pdf(path, *, title: str, study_area_wkt: str, buffer_meters: f
     """Write a dependency-free, one-page PDF containing the required metadata."""
     lines = [
         title,
-        "Untersuchungsgebiet: " + study_area_wkt,
+        # one line on an A4 page: long polygons are shortened
+        "Untersuchungsgebiet: " + (study_area_wkt if len(study_area_wkt) <= 80
+                                   else study_area_wkt[:79] + "…"),
         "Puffer: " + str(buffer_meters) + " m",
         "Legende: " + ", ".join(legend),
         "Datenquelle: " + data_source,
@@ -270,14 +319,16 @@ def write_minimal_pdf(path, *, title: str, study_area_wkt: str, buffer_meters: f
             commands.append("0 -18 Td")
         commands.append("(" + _pdf_escape(line) + ") Tj")
     commands.append("ET")
-    stream = "\n".join(commands).encode("latin-1", errors="replace")
+    # Helvetica in the PDF uses WinAnsi, so German umlauts (ä, ö, ü, ß) and
+    # the dash work via cp1252; only rare characters become '?'.
+    stream = "\n".join(commands).encode("cp1252", errors="replace")
 
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
         b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
         b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
         + stream + b"\nendstream",
     ]
@@ -331,6 +382,7 @@ def export_selected_outputs(
     pdf_path: Optional[str] = None,
 ) -> Dict[str, object]:
     """Execute selected outputs while keeping pipeline data outside this module."""
+    selected_layers = list(selected_layers)  # used twice below
     result = {"qgis_layer_ids": output_plan.qgis_layer_ids}
     if layer_objects is not None:
         result["loaded_qgis_layer_ids"] = load_qgis_layers(
@@ -347,32 +399,11 @@ def export_selected_outputs(
                 "Das GeoPackage kann nicht gespeichert werden, weil noch keine "
                 "Ergebnis-Layer erzeugt wurden."
             )
-        from qgis.core import QgsCoordinateTransformContext, QgsVectorFileWriter
-
-        writer_errors = []
-        for index, descriptor in enumerate(selected_layers):
-            layer = layer_objects[descriptor.layer_id]
-            options = QgsVectorFileWriter.SaveVectorOptions()
-            options.driverName = "GPKG"
-            options.layerName = descriptor.name or descriptor.layer_id
-            if index:
-                options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
-            else:
-                options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteFile
-            error, message = QgsVectorFileWriter.writeAsVectorFormatV3(
-                layer,
-                geopackage_path,
-                QgsCoordinateTransformContext(),
-                options,
-            )
-            if error != QgsVectorFileWriter.NoError:
-                writer_errors.append(message or descriptor.layer_id)
-        if writer_errors:
-            raise RuntimeError(
-                "Das GeoPackage konnte nicht gespeichert werden: "
-                + "; ".join(writer_errors)
-            )
-        result["geopackage_path"] = str(geopackage_path)
+        layers = [layer_objects[descriptor.layer_id] for descriptor in selected_layers]
+        try:
+            result["geopackage_path"] = write_result_geopackage(geopackage_path, layers)
+        except RuntimeError as error:
+            raise RuntimeError(f"Das GeoPackage konnte nicht gespeichert werden: {error}")
     if output_plan.pdf_requested:
         if not pdf_path:
             raise ValueError(

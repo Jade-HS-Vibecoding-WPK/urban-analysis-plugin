@@ -192,6 +192,7 @@ def toolbar_icon_path(style):
     return icon_path(TOOLBAR_ICON_FILES.get(style, TOOLBAR_ICON_FILES["classic"]))
 # Ticked check boxes: own white pixel check mark on the blue box.
 CHECK_ICON_FILE = "haken.svg"
+CLASSIC_CHECK_ICON_FILE = "haken_klassisch.svg"  # smooth white check (classic)
 # Radio buttons: own pixel circles (7x7 blocks of 2 px).
 RADIO_FILES = {
     "off": "radio_off.svg",
@@ -494,9 +495,11 @@ QScrollBar::add-line, QScrollBar::sub-line {{
 
 def classic_stylesheet():
     """Style 'Klassisch': light and neutral like QGIS, blue main action,
-    soft corners, QGIS font and native check boxes / radio buttons."""
+    soft corners, QGIS font, native radio buttons and own smooth check
+    boxes (blue when ticked)."""
     c = CLASSIC_COLORS
     r = CLASSIC_RADIUS_PX
+    check_icon = Path(icon_path(CLASSIC_CHECK_ICON_FILE)).as_posix()
     padding = "padding: 6px 14px;"
     pressed_padding = "padding: 7px 14px 5px 14px;"  # label moves 1 px down
     return f"""
@@ -624,6 +627,35 @@ QRadioButton, QCheckBox {{
 }}
 QRadioButton:disabled, QCheckBox:disabled {{
     color: {c['disabled_text']};
+}}
+/* Own check boxes: the native ones are hardly visible on the panel
+   background in some QGIS setups.  Ticked = accent blue, white check. */
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    background-color: {c['surface']};
+    border: 1px solid {c['border_strong']};
+    border-radius: 3px;
+}}
+QCheckBox::indicator:hover {{
+    border-color: {c['accent']};
+    background-color: {c['accent_light']};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {c['accent']};
+    border-color: {c['accent_dark']};
+    image: url("{check_icon}");
+}}
+QCheckBox::indicator:checked:hover {{
+    background-color: {c['accent_hover']};
+}}
+QCheckBox::indicator:disabled {{
+    background-color: {c['disabled']};
+    border-color: {c['border']};
+}}
+QCheckBox::indicator:checked:disabled {{
+    background-color: {c['disabled_text']};
+    border-color: {c['disabled_text']};
 }}
 QFrame[uaRole="issue-error"], QFrame[uaRole="issue-warning"], QFrame[uaRole="issue-info"] {{
     background-color: {c['surface']};

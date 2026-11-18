@@ -1,91 +1,82 @@
-# Aktueller Stand der Datenpipeline
+# Aktueller Stand der Datenpipeline (Person Mac)
 
-## Branch und Synchronisation
+Stand: 18.11.2026, Ende des Tages. Plan und Entscheidungen stehen in
+`ARBEITSPLAN_DEUTSCHLANDWEIT.md`.
 
-Die Implementierung wurde ausschließlich auf dem Branch `feature/datenpipeline`
-entwickelt. Der Branch ist mit
-`origin/feature/datenpipeline` synchronisiert und wurde erfolgreich auf GitHub
-gepusht.
+## Was die Pipeline kann
 
-## Implementierter Funktionsumfang
+- GeoPackages QGIS-frei lesen (sqlite3 + WKB, ohne shapely/pyproj), auf
+  Untersuchungsgebiet + Puffer zuschneiden, CRS prüfen (keine Umprojektion).
+- Quellen am **Profil** erkennen (`mapping_rules.json`): **ALKIS**
+  (`…_kon.gpkg`) und **OSM** (wie QGIS/GDAL eine `.osm`-Datei speichert:
+  Layer `multipolygons`, `lines`, `points` mit `other_tags`).
+- Objekte in Kategorien einordnen, mit lesbarer Objektart
+  (z. B. „Wohnhaus“ statt `building=house`).
+- Zielschema mit **11 Feldern** (M16): `object_id`, `address`, `floors`,
+  `source_name`, `object_type`, `object_detail`, `category`, `status`,
+  `area_m2`, `year`, `source`.
+- Exakte Duplikate entfernen; Gebäude mit mehreren Adressen (Eckhaus) als ein
+  Objekt mit allen Adressen (M8); unsichere Fälle als Rückfrage.
+- Zu jedem Zielfeld ein deutscher Name und ein Erklärungssatz (M15),
+  abrufbar über `target_field_explanation()`.
 
-Die Datenpipeline unterstützt aktuell:
+## Branches und PRs
 
-- Import lokaler GeoPackage-Dateien über die GeoPackage-SQLite-Metadaten
-- Erkennung von Feature-Layern und Geometrietypen
-- Übernahme und Prüfung des Projekt-CRS
-- Definition eines Untersuchungsgebiets über WKT
-- Räumliche Begrenzung über das Untersuchungsgebiet mit konfigurierbarem Puffer
-- Standardpuffer von 500 Metern
-- Erkennung und Vorschlag fachlicher Kategorien
-- Automatisches Attributmapping mit sichtbarer Konfidenz
-- Harmonisierung in ein gemeinsames Zielschema
-- Erkennung und Entfernung exakter Duplikate
-- Sichtbare Prüfhinweise über `ValidationIssue`
-- Übergabe harmonisierter Datensätze über `PipelineResult`
-
-Das gemeinsame Zielschema umfasst:
-
-```text
-source_name
-object_type
-category
-status
-area_m2
-year
-source
-```
-
-## Mapping des getesteten Oldenburg-Datensatzes
-
-Für das getestete GeoPackage wurden folgende Regeln ergänzt:
-
-| Quellfeld | Zielfeld | Beispielwert |
+| Branch | Inhalt | Stand |
 | --- | --- | --- |
-| `ken__bez` | `object_type` | `Turm` |
-| `bwf__bez` | `category` | `Kirchturm, Glockenturm` oder `Wasserturm` |
-| `untermerkmal` | `status` | `xxx` |
+| `feature/pipeline-id-adresse` | M16 Objekt-ID, Adresse, Geschosszahl · M15 Erklärungen | in QGIS mit ALKIS getestet |
+| `feature/pipeline-osm-profil` | M11 OSM-Profil, baut auf dem Branch darüber auf | in QGIS mit echten OSM-Daten (Donnerschwee) getestet; die letzten Linien-Regeln nur mit der Pipeline geprüft |
+| `docs/soziale-daten-erreichbarkeit` | Planentwurf E22–E27 (soziale Daten, Erreichbarkeit) | Entwurf, braucht G10 |
 
-Die Spalte `wkt_geom` wird als Geometriespalte erkannt.
+**Reihenfolge beim Mergen:** erst M16 + M15, dann M11. Der Planentwurf ist
+unabhängig, wird aber erst nach G9 besprochen.
 
-## Teststatus
+## Was Person Windows dafür tun muss
 
-Der Import wurde in der QGIS-Python-Konsole mit dem GeoPackage
-`lkr_03403_Stadt_Oldenburg_kon.gpkg` erfolgreich ausgeführt. Dabei wurden
-harmonisierte Datensätze mit den erwarteten Werten für Objektart, Kategorie und
-Status erzeugt.
+1. `tests/test_result_layers.py` erwartet noch **8** Felder, jetzt sind es
+   **11** → Test anpassen (einziger roter Test).
+2. `outputs.py`: `floors` (Geschosszahl) wie `year` als **Ganzzahl** schreiben
+   (`INTEGER_FIELDS`).
+3. W14: In Schritt 5 die Erklärung je Zielfeld aus
+   `target_field_explanation(field)` anzeigen.
+4. S10/W11: bestätigen, dass der OSM-Download das GDAL-Standardformat schreibt
+   (Layer `multipolygons`, `lines`, `points`, Spalten `osm_id`, `osm_way_id`,
+   `other_tags`) **im Projekt-CRS** – genau das erkennt das OSM-Profil.
 
-Die lokale `pytest`-Ausführung wurde wegen einer inkompatiblen, sehr alten
-Python-3.10-Alpha-Umgebung nicht verwendet. Syntaxprüfungen, direkte
-Pipeline-Smoke-Tests sowie die CRS-, Validierungs- und Mapping-Prüfungen waren
-erfolgreich.
+## Ergebnis des OSM-Tests (Donnerschwee, 500 m Puffer)
 
-## Geänderte Dateien
+- 3 689 Flächen und 3 473 Linien im Gebiet. „Sonstige OSM-Flächen“ von 165
+  auf 25 gesenkt, „Sonstige OSM-Linien“ von 1 380 auf 171.
+- Neu bei den Linien: eigene Layer **Gebäudeteile** (Umrisse aus dem
+  3D-Gebäudemodell, ca. 900), **Hecken und Baumreihen**, **Zäune und
+  Mauern**. GDAL legt diese geschlossenen Wege als Linien ab.
+- Stellplätze → Straßen, Hecken/Gebüsch → Grünflächen, Schul- und
+  Kitagelände → Nutzungsflächen (zieht nach G10 evtl. in „Bildung und
+  Betreuung“ um).
 
-- `urban_analysis/data_pipeline.py`
-- `urban_analysis/contracts.py`
-- `tests/test_data_pipeline.py`
+## Offene Fragen an Person Windows
 
-Die Dateien der Benutzerführung, insbesondere `urban_analysis/user_guidance.py`,
-`urban_analysis/ui_contract.py` und `tests/test_user_guidance.py`, wurden nicht
-geändert.
+- **Gleiche Layernamen:** „Straßen“ und „Fuß- und Radwege“ gibt es als Linien
+  und als Flächen; heute erscheint dann `(multipolygons_strassen)` im Namen.
+  Vorschlag: Die Oberfläche hängt „– Linien“ / „– Flächen“ an. Die Kategorie
+  selbst bleibt gleich, weil ALKIS dieselben Namen nutzt und der Vorrang je
+  Kategorie (E19) daran hängt.
+- **Rückfrage bei übereinanderliegenden Objekten aus einer Quelle:** OSM-Linien
+  mit verschiedener OSM-ID liegen an 4 Stellen genau übereinander (z. B.
+  Straße und Radweg), ALKIS hat ähnliche Fälle. Sollen verschiedene IDs aus
+  *einer* Quelle überhaupt nachgefragt werden?
+- **Mausrad in Schritt 5 (Vermutung):** Einmal stand bei „OSM – Punkte“
+  „Datenquelle“ statt des vorgeschlagenen „Geschosszahl“. Möglicherweise
+  ändert das Mausrad beim Scrollen über ein Auswahlfeld den Wert.
 
-## Bekannte Einschränkungen
+## Tests
 
-- `area_m2` und `year` bleiben leer, wenn die Quelldaten keine passenden Felder
-  enthalten.
-- Der Wert `xxx` wird als Status aus den Quelldaten übernommen und nicht
-  automatisch als Platzhalter verändert.
-- Die automatische Kategorieerkennung ordnet Layernamen wie `nutzung` und
-  `gebaeude` anhand ihrer Bezeichnung der Kategorie `Gebäude` zu. Diese
-  Zuordnung sollte fachlich noch geprüft werden.
-- Die vollständige Benutzeroberfläche und die eigentliche QGIS-Layerausgabe
-  gehören zum separaten Benutzerführungs-Branch.
+`.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
+System-`python3` hat ein kaputtes pytest). Stand: 221 grün, 1 rot
+(`test_result_layers.py`, siehe oben Punkt 1).
 
-## Commits
+## Als Nächstes (Person Mac)
 
-- `7c8fc2a` – `Implement GeoPackage data pipeline`
-- `fb54dbf` – `Map source attributes during harmonization`
-
-Dieser Statusbericht wird mit einem eigenen Commit auf
-`feature/datenpipeline` veröffentlicht.
+M9 Recherche ALKIS-Dienste der Länder · M10 Quellen bestimmen (OSM-Teil und
+Größenprüfung können sofort starten) · M18 Recherche GTFS/Zensus · M6
+fehlende Werte.

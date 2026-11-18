@@ -32,10 +32,13 @@ from .geometry import (
     validate_study_area,
     within_distance,
 )
-from .mapping import LayerProfile, MappingRules, default_mapping_rules
+from .mapping import LayerProfile, MappingRules, default_mapping_rules, parse_tags
 
 
 TARGET_FIELDS = (
+    "object_id",
+    "address",
+    "floors",
     "source_name",
     "object_type",
     "object_detail",
@@ -46,6 +49,9 @@ TARGET_FIELDS = (
     "source",
 )
 TARGET_FIELD_ALIASES: Mapping[str, Tuple[str, ...]] = {
+    "object_id": ("object_id", "objid", "osm_id", "gml_id"),
+    "address": ("address", "adresse", "anschrift"),
+    "floors": ("floors", "geschosse", "geschosszahl", "building:levels", "building_levels"),
     "object_type": (
         "object_type",
         "objecttype",
@@ -238,6 +244,30 @@ def _coerce_year(value: Any) -> Optional[int]:
         return None
 
 
+def _coerce_floors(value: Any) -> Optional[int]:
+    """Whole, non-negative number of floors; anything else stays empty (no estimate)."""
+    if value in (None, ""):
+        return None
+    try:
+        number = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or not number.is_integer():
+        return None
+    return int(number)
+
+
+def _coerce(target: str, value: Any) -> Any:
+    """Convert a source value to the type of its target field."""
+    if target == "area_m2":
+        return _coerce_area(value)
+    if target == "year":
+        return _coerce_year(value)
+    if target == "floors":
+        return _coerce_floors(value)
+    return value
+
+
 #: Share of the progress bar used for reading and clipping; the rest is
 #: harmonisation, which is much faster.
 READ_SHARE = 0.9
@@ -337,6 +367,8 @@ class GeoPackageImporter:
         for layer_index, layer in enumerate(layers, start=1):
             tracker.report(READ_SHARE + (1 - READ_SHARE) * (layer_index - 1) / len(layers))
             profile = self.mapping_rules.profile_for(layer.table_name, layer.fields)
+            if profile is not None:
+                layer = self._with_tag_columns(layer, profile)
             category = (
                 profile.category if profile is not None
                 else self.mapping_rules.category_from_name(layer.table_name)
@@ -696,10 +728,44 @@ class GeoPackageImporter:
         rules = cls._mapping_rules(fields)
         if profile is None:
             return rules
-        kept = [rule for rule in rules if rule.target_field not in ("object_type", "category")]
-        if profile.uses_field(fields):
+        # Fields the profile fills itself are not offered as a single column:
+        # object type and category always, the address when the profile builds
+        # it from street and number, the ID when it carries a prefix (OSM).
+        derived = {"object_type", "category", "object_id"}
+        if profile.address_fields:
+            derived.add("address")
+        kept = [rule for rule in rules if rule.target_field not in derived]
+        if profile.object_type_field and profile.uses_field(fields):
             kept.insert(0, MappingRule(str(profile.object_type_field), "object_type", 1.0))
+        if profile.object_id_field and profile.object_id_field in fields and not profile.object_id_fields:
+            kept.insert(0, MappingRule(profile.object_id_field, "object_id", 1.0))
         return tuple(kept)
+
+    @staticmethod
+    def _with_tag_columns(layer: GeoPackageLayer, profile: LayerProfile) -> GeoPackageLayer:
+        """OSM: take the profile's ``tag_columns`` out of ``other_tags`` as columns.
+
+        GDAL keeps rarer OSM tags such as ``addr:street`` or ``building:levels``
+        in one text column.  Only the keys named in the profile become extra
+        columns; existing columns are never overwritten and the original
+        ``other_tags`` value stays in the row.  A key becomes a column only if
+        at least one row has it, so step 5 never offers an empty column (e.g.
+        building levels on lines).
+        """
+        if not profile.tags_field or profile.tags_field not in layer.fields or not profile.tag_columns:
+            return layer
+        wanted = [key for key in profile.tag_columns if key not in layer.fields]
+        parsed = [parse_tags(row.get(profile.tags_field)) for row in layer.rows]
+        new_columns = tuple(key for key in wanted if any(tags.get(key) for tags in parsed))
+        if not new_columns:
+            return layer
+        rows = []
+        for row, tags in zip(layer.rows, parsed):
+            expanded = dict(row)
+            for key in new_columns:
+                expanded[key] = tags.get(key)
+            rows.append(expanded)
+        return replace(layer, fields=layer.fields + new_columns, rows=tuple(rows))
 
     @staticmethod
     def _layer_descriptors(
@@ -794,24 +860,40 @@ class GeoPackageImporter:
                 continue
             seen.add(duplicate_key)
             unique_rows.append((index, row))
+        # The address is built per row ("Hauptstraße 2") before rows of one
+        # object are combined, so street and number of a corner house stay
+        # together ("Hauptstraße 2; Nebenweg 1").
+        addresses: Dict[int, Optional[str]] = {}
+        if profile is not None and profile.address_fields:
+            addresses = {index: profile.address(row) for index, row in unique_rows}
         if profile is not None and geometry_column:
             unique_rows = GeoPackageImporter._combine_object_rows(
-                unique_rows, layer, profile, geometry_column, issues, display_name,
+                unique_rows, layer, profile, geometry_column, issues, display_name, addresses,
             )
+
+        def value(target: str, row: Mapping[str, Any], default: Any = None) -> Any:
+            return _coerce(target, row.get(rules[target])) if target in rules else default
 
         records: List[HarmonizedRecord] = []
         kept_rows: List[Mapping[str, Any]] = []
         for index, row in unique_rows:
             layer_id = layer.table_name
             attributes: Dict[str, Any] = {
+                "object_id": (
+                    profile.object_id(row)
+                    if profile is not None and profile.object_id_fields
+                    else value("object_id", row)
+                ),
+                "address": value("address", row, addresses.get(index)),
+                "floors": value("floors", row),
                 "source_name": file_path.name,
-                "object_type": row.get(rules["object_type"]) if "object_type" in rules else layer.table_name,
+                "object_type": value("object_type", row, layer.table_name),
                 "object_detail": None,
-                "category": row.get(rules["category"]) if "category" in rules else category,
-                "status": row.get(rules["status"]) if "status" in rules else None,
-                "area_m2": _coerce_area(row.get(rules["area_m2"])) if "area_m2" in rules else None,
-                "year": _coerce_year(row.get(rules["year"])) if "year" in rules else None,
-                "source": row.get(rules["source"]) if "source" in rules else None,
+                "category": value("category", row, category),
+                "status": value("status", row),
+                "area_m2": value("area_m2", row),
+                "year": value("year", row),
+                "source": value("source", row),
             }
             if profile is not None:
                 classification = profile.classify(row, layer.fields)
@@ -865,8 +947,13 @@ class GeoPackageImporter:
         geometry_column: str,
         issues: List[ValidationIssue],
         display_name: Optional[str] = None,
+        addresses: Optional[Dict[int, Optional[str]]] = None,
     ) -> List[Tuple[int, Mapping[str, Any]]]:
         """Combine rows that are one object with several addresses.
+
+        ``addresses`` (row index -> address of that row) is updated in place:
+        the kept row of a combined object gets all its addresses joined with
+        ``"; "``.
 
         Exports such as ALKIS store a building with two house numbers (e.g. a
         corner house) as two rows with the same object ID and the same
@@ -916,6 +1003,13 @@ class GeoPackageImporter:
             combined[positions[0]] = merged
             dropped.update(positions[1:])
             object_count += 1
+            if addresses is not None:
+                joined: List[str] = []
+                for position in positions:
+                    address = addresses.get(rows[position][0])
+                    if address and address not in joined:
+                        joined.append(address)
+                addresses[rows[positions[0]][0]] = "; ".join(joined) or None
 
         if not object_count:
             return rows
@@ -1164,12 +1258,7 @@ def apply_attribute_decisions(
             attributes["source"] = record.attributes.get("source")
         for target in TARGET_FIELDS:
             if target in decided:
-                value = row.get(decided[target])
-                if target == "area_m2":
-                    value = _coerce_area(value)
-                elif target == "year":
-                    value = _coerce_year(value)
-                attributes[target] = value
+                attributes[target] = _coerce(target, row.get(decided[target]))
             elif target in suggested_targets:
                 attributes[target] = layer_categories.get(record.layer_id) if target == "category" else None
 

@@ -20,11 +20,17 @@
     "bauwerke_p": "Bauwerke (Punkte)",
     "bauwerke_l": "Bauwerke (Linien)",
     "bodenschaetzung": "Bodenschätzung",
-    "bewertung": "Bewertung"
+    "bewertung": "Bewertung",
+    "multipolygons": "OSM – Flächen",
+    "lines": "OSM – Linien",
+    "points": "OSM – Punkte"
   },
 
   "target_field_labels": {
     "_hinweis": "Deutsche Namen der Zielfelder für die Benutzerführung.",
+    "object_id": "Objekt-ID",
+    "address": "Adresse",
+    "floors": "Geschosszahl",
     "source_name": "Dateiname",
     "object_type": "Objektart",
     "object_detail": "Nutzungsdetail",
@@ -33,6 +39,21 @@
     "area_m2": "Fläche (m²)",
     "year": "Jahr",
     "source": "Datenquelle"
+  },
+
+  "target_field_explanations": {
+    "_hinweis": "Ein Satz je Zielfeld für das Infosymbol (ⓘ) in Schritt 5 und in der Attributtabelle. Kurz halten; die Beispiele müssen zu dem passen, was die Pipeline wirklich einträgt.",
+    "object_id": "Kennung des Objekts in der Quelle, damit man es dort wiederfindet.",
+    "address": "Straße und Hausnummer, z. B. „Hauptstraße 2“; mehrere Adressen sind mit „; “ getrennt.",
+    "floors": "Anzahl der oberirdischen Geschosse, wenn die Quelle sie angibt; sonst leer.",
+    "source_name": "Datei oder Download, aus dem das Objekt stammt.",
+    "object_type": "Was das Objekt genau ist, z. B. Wohngebäude, Garage oder Wohnbaufläche.",
+    "object_detail": "Genauere Angabe zur Objektart, wenn die Quelle eine hat, z. B. „Park“ bei einer Erholungsfläche.",
+    "category": "Gruppe im Kartenthema, z. B. Gebäude, Straßen oder Grünflächen.",
+    "status": "Zustand des Objekts laut Quelle, z. B. „in Betrieb“ oder „außer Betrieb“; oft leer.",
+    "area_m2": "Fläche in Quadratmetern, wenn die Quelle sie angibt; sonst leer.",
+    "year": "Baujahr oder Jahr der Erfassung, wenn die Quelle es angibt.",
+    "source": "Herkunft der Daten mit Lizenzvermerk, z. B. „© OpenStreetMap-Mitwirkende“; wird in Schritt 8 ergänzt."
   },
 
   "field_labels": {
@@ -53,7 +74,13 @@
     "ken": "Kennzeichnungsschlüssel",
     "ken__bez": "Kennzeichnung",
     "abm": "Abmarkung",
-    "untermerkmal": "Untermerkmal"
+    "untermerkmal": "Untermerkmal",
+    "osm_id": "OSM-ID",
+    "osm_way_id": "OSM-Weg-ID",
+    "other_tags": "Weitere OSM-Merkmale",
+    "addr:street": "Straße",
+    "addr:housenumber": "Hausnummer",
+    "building:levels": "Geschosszahl (OSM)"
   },
 
   "profiles": [
@@ -61,9 +88,11 @@
       "name": "ALKIS",
       "_hinweis": "ALKIS-Export (z. B. lkr_03403_Stadt_Oldenburg_kon.gpkg). Ein Layer gehört zum Profil, wenn sein Name hier steht und er alle requires_fields hat.",
       "requires_fields": ["objid"],
-      "_hinweis_object_id_field": "Spalte mit der Objekt-ID. Zeilen mit gleicher ID und gleicher Geometrie, die sich NUR in den address_fields unterscheiden, sind ein Objekt mit mehreren Adressen (z. B. Eckhaus) und werden zu einem Objekt zusammengefasst; alle Adressen bleiben erhalten. Unterscheiden sie sich in anderen Spalten, wird nichts zusammengefasst und der Fall wird zur Entscheidung angezeigt.",
+      "_hinweis_object_id_field": "Spalte mit der Objekt-ID. Sie kommt ins Zielfeld object_id (Objekt-ID). Zeilen mit gleicher ID und gleicher Geometrie, die sich NUR in Straße und Hausnummer unterscheiden, sind ein Objekt mit mehreren Adressen (z. B. Eckhaus) und werden zu einem Objekt zusammengefasst; alle Adressen bleiben erhalten. Unterscheiden sie sich in anderen Spalten, wird nichts zusammengefasst und der Fall wird zur Entscheidung angezeigt.",
       "object_id_field": "objid",
-      "address_fields": ["hnr", "bez"],
+      "_hinweis_address": "Spalten für Straße und Hausnummer. Daraus wird je Zeile die Adresse gebildet (z. B. „Hauptstraße 2“), mehrere Adressen eines Objekts werden mit „; “ verbunden.",
+      "street_field": "bez",
+      "house_number_field": "hnr",
       "layers": {
         "gebaeude": {
           "category": "Gebäude",
@@ -163,6 +192,183 @@
         "grenzpunkte": {"category": null},
         "bodenschaetzung": {"category": null},
         "bewertung": {"category": null}
+      }
+    },
+    {
+      "name": "OSM",
+      "_hinweis": "OpenStreetMap-Daten, wie QGIS/GDAL sie als GeoPackage speichert: Layer multipolygons, lines und points; häufige Merkmale als eigene Spalten (building, landuse, highway …), alle übrigen in other_tags. Die Kategorie richtet sich nach dem ersten Merkmal aus tag_fields, das einen Wert hat; die Regeln vergleichen „Schlüssel=Wert“, „Schlüssel=*“ passt zu jedem Wert. Erste passende Regel gewinnt.",
+      "requires_fields": ["osm_id", "other_tags"],
+      "_hinweis_tags": "Diese Schlüssel werden aus other_tags als eigene Spalten gelesen (Adresse, Geschosszahl, Merkmale für die Kategorie).",
+      "tags_field": "other_tags",
+      "tag_columns": ["addr:street", "addr:housenumber", "building:levels", "building:part", "highway", "railway", "water", "waterway", "natural", "public_transport", "boundary", "power"],
+      "street_field": "addr:street",
+      "house_number_field": "addr:housenumber",
+      "_hinweis_tag_labels": "Verständliche Objektart für häufige OSM-Merkmale. Fehlt ein Eintrag, wird „Schlüssel=*“ genommen, sonst das Merkmal selbst (z. B. „shop=bakery“).",
+      "tag_labels": {
+        "building=house": "Wohnhaus",
+        "building=detached": "Einfamilienhaus",
+        "building=semidetached_house": "Doppelhaushälfte",
+        "building=terrace": "Reihenhaus",
+        "building=residential": "Wohngebäude",
+        "building=apartments": "Mehrfamilienhaus",
+        "building=garage": "Garage",
+        "building=garages": "Garagen",
+        "building=shed": "Schuppen",
+        "building=commercial": "Geschäftsgebäude",
+        "building=retail": "Einzelhandel",
+        "building=industrial": "Industriegebäude",
+        "building=school": "Schule",
+        "building=church": "Kirche",
+        "building=*": "Gebäude",
+        "highway=residential": "Wohnstraße",
+        "highway=living_street": "Verkehrsberuhigter Bereich",
+        "highway=primary": "Hauptstraße",
+        "highway=secondary": "Landesstraße",
+        "highway=tertiary": "Kreisstraße",
+        "highway=service": "Erschließungsweg",
+        "highway=footway": "Fußweg",
+        "highway=cycleway": "Radweg",
+        "highway=path": "Weg",
+        "highway=pedestrian": "Fußgängerzone",
+        "highway=steps": "Treppe",
+        "highway=*": "Straße",
+        "building:part=*": "Gebäudeteil",
+        "amenity=parking": "Parkplatz",
+        "amenity=parking_space": "Stellplatz",
+        "amenity=bicycle_parking": "Fahrradstellplatz",
+        "amenity=school": "Schulgelände",
+        "amenity=kindergarten": "Kita",
+        "amenity=college": "Hochschulgelände",
+        "amenity=university": "Hochschulgelände",
+        "amenity=hospital": "Krankenhausgelände",
+        "amenity=social_facility": "Soziale Einrichtung",
+        "amenity=fuel": "Tankstelle",
+        "amenity=car_wash": "Autowaschanlage",
+        "amenity=events_venue": "Veranstaltungsort",
+        "amenity=exhibition_centre": "Ausstellungsgelände",
+        "amenity=parcel_locker": "Paketstation",
+        "amenity=recycling": "Wertstoffsammelstelle",
+        "amenity=*": "Einrichtung",
+        "shop=mall": "Einkaufszentrum",
+        "shop=*": "Geschäft",
+        "building:part=roof": "Dach",
+        "barrier=hedge": "Hecke",
+        "barrier=fence": "Zaun",
+        "barrier=wall": "Mauer",
+        "barrier=retaining_wall": "Stützmauer",
+        "barrier=kerb": "Bordstein",
+        "barrier=gate": "Tor",
+        "barrier=*": "Absperrung",
+        "natural=tree_row": "Baumreihe",
+        "public_transport=platform": "Bahnsteig oder Haltestellenkante",
+        "public_transport=*": "ÖPNV-Anlage",
+        "boundary=administrative": "Verwaltungsgrenze",
+        "boundary=postal_code": "Postleitzahlgrenze",
+        "boundary=*": "Grenze",
+        "man_made=pier": "Steg",
+        "man_made=quay": "Kaimauer",
+        "power=line": "Stromleitung",
+        "power=cable": "Stromkabel",
+        "power=*": "Stromanlage",
+        "natural=shrubbery": "Gebüsch",
+        "place=square": "Platz",
+        "leisure=park": "Park",
+        "leisure=garden": "Garten",
+        "leisure=playground": "Spielplatz",
+        "leisure=pitch": "Sportplatz",
+        "leisure=sports_centre": "Sportanlage",
+        "landuse=residential": "Wohnbaufläche",
+        "landuse=commercial": "Gewerbefläche",
+        "landuse=retail": "Handelsfläche",
+        "landuse=industrial": "Industriefläche",
+        "landuse=grass": "Rasenfläche",
+        "landuse=meadow": "Wiese",
+        "landuse=forest": "Wald",
+        "landuse=allotments": "Kleingärten",
+        "landuse=cemetery": "Friedhof",
+        "landuse=railway": "Bahnfläche",
+        "natural=wood": "Wald",
+        "natural=scrub": "Gebüsch",
+        "natural=water": "Gewässer",
+        "railway=*": "Bahnstrecke",
+        "waterway=*": "Wasserlauf"
+      },
+      "layers": {
+        "multipolygons": {
+          "tag_fields": ["building", "highway", "amenity", "place", "leisure", "landuse", "natural", "water", "railway", "barrier", "shop", "building:part"],
+          "object_id_fields": [
+            {"field": "osm_way_id", "prefix": "way/"},
+            {"field": "osm_id", "prefix": "relation/"}
+          ],
+          "category_rules": [
+            {"category": "Gebäude", "layer_suffix": "gebaeude", "values": ["building=*"]},
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["highway=pedestrian", "highway=footway", "highway=cycleway", "highway=path"]
+            },
+            {
+              "category": "Straßen",
+              "layer_suffix": "strassen",
+              "values": ["highway=*", "amenity=parking", "amenity=parking_space", "amenity=bicycle_parking"]
+            },
+            {"category": "Plätze", "layer_suffix": "plaetze", "values": ["place=square"]},
+            {
+              "category": "Grünflächen",
+              "layer_suffix": "gruen",
+              "values": [
+                "leisure=park", "leisure=garden", "leisure=playground", "leisure=nature_reserve",
+                "landuse=grass", "landuse=meadow", "landuse=forest", "landuse=allotments",
+                "landuse=cemetery", "landuse=village_green", "landuse=recreation_ground",
+                "natural=wood", "natural=scrub", "natural=shrubbery", "natural=heath", "natural=grassland",
+                "natural=wetland", "barrier=hedge"
+              ]
+            },
+            {
+              "category": "Wasserflächen",
+              "layer_suffix": "wasser",
+              "values": ["natural=water", "water=*", "landuse=reservoir", "landuse=basin"]
+            },
+            {"category": "Bahnflächen", "layer_suffix": "bahn", "values": ["landuse=railway", "railway=*"]},
+            {
+              "category": "Nutzungsflächen",
+              "layer_suffix": "flaechen",
+              "values": [
+                "landuse=*", "leisure=*",
+                "amenity=school", "amenity=kindergarten", "amenity=college", "amenity=university",
+                "amenity=hospital", "amenity=social_facility", "amenity=fuel", "amenity=car_wash",
+                "amenity=events_venue", "amenity=exhibition_centre"
+              ]
+            }
+          ],
+          "default_rule": {"category": "Sonstige OSM-Flächen", "layer_suffix": "sonstige"}
+        },
+        "lines": {
+          "_hinweis": "GDAL legt geschlossene Wege mit building:part, barrier oder natural=tree_row als Linien ab, nicht als Flächen. Gebäudeteile (3D-Gebäudemodell) bekommen deshalb einen eigenen Layer und doppeln nicht die Gebäude.",
+          "tag_fields": [
+            "highway", "railway", "waterway", "building:part", "barrier", "natural",
+            "public_transport", "boundary", "man_made", "power"
+          ],
+          "object_id_fields": [{"field": "osm_id", "prefix": "way/"}],
+          "category_rules": [
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["highway=pedestrian", "highway=footway", "highway=cycleway", "highway=path", "highway=steps"]
+            },
+            {"category": "Straßen", "layer_suffix": "strassen", "values": ["highway=*"]},
+            {"category": "Bahnstrecken", "layer_suffix": "bahn", "values": ["railway=*"]},
+            {"category": "Gewässer", "layer_suffix": "wasser", "values": ["waterway=*"]},
+            {"category": "Gebäudeteile", "layer_suffix": "gebaeudeteile", "values": ["building:part=*"]},
+            {"category": "Hecken und Baumreihen", "layer_suffix": "hecken_baeume", "values": ["barrier=hedge", "natural=tree_row"]},
+            {"category": "Zäune und Mauern", "layer_suffix": "zaeune_mauern", "values": ["barrier=*"]}
+          ],
+          "default_rule": {"category": "Sonstige OSM-Linien", "layer_suffix": "sonstige"}
+        },
+        "points": {
+          "category": null,
+          "object_id_fields": [{"field": "osm_id", "prefix": "node/"}]
+        }
       }
     }
   ]

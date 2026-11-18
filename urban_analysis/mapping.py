@@ -15,6 +15,7 @@ adjust them without changing code.  Keys starting with ``_`` are comments.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -33,8 +34,25 @@ def _without_comments(data: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _matches(value: str, pattern: str) -> bool:
-    """True if ``value`` equals ``pattern`` or continues it with ``', '``."""
+    """True if ``value`` equals ``pattern`` or continues it with ``', '``.
+
+    A pattern ending in ``*`` matches every value with that beginning, e.g.
+    ``building=*`` matches ``building=house`` (used for OSM tags).
+    """
+    if pattern.endswith("*"):
+        return value.startswith(pattern[:-1])
     return value == pattern or value.startswith(pattern + ", ")
+
+
+_HSTORE_PAIR = re.compile(r'"((?:[^"\\]|\\.)*)"\s*=>\s*"((?:[^"\\]|\\.)*)"')
+
+
+def parse_tags(text: Any) -> Dict[str, str]:
+    """Read OSM ``other_tags`` as GDAL writes them: ``"key"=>"value","k2"=>"v2"``."""
+    if not isinstance(text, str) or not text:
+        return {}
+    unescape = lambda value: value.replace('\\"', '"').replace("\\\\", "\\")  # noqa: E731
+    return {unescape(key): unescape(value) for key, value in _HSTORE_PAIR.findall(text)}
 
 
 @dataclass(frozen=True)
@@ -70,13 +88,64 @@ class LayerProfile:
     category_rules: Tuple[CategoryRule, ...] = ()
     default_rule: Optional[CategoryRule] = None
     object_id_field: Optional[str] = None
-    address_fields: Tuple[str, ...] = ()
+    street_field: Optional[str] = None
+    house_number_field: Optional[str] = None
+    #: OSM: tag keys checked in this order; the first one with a value
+    #: decides the object type, e.g. ``building=house``.
+    tag_fields: Tuple[str, ...] = ()
+    #: OSM: readable names for tags, e.g. ``building=house`` -> ``Wohnhaus``.
+    tag_labels: Mapping[str, str] = field(default_factory=dict)
+    #: OSM: column holding further tags (``other_tags``) and the keys taken
+    #: from it as extra columns, e.g. ``addr:street``.
+    tags_field: Optional[str] = None
+    tag_columns: Tuple[str, ...] = ()
+    #: OSM: ID columns with prefix, first one with a value wins, e.g.
+    #: ``(("osm_way_id", "way/"), ("osm_id", "relation/"))``.
+    object_id_fields: Tuple[Tuple[str, str], ...] = ()
+
+    def object_id(self, row: Mapping[str, Any]) -> Optional[str]:
+        """Object ID of a row from ``object_id_fields`` (with prefix), else ``None``."""
+        for column, prefix in self.object_id_fields:
+            value = row.get(column)
+            if value not in (None, ""):
+                return f"{prefix}{value}"
+        return None
+
+    def tag(self, row: Mapping[str, Any]) -> Optional[str]:
+        """First tag with a value from ``tag_fields``, e.g. ``building=house``."""
+        for key in self.tag_fields:
+            value = row.get(key)
+            if value not in (None, "") and str(value).strip():
+                return f"{key}={str(value).strip()}"
+        return None
+
+    def tag_label(self, tag: str) -> str:
+        """Readable name of a tag: exact entry, then ``key=*``, else the tag itself."""
+        key = tag.split("=", 1)[0]
+        return self.tag_labels.get(tag) or self.tag_labels.get(f"{key}=*") or tag
+
+    @property
+    def address_fields(self) -> Tuple[str, ...]:
+        """Columns that may differ between rows of one object (its addresses)."""
+        return tuple(field for field in (self.street_field, self.house_number_field) if field)
+
+    def address(self, row: Mapping[str, Any]) -> Optional[str]:
+        """One address from a row, e.g. ``Hauptstraße 2``; ``None`` if both are empty."""
+        parts = []
+        for field in (self.street_field, self.house_number_field):
+            value = row.get(field) if field else None
+            if value not in (None, "") and str(value).strip():
+                parts.append(str(value).strip())
+        return " ".join(parts) or None
 
     @property
     def splits_layer(self) -> bool:
         return bool(self.category_rules or self.default_rule)
 
     def uses_field(self, fields: Sequence[str]) -> bool:
+        """True if the profile decides the object type for a layer with ``fields``."""
+        if self.tag_fields:
+            return any(key in fields for key in self.tag_fields)
         return self.object_type_field is not None and self.object_type_field in fields
 
     def split_type(self, value: str) -> Tuple[str, Optional[str]]:
@@ -89,11 +158,18 @@ class LayerProfile:
         return value, None
 
     def classify(self, row: Mapping[str, Any], fields: Sequence[str]) -> Classification:
-        raw = row.get(self.object_type_field) if self.uses_field(fields) else None
-        value = str(raw).strip() if raw not in (None, "") else None
         object_type = object_detail = None
-        if value is not None:
-            object_type, object_detail = self.split_type(value)
+        if self.tag_fields:
+            # OSM: rules match the tag ("building=house"); the object type is
+            # its readable name ("Wohnhaus").
+            value = self.tag(row)
+            if value is not None:
+                object_type = self.tag_label(value)
+        else:
+            raw = row.get(self.object_type_field) if self.uses_field(fields) else None
+            value = str(raw).strip() if raw not in (None, "") else None
+            if value is not None:
+                object_type, object_detail = self.split_type(value)
 
         if not self.splits_layer:
             return Classification(self.category, object_type, object_detail)
@@ -113,6 +189,7 @@ class MappingRules:
     field_labels: Mapping[str, str]
     layer_labels: Mapping[str, str] = field(default_factory=dict)
     target_field_labels: Mapping[str, str] = field(default_factory=dict)
+    target_field_explanations: Mapping[str, str] = field(default_factory=dict)
 
     def profile_for(self, table_name: str, fields: Iterable[str]) -> Optional[LayerProfile]:
         available = set(fields)
@@ -145,6 +222,10 @@ class MappingRules:
         """German name of a target field, e.g. ``Objektart`` for ``object_type``."""
         return self.target_field_labels.get(field, field)
 
+    def target_field_explanation(self, field: str) -> Optional[str]:
+        """One sentence explaining a target field (for the ⓘ symbol), or ``None``."""
+        return self.target_field_explanations.get(field)
+
 
 def _rule(data: Mapping[str, Any], where: str) -> CategoryRule:
     try:
@@ -165,7 +246,13 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         name = str(profile.get("name", "Profil"))
         requires = tuple(str(field) for field in profile.get("requires_fields", ()))
         object_id_field = profile.get("object_id_field")
-        address_fields = tuple(str(field) for field in profile.get("address_fields", ()))
+        street_field = profile.get("street_field")
+        house_number_field = profile.get("house_number_field")
+        tags_field = profile.get("tags_field")
+        tag_columns = tuple(str(key) for key in profile.get("tag_columns", ()))
+        tag_labels = {
+            str(tag): str(label) for tag, label in _without_comments(profile.get("tag_labels", {})).items()
+        }
         for table_name, layer in _without_comments(profile.get("layers", {})).items():
             layer = _without_comments(layer)
             where = f"{name}/{table_name}"
@@ -183,7 +270,16 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
                     ),
                     default_rule=_rule(default, where) if default else None,
                     object_id_field=str(object_id_field) if object_id_field else None,
-                    address_fields=address_fields,
+                    street_field=str(street_field) if street_field else None,
+                    house_number_field=str(house_number_field) if house_number_field else None,
+                    tag_fields=tuple(str(key) for key in layer.get("tag_fields", ())),
+                    tag_labels=tag_labels,
+                    tags_field=str(tags_field) if tags_field else None,
+                    tag_columns=tag_columns,
+                    object_id_fields=tuple(
+                        (str(entry["field"]), str(entry.get("prefix", "")))
+                        for entry in layer.get("object_id_fields", ())
+                    ),
                 )
             )
     name_categories = tuple(
@@ -202,6 +298,7 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         _labels("field_labels"),
         _labels("layer_labels"),
         _labels("target_field_labels"),
+        _labels("target_field_explanations"),
     )
 
 
@@ -233,3 +330,8 @@ def readable_layer(layer_id: str) -> str:
 def readable_target_field(field: str) -> str:
     """For the user guidance: ``object_type`` -> ``Objektart``."""
     return default_mapping_rules().target_field_name(field)
+
+
+def target_field_explanation(field: str) -> Optional[str]:
+    """For the user guidance (ⓘ symbol): one sentence explaining a target field."""
+    return default_mapping_rules().target_field_explanation(field)
