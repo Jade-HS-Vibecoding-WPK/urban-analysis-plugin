@@ -8,7 +8,6 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
-import random
 from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
@@ -30,26 +29,18 @@ from .study_area import (
     study_area_from_layer,
 )
 from .theme import (
-    LAMP_FILES,
-    LAMP_SIZE_PX,
-    WIRE_CELL_PX,
-    WIRE_COLORS,
-    WIRE_PATTERN,
-    WIRE_ROWS,
-    icon_path,
-    lit_columns,
+    load_fonts,
     panel_stylesheet,
     set_role,
-    spawn_sparks,
-    step_sparks,
-    wire_cells,
 )
 from .ui_contract import UI_LABELS
+from .ui.layer_icons import LAYER_ICONS, icon_key
 from .user_guidance import (
     DECIDED_IN_HARMONIZATION,
     SEVERITY_LABELS,
     SEVERITY_ORDER,
     describe_group,
+    issue_table_name,
 )
 
 
@@ -100,10 +91,8 @@ LAST_FOLDER_SETTING = "urban_analysis/last_geopackage_folder"
 ARROW_CLOSED = "▸"
 ARROW_OPEN = "▾"
 PANEL_ANIMATION_MS = 180
-BUSY_TICK_MS = 60
-WIRE_SPARK_SPACE_PX = 14  # room above the wire for rising sparks
-PROGRESS_MARGIN_PX = 10
-RESET_TOOLTIP = "Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
+STYLE_BUTTON_TOOLTIP = "Stil wechseln: Klassisch oder Pixel"
+RESET_TOOLTIP ="Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
 RESET_QUESTION = (
     "Alles auf Anfang zurücksetzen?\n\n"
     "Alle Eingaben und die geladenen Daten im Plugin werden verworfen, du beginnst "
@@ -183,15 +172,32 @@ def overview_rows(flow, area_ha, names):
 
 
 def planned_layer_rows(flow, names):
-    """One row per result layer that will be created, with its object count."""
+    """One row per result layer that will be created, with its object count
+    and its icon key as third element."""
     counts = {}
     for record in flow.result.harmonized_records:
         counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
     rows = []
     for descriptor in flow.result.selected_layers():
         name = result_layer_name(descriptor, names.layer)
-        rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}"))
+        rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}",
+                     icon_key(descriptor.layer_id, descriptor.category)))
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
+
+
+def layer_icon_key(flow, layer_id):
+    """Icon key of a layer from its descriptor (category) or its id."""
+    for descriptor in flow.result.layers:
+        if descriptor.layer_id == layer_id:
+            return icon_key(layer_id, descriptor.category)
+    return icon_key(layer_id)
+
+
+def issue_icon_key(flow, issue):
+    """Icon key for a review hint, or None if it belongs to no single layer."""
+    candidates = set(LAYER_ICONS) | {d.layer_id for d in flow.result.layers}
+    table = issue_table_name(issue.message, sorted(candidates))
+    return layer_icon_key(flow, table) if table else None
 
 
 def output_rows(output):
@@ -207,9 +213,15 @@ def output_rows(output):
     )
 
 
-def result_rows(reports):
-    """Rows for the 'Fertig' view: created layers and anything not taken over."""
-    rows = [(None, f"{report.name} – {objects_text(report.feature_count)}") for report in reports]
+def result_rows(reports, categories=None):
+    """Rows for the 'Fertig' view: created layers (with icon key) and anything
+    not taken over.  ``categories`` maps layer_id -> category."""
+    categories = categories or {}
+    rows = [
+        (None, f"{report.name} – {objects_text(report.feature_count)}",
+         icon_key(report.layer_id, categories.get(report.layer_id)))
+        for report in reports
+    ]
     for report in reports:
         for reason, count in report.skipped.items():
             rows.append((None, f"{report.name}: {format_count(count)} nicht übernommen ({reason})"))
@@ -256,12 +268,41 @@ def mapping_detail_text(source_field, examples):
     return f"{prefix}Spalte {source_field}"
 
 
+def count_text(count, singular, plural):
+    """'1 Gruppe', '645 Gruppen', '1 675 Objekte'."""
+    return f"{format_count(count)} {singular if count == 1 else plural}"
+
+
+def duplicate_title_text(layer_name, group_count, record_count):
+    """Card title in step 6, e.g. 'Gebäude: 645 Gruppen mit 1 675 Objekten'."""
+    return (
+        f"{layer_name}: {count_text(group_count, 'Gruppe', 'Gruppen')} mit "
+        f"{count_text(record_count, 'Objekt', 'Objekten')}"
+    )
+
+
+def more_groups_text(count):
+    """'… und 1 weitere Gruppe' / '… und 642 weitere Gruppen'."""
+    return f"… und {count_text(count, 'weitere Gruppe', 'weitere Gruppen')}"
+
+
+def merge_hint_text(removable):
+    """What 'Zusammenführen' removes in one layer."""
+    verb = "wird" if removable == 1 else "werden"
+    return (
+        f"Je Gruppe bleibt das erste Objekt, "
+        f"{count_text(removable, 'Objekt', 'Objekte')} {verb} entfernt."
+    )
+
+
 def cross_layer_warning_text(count):
     """Hint for groups whose objects lie in different result layers."""
+    verb = "liegt" if count == 1 else "liegen"
     return (
-        f"Achtung: {count} Gruppe(n) liegen in verschiedenen Ergebnis-Layern "
-        "(z. B. einmal als Straße, einmal als Weg). Beim Zusammenführen bleibt nur "
-        "das erste Objekt – das andere fehlt dann in seiner Kategorie."
+        f"Achtung: {count_text(count, 'Gruppe', 'Gruppen')} {verb} in verschiedenen "
+        "Ergebnis-Layern (z. B. einmal als Straße, einmal als Weg). Beim "
+        "Zusammenführen bleibt nur das erste Objekt – das andere fehlt dann in "
+        "seiner Kategorie."
     )
 
 
@@ -269,8 +310,10 @@ def duplicates_applied_text(removed):
     """Feedback after step 6."""
     if removed == 0:
         return "Entscheidung übernommen: Alle Objekte bleiben erhalten."
-    noun = "Objekt" if removed == 1 else "Objekte"
-    return f"Entscheidung übernommen: {removed} {noun} durch Zusammenführen entfernt."
+    return (
+        f"Entscheidung übernommen: {count_text(removed, 'Objekt', 'Objekte')} "
+        "durch Zusammenführen entfernt."
+    )
 INDENT_PX = 22
 MIN_CONTENT_WIDTH = 300
 MESSAGE_MAX_HEIGHT = 140
@@ -313,15 +356,6 @@ def import_error_text(file_name, error, full_path=None):
     )
 
 
-def lamp_state(step_index, current_index):
-    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'."""
-    if step_index < current_index:
-        return "on"
-    if step_index == current_index:
-        return "dim"
-    return "off"
-
-
 def pipeline_reports_progress(importer):
     """True if ``import_file`` accepts a ``progress`` callback (fraction 0..1).
 
@@ -334,6 +368,31 @@ def pipeline_reports_progress(importer):
         return "progress" in inspect.signature(importer.import_file).parameters
     except (TypeError, ValueError):
         return False
+
+
+class ImportCanceled(Exception):
+    """The user stopped loading with 'Laden abbrechen'."""
+
+
+CANCELED_MESSAGE = (
+    "Das Laden wurde abgebrochen. Du kannst eine andere Datei wählen oder es "
+    "erneut versuchen."
+)
+CANCELING_TEXT = "Wird abgebrochen …"
+
+
+def cancel_aware_progress(is_canceled, report):
+    """Progress callback for the pipeline that also stops it when canceled.
+
+    The pipeline calls it regularly; if the user pressed 'Laden abbrechen',
+    it raises ``ImportCanceled`` there, so loading stops at once without any
+    change in the pipeline.
+    """
+    def progress(fraction):
+        if is_canceled():
+            raise ImportCanceled()
+        report(fraction * 100)
+    return progress
 
 
 def busy_label_text(text, percent):
@@ -369,8 +428,17 @@ LOG_TAG = "Urban Analysis"
 
 
 def progress_text(index):
-    """Return the overall progress label for the page at ``index``."""
-    return f"Schritt {index + 1} von {len(MVP_UI_STEPS)} – {MVP_UI_STEPS[index]}"
+    """Return the overall progress label for the page at ``index``.
+
+    A no-break space keeps the dash with the number, so a narrow panel never
+    shows the dash alone on a line.
+    """
+    return f"{step_counter_text(index)} – {MVP_UI_STEPS[index]}"
+
+
+def step_counter_text(index):
+    """Small line above the step heading, e.g. 'Schritt 5 von 9'."""
+    return f"Schritt {index + 1} von {len(MVP_UI_STEPS)}"
 
 
 def error_text(error):
@@ -443,7 +511,34 @@ def _create_dock(plugin):
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
     from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
-    from qgis.PyQt.QtGui import QColor, QIcon, QPainter
+
+    from .ui.widgets.pixel_button import PixelButton
+    from .ui.widgets.pixel_scene import PixelScene
+    from .ui.widgets.classic_header import ClassicHeader
+
+    class _BothHeaders:
+        """Sends every header message (step, loading, done …) to both looks,
+        so switching the style never loses the current state."""
+
+        def __init__(self, *views):
+            self._views = views
+
+        def __getattr__(self, name):
+            def call(*args, **kwargs):
+                for view in self._views:
+                    getattr(view, name)(*args, **kwargs)
+            return call
+    from .ui.widgets.icons import (
+        TITLE_ICON_PX, icon_size, layer_icon, palette_icon, title_icon, with_icon,
+    )
+    from qgis.PyQt.QtCore import QSize
+    from .ui import style as ui_style
+    from qgis.PyQt.QtWidgets import QMenu
+
+    try:  # Qt6: actions live in QtGui
+        from qgis.PyQt.QtGui import QAction, QActionGroup
+    except ImportError:  # Qt5
+        from qgis.PyQt.QtWidgets import QAction, QActionGroup
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
@@ -463,6 +558,7 @@ def _create_dock(plugin):
         QRadioButton,
         QScrollArea,
         QSizePolicy,
+        QToolButton,
         QVBoxLayout,
         QWidget,
     )
@@ -485,77 +581,6 @@ def _create_dock(plugin):
             self.widgets = {}
             self.builder(self)
 
-    class WireBar(QWidget):
-        """Busy bar as an own pixel wire that lights up with the real progress.
-
-        Dark red = not loaded yet, bright red = loaded. Sparks rise at the
-        progress front while a step runs.
-        """
-
-        def __init__(self):
-            super().__init__()
-            self._value = 0
-            self._maximum = 100
-            self.sparks = []
-            self.rng = random.Random(7)
-            self.setFixedHeight(WIRE_ROWS * WIRE_CELL_PX + WIRE_SPARK_SPACE_PX)
-
-        # QProgressBar-like interface used by the dock and tests
-        def setValue(self, value):
-            self._value = max(0, min(int(value), self._maximum))
-            self.update()
-
-        def value(self):
-            return self._value
-
-        def maximum(self):
-            return self._maximum
-
-        def reset(self):
-            self._value = 0
-            self.sparks = []
-            self.update()
-
-        def _columns(self):
-            return max(self.width() // WIRE_CELL_PX, 1)
-
-        def _top(self):
-            return self.height() - WIRE_ROWS * WIRE_CELL_PX
-
-        def tick(self):
-            """Move sparks and create new ones at the front of the lit wire."""
-            self.sparks = step_sparks(self.sparks)
-            lit = lit_columns(self._value, self._maximum, self._columns())
-            if lit > 0:
-                front = lit - 1
-                row = WIRE_PATTERN[front % len(WIRE_PATTERN)]
-                self.sparks += spawn_sparks(
-                    front * WIRE_CELL_PX + WIRE_CELL_PX / 2,
-                    self._top() + row * WIRE_CELL_PX,
-                    self.rng,
-                )
-            self.update()
-
-        def paintEvent(self, _event):
-            painter = QPainter(self)
-            columns = self._columns()
-            lit = lit_columns(self._value, self._maximum, columns)
-            top = self._top()
-            colors = {key: QColor(value) for key, value in WIRE_COLORS.items()}
-            for x, y in wire_cells(columns):
-                if x < lit:
-                    color = colors["on_light"] if (x + y) % 5 == 0 else colors["on"]
-                else:
-                    color = colors["off_edge"] if (x + y) % 4 == 0 else colors["off"]
-                painter.fillRect(x * WIRE_CELL_PX, top + y * WIRE_CELL_PX,
-                                 WIRE_CELL_PX, WIRE_CELL_PX, color)
-            for x, y, _vx, _vy, life, max_life in self.sparks:
-                spark = QColor(WIRE_COLORS["spark"])
-                spark.setAlpha(int(255 * life / max_life))
-                size = 2 if life < max_life / 2 else 3
-                painter.fillRect(int(x), int(y), size, size, spark)
-            painter.end()
-
     class GuidedDock(QgsDockWidget):
         """Side panel that walks through the nine MVP steps."""
 
@@ -571,57 +596,75 @@ def _create_dock(plugin):
             self.import_task = None  # running background import (step 3)
             self.closing = False
             self.next_message = None  # info shown after the next page change
-            self.all_done = False  # all lamps on after "Verarbeitung starten"
+            self.all_done = False  # fish at the end after "Verarbeitung starten"
             self.last_reports = None  # result of the last processing run (step 9)
 
-            # The whole plugin shares one style (theme.py).
-            self.setStyleSheet(panel_stylesheet())
+            # The whole plugin shares one style (theme.py), with the bundled
+            # fonts if present (otherwise the system monospace font).
+            # Look chosen with the gear button (saved in the QGIS settings;
+            # 'classic' = like QGIS is the default).
+            fonts = load_fonts()
+            self.fonts = fonts
+            self.setStyleSheet(panel_stylesheet(fonts, ui_style.load()))
+            # Slim title bar in sky colour: the title itself stands in the
+            # scene's sky; only "Lösen" and "Schließen" remain here.
+            self.setTitleBarWidget(self._title_bar())
+            # The scene fills the full width at the top (no margins); all
+            # other content gets normal margins below it.
             body = QWidget()
-            layout = QVBoxLayout(body)
+            outer = QVBoxLayout(body)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setSpacing(0)
+            content = QWidget()
+            layout = QVBoxLayout(content)
+            layout.setContentsMargins(9, 6, 9, 9)
 
+            # Header: small "Schritt x von 9" next to "Zurücksetzen", below it
+            # the step name as heading over the full width.
+            self.step_counter = QLabel()
+            set_role(self.step_counter, "hint")
             self.step_label = QLabel()
             self.step_label.setWordWrap(True)
             set_role(self.step_label, "heading")
-            self.reset_button = QPushButton("↺ Zurücksetzen")
-            set_role(self.reset_button, "secondary")
-            self.reset_button.setCursor(Qt.PointingHandCursor)
+            self.reset_button = PixelButton("↺ Zurücksetzen", "secondary")
             self.reset_button.setToolTip(RESET_TOOLTIP)
             self.reset_button.clicked.connect(self.ask_reset)
-            header = QHBoxLayout()
-            header.addWidget(self.step_label, 1)
-            header.addWidget(self.reset_button, 0, Qt.AlignTop)
+            header = QVBoxLayout()
+            header.setSpacing(0)
+            counter_row = QHBoxLayout()
+            counter_row.addWidget(self.step_counter, 1)
+            counter_row.addWidget(self.reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            header.addLayout(counter_row)
+            header.addWidget(self.step_label)
 
-            # Overall progress: one lamp per step up to the map
-            # (off = open, dim = current step, on = done).
-            self.lamp_pixmaps = {
-                state: QIcon(icon_path(name)).pixmap(LAMP_SIZE_PX, LAMP_SIZE_PX)
-                for state, name in LAMP_FILES.items()
-            }
-            self.step_lamps = []
-            progress_row = QHBoxLayout()
-            progress_row.setContentsMargins(0, PROGRESS_MARGIN_PX, 0, PROGRESS_MARGIN_PX)
-            progress_row.setSpacing(6)
-            for index, step in enumerate(MVP_UI_STEPS):
-                lamp = QLabel()
-                lamp.setFixedSize(LAMP_SIZE_PX, LAMP_SIZE_PX)
-                lamp.setToolTip(f"{index + 1}. {step}")
-                lamp.setPixmap(self.lamp_pixmaps["off"])
-                progress_row.addWidget(lamp)
-                self.step_lamps.append(lamp)
-            progress_row.addStretch()
+            # Header with the overall and the loading progress, in two looks:
+            # pixel style = fishing scene, classic style = step points and a
+            # smooth bar.  Both get every message; only one is visible.
+            self.pixel_scene = PixelScene(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
+            self.pixel_scene.set_title_font(fonts["heading"])
+            self.classic_header = ClassicHeader(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
+            self.scene = _BothHeaders(self.pixel_scene, self.classic_header)
 
-            # Busy bar for long steps: a pixel wire that lights up with the
-            # real progress; sparks rise at the progress front.
+            # Text line for long steps ("Lade … 40 %") below the scene.
             self.busy_label = QLabel()
             self.busy_label.setWordWrap(True)
             set_role(self.busy_label, "status")
-            self.busy_bar = WireBar()
             self.busy_text = ""
-            self.busy_timer = QTimer(self)
-            self.busy_timer.setInterval(BUSY_TICK_MS)
-            self.busy_timer.timeout.connect(self._advance_busy)
             self.busy_label.hide()
-            self.busy_bar.hide()
+            # 'Laden abbrechen': only visible while data is loading.
+            self.cancel_requested = False
+            self.cancel_button = PixelButton("Laden abbrechen", "secondary")
+            self.cancel_button.setToolTip("Das Laden der Datei stoppen. Es wird nichts übernommen.")
+            self.cancel_button.clicked.connect(self.cancel_import)
+            self.cancel_button.hide()
+            # text over the full width (long file names), the button below it
+            busy_row = QVBoxLayout()
+            busy_row.setSpacing(2)
+            busy_row.addWidget(self.busy_label)
+            cancel_row = QHBoxLayout()
+            cancel_row.addStretch()
+            cancel_row.addWidget(self.cancel_button)
+            busy_row.addLayout(cancel_row)
 
             # Only the current page is visible. A plain box layout (instead of
             # QStackedWidget) gives wrapped texts their full height.
@@ -654,29 +697,110 @@ def _create_dock(plugin):
             self.message_scroll.setMaximumHeight(MESSAGE_MAX_HEIGHT)
             self.message_scroll.hide()
 
-            self.back_button = QPushButton("Zurück")
-            set_role(self.back_button, "secondary")
-            self.back_button.setCursor(Qt.PointingHandCursor)
+            # Footer buttons are drawn as pixel buttons (ui/widgets).
+            self.back_button = PixelButton("Zurück", "secondary")
             self.back_button.clicked.connect(self.go_back)
-            self.primary_button = QPushButton()
+            self.primary_button = PixelButton("", "primary")
             self.primary_button.setObjectName("uaPrimaryButton")
-            set_role(self.primary_button, "primary")
-            self.primary_button.setCursor(Qt.PointingHandCursor)
             self.primary_button.clicked.connect(self.run_primary_action)
             buttons = QHBoxLayout()
             buttons.addWidget(self.back_button)
             buttons.addStretch()
             buttons.addWidget(self.primary_button)
 
+            outer.addWidget(self.pixel_scene)
+            outer.addWidget(self.classic_header)
+            self._show_header(ui_style.current())
+            outer.addWidget(content, 1)
             layout.addLayout(header)
-            layout.addLayout(progress_row)
-            layout.addWidget(self.busy_label)
-            layout.addWidget(self.busy_bar)
+            layout.addLayout(busy_row)
             layout.addWidget(scroll, 1)
             layout.addWidget(self.message_scroll)
             layout.addLayout(buttons)
             make_texts_selectable(body)
             self.setWidget(body)
+
+        def _title_bar(self):
+            """Slim bar in the panel colour with 'Lösen' and 'Schließen'.
+
+            Dragging the bar still moves or undocks the panel (Qt handles that
+            for custom title bars)."""
+            bar = QWidget()
+            bar.setObjectName("uaTitleBar")
+            row = QHBoxLayout(bar)
+            row.setContentsMargins(6, 2, 4, 0)
+            row.addStretch()
+            row.addWidget(self._style_button())
+            for kind, tip, action in (
+                ("float", "Lösen / andocken", lambda: self.setFloating(not self.isFloating())),
+                ("close", "Schließen", self.close),
+            ):
+                button = QToolButton()
+                # own icons: same line weight as the palette next to them
+                button.setIcon(title_icon(kind))
+                button.setIconSize(QSize(TITLE_ICON_PX, TITLE_ICON_PX))
+                button.setToolTip(tip)
+                button.setAutoRaise(True)
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.clicked.connect(action)
+                row.addWidget(button)
+            return bar
+
+        def _style_button(self):
+            """Palette button: choose 'Klassisch (QGIS-Stil)' or 'Pixel-Stil'."""
+            button = QToolButton()
+            button.setIcon(palette_icon())
+            button.setIconSize(QSize(TITLE_ICON_PX, TITLE_ICON_PX))
+            button.setToolTip(STYLE_BUTTON_TOOLTIP)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(button)
+            group = QActionGroup(menu)
+            group.setExclusive(True)
+            self.style_actions = {}
+            for key, label in ui_style.STYLE_LABELS.items():
+                action = QAction(label, menu)
+                action.setCheckable(True)
+                action.setChecked(key == ui_style.current())
+                action.triggered.connect(lambda _checked=False, key=key: self.apply_style(key))
+                group.addAction(action)
+                menu.addAction(action)
+                self.style_actions[key] = action
+            button.setMenu(menu)
+            self.style_menu = menu
+            return button
+
+        def apply_style(self, style):
+            """Switch the look at once and remember it for the next start."""
+            try:
+                style = ui_style.save(style)
+                for key, action in getattr(self, "style_actions", {}).items():
+                    action.setChecked(key == style)
+                self.setStyleSheet(panel_stylesheet(self.fonts, style))
+                self._show_header(style)
+                for button in self.findChildren(PixelButton):
+                    button.style_changed()
+                plugin.update_toolbar_icon()
+                page = self.pages[self.current] if self.pages else None
+                if page is not None and page.rebuild and plugin.workflow is not None:
+                    # pages with layer icons are drawn again in the new look
+                    self._rebuild_current_page()
+                QTimer.singleShot(0, self.fit_wrapped_labels)
+            except Exception as error:  # show every program error visibly
+                self.show_unexpected_error("Darstellung wechseln", error)
+
+        def _show_header(self, style):
+            self.pixel_scene.setVisible(style == "pixel")
+            self.classic_header.setVisible(style == "classic")
+
+        def _rebuild_current_page(self):
+            """Build the current page again (keeps the step, messages and the
+            'Fertig' view of step 9)."""
+            page = self.pages[self.current]
+            page.build()
+            make_texts_selectable(page.widget)
+            page.layout.activate()
+            self.stack.updateGeometry()
 
         def add_page(self, builder=None, validator=None, rebuild=False, on_show=None):
             page = Page(builder, validator, rebuild, on_show)
@@ -708,8 +832,11 @@ def _create_dock(plugin):
             self.stack_layout.activate()
             self.stack.updateGeometry()
             QTimer.singleShot(0, self.fit_wrapped_labels)
-            self.step_label.setText(progress_text(index))
-            self.update_lamps()
+            self.step_counter.setText(step_counter_text(index))
+            self.step_label.setText(MVP_UI_STEPS[index])
+            self.step_label.setToolTip(progress_text(index))
+            self.scene.setToolTip(progress_text(index))
+            self.update_progress()
             self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
@@ -754,18 +881,16 @@ def _create_dock(plugin):
             self.message.clear()
             self.message_scroll.hide()
 
-        def update_lamps(self):
-            """Lamps before the current step are on, the current one glows.
-
-            After a successful processing run all lamps are on.
-            """
-            current = len(self.step_lamps) if self.all_done else self.current
-            for index, lamp in enumerate(self.step_lamps):
-                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current)])
+        def update_progress(self):
+            """The step fish swims to the current step (after a successful
+            processing run to the last one, with all step marks lit)."""
+            self.scene.set_step(len(MVP_UI_STEPS) if self.all_done else self.current)
 
         def mark_all_done(self):
+            """Result layers created: fish to the last step, then a happy jump."""
             self.all_done = True
-            self.update_lamps()
+            self.update_progress()
+            self.scene.celebrate()
 
         def fit_wrapped_labels(self):
             """Give every wrapped text its full height at the current width.
@@ -773,6 +898,10 @@ def _create_dock(plugin):
             Qt underestimates the height of wrapped labels inside nested cards;
             measuring them after the layout has its width avoids cut-off lines.
             """
+            # The step heading wraps in narrow panels, too.
+            heading_height = self.step_label.heightForWidth(self.step_label.width())
+            if heading_height > 0:
+                self.step_label.setMinimumHeight(heading_height)
             if not self.pages:
                 return
             page = self.pages[self.current]
@@ -794,36 +923,46 @@ def _create_dock(plugin):
             return super().eventFilter(watched, event)
 
         def set_busy(self, text):
-            """Show the busy bar and lock the panel while a step runs."""
+            """The rabbit casts; lock the panel while a step runs."""
             self.busy_text = text
-            self.busy_bar.reset()
             self.busy_label.setText(busy_label_text(text, None))
             self.busy_label.show()
-            self.busy_bar.show()
-            self.busy_timer.start()
+            self.cancel_requested = False
+            self.cancel_button.setEnabled(True)
+            self.cancel_button.show()
+            self.scene.start_loading()
             self.primary_button.setEnabled(False)
             self.back_button.setEnabled(False)
             self.reset_button.setEnabled(False)
             self.stack.setEnabled(False)
 
         def set_busy_progress(self, percent):
-            """Real progress from the background task (0-100)."""
-            self.busy_bar.setValue(int(percent))
+            """Real progress from the background task (0-100): the float moves."""
+            if self.cancel_requested:
+                return  # keep showing 'Wird abgebrochen …'
+            self.scene.set_progress(percent)
             self.busy_label.setText(busy_label_text(self.busy_text, percent))
 
-        def clear_busy(self):
-            self.busy_timer.stop()
-            self.busy_bar.reset()
+        def cancel_import(self):
+            """'Laden abbrechen': ask the background task to stop."""
+            if self.import_task is None:
+                return
+            self.cancel_requested = True
+            self.cancel_button.setEnabled(False)
+            self.busy_label.setText(CANCELING_TEXT)
+            self.import_task.cancel()
+
+        def clear_busy(self, outcome="cancel"):
+            """Unlock the panel.  ``outcome``: 'done' (line breaks, rabbit
+            casts again), 'error' (float twitches, '…' bubble) or 'cancel'."""
+            {"done": self.scene.finish, "error": self.scene.fail}.get(outcome, self.scene.cancel)()
             self.busy_label.hide()
-            self.busy_bar.hide()
+            self.cancel_button.hide()
+            self.cancel_requested = False
             self.stack.setEnabled(True)
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
             self.reset_button.setEnabled(True)
-
-        def _advance_busy(self):
-            # Sparks rise at the front of the lit wire.
-            self.busy_bar.tick()
 
         def ask_reset(self):
             """Ask, then reset the whole plugin to step 1 without data."""
@@ -896,7 +1035,7 @@ def _create_dock(plugin):
             if self.import_task is not None:
                 self.import_task.cancel()
                 self.import_task = None
-            self.busy_timer.stop()
+            self.scene.stop()
             self.stop_drawing()
 
     dock = GuidedDock()
@@ -1140,8 +1279,15 @@ def _create_dock(plugin):
         panel_layout.setContentsMargins(12, 8, 12, 12)
         panel.setMaximumHeight(0)
         panel.hide()
-        page.layout.addWidget(button)
-        page.layout.addWidget(panel)
+        # Button and panel sit in one box without spacing, so the opened
+        # panel hangs directly (flush) below its button.
+        group = QWidget()
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        group_layout.setSpacing(0)
+        group_layout.addWidget(button)
+        group_layout.addWidget(panel)
+        page.layout.addWidget(group)
         page.widgets[f"{key}_button"] = button
         page.widgets[f"{key}_panel"] = panel
 
@@ -1262,8 +1408,11 @@ def _create_dock(plugin):
             importer = GeoPackageImporter()
             options = {}
             if pipeline_reports_progress(importer):
-                # fraction 0..1 from the pipeline -> task progress 0..100
-                options["progress"] = lambda fraction: task.setProgress(fraction * 100)
+                # fraction 0..1 from the pipeline -> task progress 0..100;
+                # stops the pipeline when 'Laden abbrechen' was pressed
+                options["progress"] = cancel_aware_progress(task.isCanceled, task.setProgress)
+            if task.isCanceled():
+                raise ImportCanceled()
             return importer.import_file(
                 path,
                 project_crs=settings["project_crs"],
@@ -1277,16 +1426,23 @@ def _create_dock(plugin):
             if dock.closing:
                 return
             try:
-                dock.clear_busy()
+                if isinstance(exception, ImportCanceled) or dock.cancel_requested:
+                    # stopped by the user (also if the pipeline finished anyway)
+                    dock.clear_busy("cancel")
+                    dock.show_message(CANCELED_MESSAGE, kind="info")
+                    return
                 if exception is not None:
+                    dock.clear_busy("error")
                     if isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
                         dock.show_message(import_error_text(path.name, exception, path))
                     else:
                         dock.show_unexpected_error(UI_LABELS["load_data"], exception)
                     return
                 if result is None:
-                    dock.show_message("Das Laden wurde abgebrochen.", kind="info")
+                    dock.clear_busy("cancel")
+                    dock.show_message(CANCELED_MESSAGE, kind="info")
                     return
+                dock.clear_busy("done")
                 plugin.start_workflow(result)
                 dock.show_page(3)
                 dock.show_message(
@@ -1334,7 +1490,8 @@ def _create_dock(plugin):
         card_layout.setContentsMargins(10, 6, 8, 6)
         text = QLabel(issue.message)
         text.setWordWrap(True)
-        card_layout.addWidget(text)
+        key = issue_icon_key(flow, issue)
+        card_layout.addWidget(with_icon(key, text) if key else text)
         details = []
         if issue.rule:
             details.append(f"Regel: {issue.rule}")
@@ -1389,7 +1546,7 @@ def _create_dock(plugin):
             font = title.font()
             font.setBold(True)
             title.setFont(font)
-            card_layout.addWidget(title)
+            card_layout.addWidget(with_icon(layer_icon_key(flow, layer_id), title))
             for suggestion in suggestions:
                 accepted = QCheckBox(names.field(suggestion.source_field))
                 accepted.setChecked(suggestion.accepted is not False)
@@ -1407,8 +1564,11 @@ def _create_dock(plugin):
                 target.setCurrentIndex(index)
                 target.setEnabled(accepted.isChecked())
                 accepted.toggled.connect(target.setEnabled)
+                # Column name on its own line, the target field below it, so
+                # long names are never cut off in a narrow panel.
+                card_layout.addWidget(accepted)
                 row = QHBoxLayout()
-                row.addWidget(accepted, 1)
+                row.setContentsMargins(INDENT_PX, 0, 0, 0)
                 row.addWidget(arrow)
                 row.addWidget(target, 1)
                 card_layout.addLayout(row)
@@ -1459,22 +1619,34 @@ def _create_dock(plugin):
         set_role(card, "issue-warning")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 8, 8, 8)
+        names = readable_names()
+        descriptors = {d.layer_id: d for d in flow.result.layers}
+
+        def result_label(layer_id):
+            # same names as the result layers in step 9 (e.g. split
+            # 'nutzung_flaechen' -> 'Nutzungsflächen')
+            descriptor = descriptors.get(layer_id)
+            if descriptor is None:
+                return names.layer(layer_id)
+            return result_layer_name(descriptor, names.layer)
+
         title = QLabel(
-            f"{layer.table_name}: {layer.group_count} Gruppe(n) mit "
-            f"{layer.record_count} Objekten"
+            duplicate_title_text(
+                names.layer(layer.table_name), layer.group_count, layer.record_count
+            )
         )
         title.setWordWrap(True)
         font = title.font()
         font.setBold(True)
         title.setFont(font)
-        card_layout.addWidget(title)
+        card_layout.addWidget(with_icon(layer_icon_key(flow, layer.table_name), title))
         for group, records in layer.groups[:DUPLICATE_EXAMPLES]:
-            example = QLabel(f"• {describe_group(records)}")
+            example = QLabel(f"• {describe_group(records, result_label)}")
             example.setWordWrap(True)
             set_role(example, "hint")
             card_layout.addWidget(example)
         if layer.group_count > DUPLICATE_EXAMPLES:
-            more = QLabel(f"… und {layer.group_count - DUPLICATE_EXAMPLES} weitere Gruppe(n)")
+            more = QLabel(more_groups_text(layer.group_count - DUPLICATE_EXAMPLES))
             set_role(more, "hint")
             card_layout.addWidget(more)
         cross = layer.cross_layer_groups()
@@ -1487,10 +1659,7 @@ def _create_dock(plugin):
         keep = QRadioButton("Behalten")
         keep_hint = QLabel("Alle Objekte bleiben erhalten.")
         merge = QRadioButton("Zusammenführen")
-        merge_hint = QLabel(
-            f"Je Gruppe bleibt das erste Objekt, {layer.removable_count} Objekte "
-            "werden entfernt."
-        )
+        merge_hint = QLabel(merge_hint_text(layer.removable_count))
         for button in (keep, merge):
             button.setCursor(Qt.PointingHandCursor)
         for hint in (keep_hint, merge_hint):
@@ -1524,7 +1693,7 @@ def _create_dock(plugin):
         if open_layers:
             return reject(
                 "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
-                "Noch offen: " + ", ".join(open_layers)
+                "Noch offen: " + ", ".join(readable_names().layer(name) for name in open_layers)
             )
         if not flow.duplicate_layers():
             return True
@@ -1536,11 +1705,15 @@ def _create_dock(plugin):
     def build_topic(page):
         topic_input = QLineEdit(workflow().result.selected_topic or "Siedlungsstruktur")
         category_list = QListWidget()
+        category_list.setIconSize(icon_size())
         for category in workflow().recognized_categories():
-            item = QListWidgetItem(category)
+            item = QListWidgetItem(layer_icon(icon_key(category=category)), category)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)
             category_list.addItem(item)
+        # show all categories at once (no inner scrolling)
+        rows = max(category_list.count(), 1)
+        category_list.setMinimumHeight(rows * (icon_size().height() + 4) + 8)
         confirm_missing = QCheckBox(UI_LABELS["continue_incomplete"])
         page.layout.addWidget(QLabel(UI_LABELS["topic"]))
         page.layout.addWidget(topic_input)
@@ -1600,10 +1773,12 @@ def _create_dock(plugin):
         font.setBold(True)
         heading.setFont(font)
         card_layout.addWidget(heading)
-        for label, value in rows:
+        for row in rows:
+            label, value = row[0], row[1]
             line = QLabel(f"{label}: {value}" if label else value)
             line.setWordWrap(True)
-            card_layout.addWidget(line)
+            # optional third element: icon key of a layer
+            card_layout.addWidget(with_icon(row[2], line) if len(row) > 2 and row[2] else line)
         return card
 
     def study_area_hectares(result):
@@ -1621,7 +1796,9 @@ def _create_dock(plugin):
             set_role(done, "status")
             page.layout.addWidget(done)
             page.layout.addWidget(summary_card(
-                "Angelegte Ergebnis-Layer", result_rows(dock.last_reports)))
+                "Angelegte Ergebnis-Layer",
+                result_rows(dock.last_reports,
+                            {d.layer_id: d.category for d in flow.result.layers})))
             hint = QLabel(done_hint_text(result_group_name(flow.result.selected_topic)))
             hint.setWordWrap(True)
             set_role(hint, "hint")

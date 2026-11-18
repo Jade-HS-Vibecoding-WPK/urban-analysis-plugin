@@ -8,9 +8,9 @@ from urban_analysis.guided_dialog import (
     PAGE_ACTIONS,
     busy_label_text,
     error_text,
-    lamp_state,
     pipeline_reports_progress,
     progress_text,
+    step_counter_text,
     unexpected_error_text,
 )
 
@@ -139,8 +139,9 @@ def test_closing_the_panel_unchecks_the_toolbar_button(monkeypatch):
 def test_every_step_has_one_main_action_and_progress_label():
     assert len(PAGE_ACTIONS) == len(MVP_UI_STEPS)
     assert PAGE_ACTIONS[-1] == "Verarbeitung starten"
-    assert progress_text(0) == "Schritt 1 von 9 – Projekt-CRS"
-    assert progress_text(8) == "Schritt 9 von 9 – Verarbeitung starten"
+    assert step_counter_text(4) == "Schritt 5 von 9"
+    assert progress_text(0) == "Schritt 1 von 9\u00a0– Projekt-CRS"
+    assert progress_text(8) == "Schritt 9 von 9\u00a0– Verarbeitung starten"
 
 
 def test_unexpected_errors_are_described_with_step_type_and_log_hint():
@@ -150,11 +151,6 @@ def test_unexpected_errors_are_described_with_step_type_and_log_hint():
     assert "ZeroDivisionError: division by zero" in text
     assert "Protokollmeldungen" in text
     assert "Urban Analysis" in text
-
-
-def test_lamps_are_on_for_done_steps_dim_for_the_current_and_off_after():
-    assert [lamp_state(i, 3) for i in range(6)] == ["on", "on", "on", "dim", "off", "off"]
-    assert [lamp_state(i, 9) for i in range(9)] == ["on"] * 9  # all done
 
 
 def test_busy_text_shows_real_progress_only_when_known():

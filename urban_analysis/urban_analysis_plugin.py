@@ -5,7 +5,8 @@ from qgis.PyQt.QtWidgets import QAction
 from .contracts import PipelineResult
 from .guided_dialog import report_unexpected_error, set_dock_visible
 from .outputs import export_selected_outputs
-from .theme import icon_path
+from .theme import toolbar_icon_path
+from .ui import style as ui_style
 from .user_guidance import GuidedWorkflow, OutputPlan
 
 
@@ -27,7 +28,7 @@ class UrbanAnalysisPlugin:
         from qgis.PyQt.QtGui import QIcon
 
         self.action = QAction(
-            QIcon(icon_path()),
+            QIcon(toolbar_icon_path(ui_style.load())),
             "Urban Analysis",
             self.iface.mainWindow(),
         )
@@ -50,6 +51,13 @@ class UrbanAnalysisPlugin:
             self.iface.removeToolBarIcon(self.action)
             self.action.deleteLater()
             self.action = None
+
+    def update_toolbar_icon(self):
+        """Toolbar/menu icon in the current style (called after switching)."""
+        if self.action is not None:
+            from qgis.PyQt.QtGui import QIcon
+
+            self.action.setIcon(QIcon(toolbar_icon_path(ui_style.current())))
 
     def toggle_dock(self, checked=False):
         """Show or hide the side panel (toolbar button and menu entry)."""

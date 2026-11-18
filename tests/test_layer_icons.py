@@ -1,0 +1,46 @@
+"""Own pixel icons per layer and category (ui/layer_icons.py)."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from urban_analysis.ui import layer_icons as icons
+
+RULES = json.loads((Path(icons.__file__).parents[1] / "mapping_rules.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("key", icons.ICON_KEYS)
+def test_every_icon_is_a_16x16_tile_with_stepped_corners(key):
+    pixels = icons.icon_pixels(key)
+    assert all(0 <= x < 16 and 0 <= y < 16 for x, y in pixels)
+    for corner in ((0, 0), (15, 0), (0, 15), (15, 15)):
+        assert corner not in pixels  # stepped corner stays empty
+    assert pixels[(0, 7)] == pixels[(7, 0)] == icons.PALETTE["o"]  # dark outline
+    assert len(set(pixels.values())) >= 3  # a real motif, not an empty tile
+
+
+def test_icons_differ_from_each_other():
+    shapes = {key: tuple(sorted(icons.icon_pixels(key).items())) for key in icons.ICON_KEYS}
+    assert len(set(shapes.values())) == len(shapes)
+
+
+def test_every_pipeline_category_and_alkis_layer_has_its_own_icon():
+    profile = RULES["profiles"][0]
+    categories = {rule["category"] for rule in profile["layers"]["nutzung"]["category_rules"]}
+    categories |= {profile["layers"]["nutzung"]["default_rule"]["category"], "Gebäude"}
+    for category in categories:
+        assert icons.icon_key(category=category) != icons.UNKNOWN, category
+    for layer in profile["layers"]:
+        assert icons.icon_key(layer) != icons.UNKNOWN, layer
+    suffixes = {rule["layer_suffix"] for rule in profile["layers"]["nutzung"]["category_rules"]}
+    for suffix in suffixes:
+        assert icons.icon_key(f"nutzung_{suffix}") != icons.UNKNOWN, suffix
+
+
+def test_icon_choice():
+    assert icons.icon_key(category="Gebäude") == "gebaeude"
+    assert icons.icon_key("nutzung_wasser") == "wasser"
+    assert icons.icon_key("nutzung_gruen", "Grünflächen") == "gruen"
+    assert icons.icon_key("irgendwas") == icons.UNKNOWN
+    assert icons.icon_key() == icons.UNKNOWN
