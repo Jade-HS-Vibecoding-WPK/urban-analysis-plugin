@@ -142,12 +142,14 @@ drei neue:
 | `object_detail` | Nutzungsdetail | Genauere Angabe zur Objektart, wenn die Quelle eine hat, z. B. „Park“ bei einer Erholungsfläche. |
 | `category` | Kategorie | Gruppe im Kartenthema, z. B. Gebäude, Straßen, Grünflächen. |
 | `status` | Status | Zustand des Objekts laut Quelle, z. B. „in Betrieb“ oder „außer Betrieb“; oft leer. |
-| `area_m2` | Fläche (m²) | Grundfläche in Quadratmetern. |
+| `area_m2` | Fläche (m²) | Grundfläche in Quadratmetern; aus der Form berechnet, wenn die Quelle keine Angabe hat. |
 | `year` | Jahr | Baujahr oder Jahr der Erfassung, wenn bekannt. |
 | `source` | Datenquelle | Herkunft der Daten, wird in Schritt 8 eingetragen. |
 
 `floors` ist eine Ganzzahl und bleibt leer, wenn die Quelle keine Angabe hat
-(keine Schätzung). Die Erklärungstexte stehen in `mapping_rules.json` (M15),
+(keine Schätzung). `area_m2` wird aus der Geometrie berechnet (im Projekt-CRS),
+wenn die Quelle keine Flächenspalte hat; ein Wert aus der Quelle hat Vorrang
+(Entscheidung im Review von G9, beantwortet die offene Frage aus Phase 1). Die Erklärungstexte stehen in `mapping_rules.json` (M15),
 damit sie ohne Code änderbar sind.
 
 **2. Was die Nutzerin in Schritt 5 entscheidet.**
