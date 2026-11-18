@@ -127,6 +127,56 @@ Kategorien werden nicht vorausgesetzt, sondern aus Layernamen, Attributen,
 Geometrietypen und Werten vorgeschlagen. Die Datenquelle bleibt als
 editierbares Feld unter Nutzerkontrolle.
 
+#### Vorschlag G9 (Person Windows, 18.11.2026) – zur Abstimmung im PR
+
+**1. Felder der Ergebnis-Layer.** Die bisherigen 8 Felder bleiben; dazu kommen
+drei neue:
+
+| Feld | Deutscher Name | Erklärung (ein Satz, für das Infosymbol) |
+| --- | --- | --- |
+| `object_id` *(neu, E20)* | Objekt-ID | Kennung des Objekts in der Quelle, damit man es dort wiederfindet. |
+| `address` *(neu, E20)* | Adresse | Straße und Hausnummer, z. B. „Hauptstraße 2“; bei mehreren Adressen mit „; “ getrennt. |
+| `floors` *(neu)* | Geschosszahl | Anzahl der oberirdischen Geschosse eines Gebäudes (ALKIS-Gebäude, OSM `building:levels`). |
+| `source_name` | Dateiname | Datei oder Download, aus dem das Objekt stammt. |
+| `object_type` | Objektart | Was das Objekt ist, z. B. Gebäude, Straße, Grünfläche. |
+| `object_detail` | Nutzungsdetail | Genauere Art der Nutzung, z. B. Wohnen, Gewerbe, Spielplatz. |
+| `category` | Kategorie | Gruppe im Kartenthema, z. B. Gebäude, Straßen, Grünflächen. |
+| `status` | Status | Ob es das Objekt gibt, z. B. Bestand oder geplant. |
+| `area_m2` | Fläche (m²) | Grundfläche in Quadratmetern. |
+| `year` | Jahr | Baujahr oder Jahr der Erfassung, wenn bekannt. |
+| `source` | Datenquelle | Herkunft der Daten, wird in Schritt 8 eingetragen. |
+
+`floors` ist eine Ganzzahl und bleibt leer, wenn die Quelle keine Angabe hat
+(keine Schätzung). Die Erklärungstexte stehen in `mapping_rules.json` (M15),
+damit sie ohne Code änderbar sind.
+
+**2. Was die Nutzerin in Schritt 5 entscheidet.**
+
+- Oben ein Satz, *warum*: „Damit Daten aus verschiedenen Quellen gleich heißen
+  und zusammenpassen.“
+- **Je Layer ein Ausklappmenü** (zu Beginn zugeklappt), im Kopf Icon, Name
+  und z. B. „5 Spalten zugeordnet, 12 weitere“. So bleibt die Seite auch bei
+  vielen ALKIS-Layern übersichtlich.
+- Im aufgeklappten Layer: **zuerst die Spalten mit Vorschlag**, darunter ein
+  zweites Ausklappmenü „Weitere Spalten (12)“.
+- Je Spalte: Spaltenname, 2–3 Beispielwerte und eine Auswahl
+  **„→ Zielfeld …“ / „als Originalspalte behalten“ / „weglassen“**. Vorschläge
+  der Pipeline sind vorausgewählt; Spalten ohne Vorschlag stehen auf
+  „weglassen“.
+- Ein Zielfeld darf je Layer nur einmal vergeben werden; doppelte Wahl wird
+  als verständlicher Hinweis gezeigt, nicht still korrigiert.
+
+**3. Verständliche Namen mit Infosymbol.** Überall, wo ein Zielfeld steht
+(Schritt 5, Attributtabelle als Alias), wird der deutsche Name gezeigt. Daneben
+ein kleines **ⓘ-Symbol**: Fährt man darüber oder klickt es an, erscheint der
+Erklärungssatz aus der Tabelle oben. Auf den ersten Blick sieht man nur Namen,
+die Erklärung erst bei Bedarf.
+
+**Folgen für die Arbeitsschritte:** M16 bekommt zusätzlich `floors`
+(Profil-Spalten für ALKIS und OSM). `tests/test_result_layers.py` (Windows)
+erwartet dann 11 statt 8 Felder und wird im selben Zug angepasst. W14 baut
+Schritt 5 nach Punkt 2 und 3.
+
 ### 3.5 Dopplungen und Konsistenz prüfen
 
 IDs sowie Geometrien und Attribute werden auf Dopplungen, Widersprüche und
