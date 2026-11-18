@@ -42,6 +42,31 @@ def load():
     return set_current(value)
 
 
+ANIMATIONS_KEY = "urban_analysis/animations"
+REDUCE_ANIMATIONS_LABEL = "Animationen reduzieren"
+
+
+def animations_enabled():
+    """True unless 'Animationen reduzieren' was chosen (kept in QGIS settings)."""
+    try:
+        from qgis.core import QgsSettings
+
+        value = QgsSettings().value(ANIMATIONS_KEY, True)
+    except ImportError:  # outside QGIS (tests)
+        return True
+    return str(value).lower() not in ("false", "0", "no")
+
+
+def save_animations(enabled):
+    try:
+        from qgis.core import QgsSettings
+
+        QgsSettings().setValue(ANIMATIONS_KEY, bool(enabled))
+    except ImportError:
+        pass
+    return bool(enabled)
+
+
 def save(style):
     """Remember the chosen style in the QGIS settings."""
     style = set_current(style)

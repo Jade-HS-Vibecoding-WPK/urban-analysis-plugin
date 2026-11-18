@@ -86,17 +86,20 @@ def test_done_always_ends_with_a_caught_fish():
     scene.set_progress(100)
     scene.finish()
     assert scene.phase == "catch" and scene.catches == 1
-    seen = set()
-    happy = sparkle = False
+    seen = []
+    happy = sparkle = dived_in = False
     for _ in range(CATCH_FRAMES):
         view = scene.catch_view()
-        if view:
-            seen.add(view[0])
+        if view and view[0] not in seen:
+            seen.append(view[0])
         happy |= scene.rabbit_happy()
         sparkle |= scene.sparkle()
         scene.tick()
-    assert seen == {"jump", "hang"}  # fish jumps out, then hangs on the line
+        dived_in |= any(x == scene.release_x() for x, _left in scene.splashes)
+    # fish jumps out, hangs on the line, is let go and swims away
+    assert seen == ["jump", "hang", "release", "swim"]
     assert happy and sparkle
+    assert dived_in  # splash where the released fish enters the water
     assert scene.phase == "idle" and scene.catch_view() is None
     assert scene.float_state()[0] == art.BOBBER_REST_X
     assert scene.rod_tip() == ROD_REST and scene.line_mode() == "slack"

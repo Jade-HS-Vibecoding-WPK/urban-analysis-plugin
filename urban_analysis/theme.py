@@ -657,6 +657,22 @@ QCheckBox::indicator:checked:disabled {{
     background-color: {c['disabled_text']};
     border-color: {c['disabled_text']};
 }}
+/* Same boxes in lists (e.g. categories in step 7). */
+QListView::indicator {{
+    width: 14px;
+    height: 14px;
+    background-color: {c['surface']};
+    border: 1px solid {c['border_strong']};
+    border-radius: 3px;
+}}
+QListView::indicator:hover {{
+    border-color: {c['accent']};
+}}
+QListView::indicator:checked {{
+    background-color: {c['accent']};
+    border-color: {c['accent_dark']};
+    image: url("{check_icon}");
+}}
 QFrame[uaRole="issue-error"], QFrame[uaRole="issue-warning"], QFrame[uaRole="issue-info"] {{
     background-color: {c['surface']};
     border: 1px solid {c['border']};

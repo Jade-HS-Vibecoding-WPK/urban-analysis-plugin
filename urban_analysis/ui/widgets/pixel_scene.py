@@ -22,7 +22,7 @@ from qgis.PyQt.QtGui import QColor, QFont, QImage, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import QSizePolicy, QWidget
 
 from .. import scene_art as art
-from ..scene_motion import FRAME_MS, JUMP_PATH, FishingScene, step_positions
+from ..scene_motion import FRAME_MS, JUMP_PATH, SWIM_DISTANCE, FishingScene, step_positions
 
 CLOUDS = ((4, 24, 1.0), (250, 12, 0.75), (345, 34, 0.55))  # x, y, scale (x for 420 px)
 PINES = ((14, 50, 22), (34, 42, 18), (52, 30, 14))       # x, height, width
@@ -335,6 +335,30 @@ class PixelScene(QWidget):
             p.drawPixmap(x, y, jumping)
             for rx, w in ((-6, 4), (4, 4), (-2, 3)):  # splash where it jumped out
                 self._dot(p, float_x + rx, art.WATER_Y - 2 - abs(rx) // 3, "ripple", w, 1)
+            return
+        if view[0] == "release":
+            # let go: the fish glides from the line back into the water (a
+            # small arc to the right), nose first
+            t = view[1]
+            jumping = self._sprites["jumping"]
+            entry = (self.state.release_x() - jumping.width() // 2, art.WATER_Y - 6)
+            x = round(hang[0] + (entry[0] - hang[0]) * t)
+            y = round(hang[1] + (entry[1] - hang[1]) * t - 8 * math.sin(math.pi * t))
+            p.save()
+            p.setClipRect(0, 0, self.width(), art.WATER_Y + 2)  # dips under the surface
+            p.drawPixmap(x, y, jumping)
+            p.restore()
+            return
+        if view[0] == "swim":
+            # under water it swims away to the right and fades into the deep
+            t = view[1]
+            pixmap = self._fish[(True, int(t * 4) % 2 == 1)]
+            x = round(self.state.release_x() + SWIM_DISTANCE * t - pixmap.width() // 2)
+            y = art.WATER_Y + 4 + round(4 * t)
+            p.save()
+            p.setOpacity(max(0.0, 1.0 - t * 0.8))
+            p.drawPixmap(x, y, pixmap)
+            p.restore()
             return
         pixmap = self._sprites["caught_2" if view[1] else "caught"]
         self._pixels(p, [tip, (hang[0] + mouth_x, hang[1] + mouth_y)], "line")

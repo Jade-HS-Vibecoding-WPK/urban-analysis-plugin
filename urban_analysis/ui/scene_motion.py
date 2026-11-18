@@ -6,10 +6,11 @@ Phases of the rabbit's line:
     loading  the rabbit pulls the float in: it follows the REAL progress
              from the right (0 %) to the rabbit (100 %)
     catch    at 100 % a fish bites, jumps out and hangs wriggling on the
-             line; the rabbit is happy (ears wiggle, a twinkle), then the
-             fish is put away and the float rests again
+             line; the rabbit is happy (ears wiggle, a twinkle), then it
+             lets the fish go: it glides back into the water, splashes and
+             swims away; the float rests again
     reel     after an error the float is pulled back without a catch
-The rabbit never loses a fish.
+The rabbit never loses a fish – it only releases it on purpose.
 
 The step fish swims along the bottom to the current step (1 of 9 ... 9 of 9),
 in pixel steps, with light current lines behind it.
@@ -29,12 +30,16 @@ CAST_FRAMES = ((22, -30), (6, -34), (-8, -28), (8, -34), (26, -28), (33, -17), R
 ROD_LIFT = (31, -25)       # rod pulled up when the fish jumps
 ROD_BENT = (27, -15)       # rod bends under the weight of the fish
 
-# Catch, frame by frame (about 1.4 s)
+# Catch, frame by frame (about 1.9 s)
 CATCH_DIP = (3, 6)         # float dips twice (px under water)
 CATCH_JUMP = 2             # first frame of the jump (float disappears)
 CATCH_HANG = 4             # from here the fish hangs on the line
 CATCH_SPARKLE = (5, 10)    # twinkle above the rabbit (inclusive)
-CATCH_FRAMES = 14          # last two frames: fish put away, float rests
+CATCH_RELEASE = 12         # the rabbit lets the fish go: it glides back ...
+CATCH_SWIM = 15            # ... splashes in and swims away under water
+CATCH_FRAMES = 19          # then the float rests again
+RELEASE_DX = 16            # the fish enters the water right of the float
+SWIM_DISTANCE = 28         # px the released fish swims before it is gone
 
 REEL_FRAMES = 4
 SPLASH_FRAMES = 3          # ripples after the float lands
@@ -223,8 +228,9 @@ class FishingScene:
             self.splash = SPLASH_FRAMES
             self._enter(self.after_cast)
             self.float_x = bobber_x(self.progress, self.width)
+        elif self.phase == "catch" and self.frame == CATCH_SWIM:
+            self.splashes.append([self.release_x(), SPLASH_LIFE])  # fish dives in
         elif self.phase == "catch" and self.frame >= CATCH_FRAMES:
-            self.splash = SPLASH_FRAMES
             self._enter("idle")
         elif self.phase == "reel" and self.frame >= REEL_FRAMES:
             self.float_x = art.BOBBER_REST_X
@@ -280,7 +286,7 @@ class FishingScene:
         if self.phase == "catch":
             if CATCH_JUMP <= self.frame < CATCH_HANG:
                 return ROD_LIFT
-            if CATCH_HANG <= self.frame < CATCH_FRAMES - 2:
+            if CATCH_HANG <= self.frame < CATCH_RELEASE:
                 return ROD_BENT
         return ROD_REST
 
@@ -291,7 +297,7 @@ class FishingScene:
         if self.phase == "catch":
             if self.frame < CATCH_JUMP:
                 return self.float_x, 0, True, CATCH_DIP[self.frame]
-            if self.frame < CATCH_FRAMES - 2:
+            if self.frame < CATCH_RELEASE:
                 return self.float_x, 0, False, 0
         x = self.float_x
         if self.phase == "reel":
@@ -312,23 +318,32 @@ class FishingScene:
         if self.phase == "catch":
             if self.frame < CATCH_JUMP:
                 return "tight"
-            if self.frame < CATCH_FRAMES - 2:
+            if self.frame < CATCH_RELEASE:
                 return "fish"
         if self.phase in ("loading", "reel"):
             return "tight"
         return "slack"
 
+    def release_x(self):
+        """Where the released fish dives back into the water."""
+        return art.BOBBER_REST_X + RELEASE_DX
+
     def catch_view(self):
-        """Where the caught fish is: None, ('jump', t 0..1) or ('hang', tail_left)."""
-        if self.phase != "catch" or not CATCH_JUMP <= self.frame < CATCH_FRAMES - 2:
+        """Where the caught fish is: None, ('jump', t), ('hang', tail_left),
+        ('release', t) or ('swim', t) with t running 0..1."""
+        if self.phase != "catch" or not CATCH_JUMP <= self.frame < CATCH_FRAMES:
             return None
         if self.frame < CATCH_HANG:
             return ("jump", (self.frame - CATCH_JUMP + 1) / (CATCH_HANG - CATCH_JUMP + 1))
-        return ("hang", self.frame % 2 == 0)
+        if self.frame < CATCH_RELEASE:
+            return ("hang", self.frame % 2 == 0)
+        if self.frame < CATCH_SWIM:
+            return ("release", (self.frame - CATCH_RELEASE + 1) / (CATCH_SWIM - CATCH_RELEASE + 1))
+        return ("swim", (self.frame - CATCH_SWIM + 1) / (CATCH_FRAMES - CATCH_SWIM))
 
     def rabbit_happy(self):
         """Second rabbit frame (ear tipped) every other frame while it is happy."""
-        return self.phase == "catch" and CATCH_HANG <= self.frame < CATCH_FRAMES - 2 \
+        return self.phase == "catch" and CATCH_HANG <= self.frame < CATCH_SWIM \
             and self.frame % 2 == 1
 
     def sparkle(self):
