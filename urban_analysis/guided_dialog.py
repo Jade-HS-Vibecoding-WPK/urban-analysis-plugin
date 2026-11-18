@@ -39,6 +39,7 @@ from .study_area import (
     download_box_km2,
     download_size_text,
     format_km2,
+    is_large,
     is_oversized,
     oversize_question_text,
     oversize_warning_text,
@@ -1455,7 +1456,7 @@ def _create_dock(plugin):
         km2 = download_box_km2(box.xMinimum(), box.yMinimum(), box.xMaximum(),
                                box.yMaximum(), page.widgets["buffer"].value())
         page.widgets["download_km2"] = km2
-        if is_oversized(km2):
+        if is_large(km2):
             set_role(size, "warning")
             size.setText(download_size_text(km2) + "\n\n" + oversize_warning_text(km2))
         else:
@@ -1471,7 +1472,7 @@ def _create_dock(plugin):
             return reject(str(error))
         update_area_status(page)
         km2 = page.widgets["download_km2"]
-        if km2 is not None and is_oversized(km2):
+        if km2 is not None and is_large(km2):
             answer = QMessageBox.question(
                 dock, "Großes Gebiet", oversize_question_text(km2),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)

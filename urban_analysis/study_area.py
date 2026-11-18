@@ -34,8 +34,12 @@ def area_summary_text(polygon_count, area_m2, crs_authid):
 
 
 # E13/E17: OSM/ALKIS are downloaded for the rectangle around area + buffer.
-MAX_DOWNLOAD_KM2 = 25.0
-MAX_DOWNLOAD_TEXT = "25"
+# Above 25 km² a warning (takes long, large files), above 50 km² no download
+# (user decision 18.11.2026, changes E13 – to be confirmed by Person Mac).
+LARGE_AREA_KM2 = 25.0
+LARGE_AREA_TEXT = "25"
+MAX_DOWNLOAD_KM2 = 50.0
+MAX_DOWNLOAD_TEXT = "50"
 
 
 def download_box_km2(xmin, ymin, xmax, ymax, buffer_meters):
@@ -58,28 +62,48 @@ def download_size_text(km2):
     )
 
 
+def is_large(km2):
+    """Above 25 km²: warn in step 2, continuing stays possible."""
+    return km2 > LARGE_AREA_KM2
+
+
 def is_oversized(km2):
+    """Above 50 km²: OSM/ALKIS cannot be downloaded (step 3)."""
     return km2 > MAX_DOWNLOAD_KM2
 
 
 def oversize_warning_text(km2):
-    """Yellow hint in step 2; continuing stays possible (E17)."""
+    """Yellow hint in step 2 for a large area; continuing stays possible."""
+    size = format_km2(km2)
+    if is_oversized(km2):
+        return (
+            f"Das Gebiet ist mit Puffer {size} km² groß, also größer als "
+            f"{MAX_DOWNLOAD_TEXT} km². OSM- und ALKIS-Daten können dafür nicht "
+            "heruntergeladen werden; eine eigene Datei geht, wird aber sehr groß "
+            "und langsam. Du kannst trotzdem weitermachen; verkleinere sonst das "
+            "Gebiet oder den Puffer."
+        )
     return (
-        f"Das Gebiet ist mit Puffer {format_km2(km2)} km² groß, also größer als "
-        f"{MAX_DOWNLOAD_TEXT} km². OSM- und ALKIS-Daten "
-        "können dafür nicht heruntergeladen werden, und eigene Dateien werden "
-        "möglicherweise sehr groß und langsam. Du kannst trotzdem weitermachen; "
-        "verkleinere sonst das Gebiet oder den Puffer."
+        f"Großes Gebiet: {size} km² (über {LARGE_AREA_TEXT} km²). Das Laden der "
+        "Daten kann lange dauern und die Dateien werden groß. Du kannst trotzdem "
+        "weitermachen."
     )
 
 
 def oversize_question_text(km2):
-    """Question on 'Weiter' when the area is too large for downloads."""
+    """Question on 'Weiter' when the area is large."""
+    size = format_km2(km2)
+    if is_oversized(km2):
+        return (
+            f"Das Gebiet ist mit Puffer {size} km² groß (höchstens "
+            f"{MAX_DOWNLOAD_TEXT} km² für OSM und ALKIS).\n\n"
+            "OSM und ALKIS können dafür nicht heruntergeladen werden; eine eigene "
+            "Datei wird sehr groß und langsam. Trotzdem fortfahren?"
+        )
     return (
-        f"Das Gebiet ist mit Puffer {format_km2(km2)} km² groß (höchstens "
-        f"{MAX_DOWNLOAD_TEXT} km² für Downloads).\n\n"
-        "Die Daten werden dann möglicherweise sehr groß; OSM und ALKIS können "
-        "nicht heruntergeladen werden. Trotzdem fortfahren?"
+        f"Das Gebiet ist mit Puffer {size} km² groß.\n\n"
+        "Das Laden der Daten kann lange dauern und die Dateien werden groß. "
+        "Trotzdem fortfahren?"
     )
 
 
