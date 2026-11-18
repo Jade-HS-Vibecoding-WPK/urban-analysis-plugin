@@ -42,9 +42,11 @@ MVP-Ablauf besteht aus diesen neun Schritten:
 9. **Verarbeitung starten:** Die Verarbeitung erzeugt die gewählten Ausgaben
    und eine Zusammenfassung mit Warnungen, Änderungen und offenen Problemen.
 
-Externe Open-Source-Datenquellen, automatische Datenabfragen, weitere
-Dateiformate und zusätzliche Kartenthemen sind ausdrücklich spätere
-Erweiterungen. Rohdaten werden nicht überschrieben; bereinigte Kopien und
+Weitere Dateiformate und zusätzliche Kartenthemen sind ausdrücklich spätere
+Erweiterungen. Externe Datenquellen (OSM für ganz Deutschland, ALKIS
+automatisch von den Diensten der Bundesländer) und automatische
+Datenabfragen werden seit dem 18.11.2026 in **Phase 2** umgesetzt
+(`ARBEITSPLAN_DEUTSCHLANDWEIT.md`). Rohdaten werden nicht überschrieben; bereinigte Kopien und
 Ergebnislayer werden getrennt erzeugt.
 
 ## 3. Fachlicher und technischer Workflow
@@ -60,8 +62,10 @@ protokolliert.
 
 Im MVP werden lokale **GeoPackage-Dateien** geladen. Ein Standardpuffer von
 **500 m** begrenzt die Daten räumlich um das Untersuchungsgebiet; der Nutzer
-kann ihn ändern. Externe
-Open-Source-Datenquellen und weitere Dateiformate werden erst später ergänzt.
+kann ihn ändern. In **Phase 2** kommen OSM und ALKIS als automatisch
+heruntergeladene Quellen hinzu; eigene GeoPackages bleiben möglich
+(`ARBEITSPLAN_DEUTSCHLANDWEIT.md`, E5–E19). Weitere Dateiformate werden erst
+später ergänzt.
 Für jede Datenquelle wird dokumentiert:
 
 | Punkt | Zu dokumentieren |
@@ -167,8 +171,9 @@ Datenvertrag aufbauen und werden erst danach ergänzt.
 
 #### Spätere Erweiterungen
 
-- **Externe Open-Source-Datenquellen:** Automatische Abfragen und
-  Quellenverwaltung werden erst nach dem lokalen GeoPackage-MVP geprüft.
+- **Externe Open-Source-Datenquellen:** Automatische Abfragen von OSM und
+  ALKIS sind jetzt Teil von Phase 2 (`ARBEITSPLAN_DEUTSCHLANDWEIT.md`).
+  Weitere Quellen (z. B. WMS, andere Anbieter) bleiben spätere Erweiterungen.
 - **Weitere Formate:** Zusätzliche Eingabe- und Ausgabeformate werden später
   ergänzt.
 - **ÖPNV und Fußwegenetz:** Erreichbarkeitsanalysen und Netzberechnungen sind
@@ -272,16 +277,22 @@ Datenpipeline, Kartenansicht oder PDF-Erzeugung.
 
 ## 6. Offene Entscheidungen
 
-Vor dem Start müssen noch festgelegt werden:
+Stand 18.11.2026:
 
-- konkretes Untersuchungsgebiet-Polygon und Beispiel-GeoPackage,
-- genaue Testdaten und die zulässige Einheit für den änderbaren 500-m-Puffer,
-- Details des Zielschemas je vorgeschlagener Kategorie,
-- Schwelle, ab der ein Fall als unsichere Dopplung angezeigt wird,
-- Details des PDF-Layouts über Karte, Puffer, Legende und Datenquelle,
-- gemeinsamer Integrationspunkt und Abnahmekriterien.
+- ✅ konkretes Untersuchungsgebiet-Polygon und Beispiel-GeoPackage
+  (Donnerschwee, lokaler ALKIS-Ausschnitt),
+- ✅ genaue Testdaten und die zulässige Einheit für den änderbaren
+  500-m-Puffer (Meter im Projekt-CRS),
+- ✅ Details des Zielschemas je vorgeschlagener Kategorie
+  (`mapping_rules.json`),
+- ✅ Schwelle für unsichere Dopplungen: innerhalb einer Quelle siehe E8;
+  zwischen Quellen 20 % Flächenabweichung (E12),
+- ❌ Details des PDF-Layouts über Karte, Puffer, Legende und Datenquelle
+  (offen, gehört zu W8b),
+- ✅ gemeinsamer Integrationspunkt und Abnahmekriterien (§9).
 
-Externe Open-Source-Datenquellen, weitere Formate und zusätzliche
+Neue Entscheidungen für Phase 2 stehen in `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §2
+(E5–E19), noch offene Fragen dort in §9. Weitere Formate und zusätzliche
 Kartenthemen bleiben spätere Erweiterungen.
 
 ## 7. Rollen im Zweierteam
