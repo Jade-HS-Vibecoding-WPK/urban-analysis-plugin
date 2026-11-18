@@ -135,8 +135,15 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 - Datei: `urban_analysis/sources.py` (neu) und
   `urban_analysis/sources_catalog.json` (neu, wie `mapping_rules.json` ohne
   Code änderbar).
-- Eingabe: Untersuchungsgebiet (WKT, Projekt-CRS), Puffer, optional ein von
-  der Nutzerin geändertes Bundesland.
+- Eingabe: Untersuchungsgebiet (WKT, Projekt-CRS), Puffer, das
+  **Download-Rechteck (Gebiet + Puffer) in EPSG:4326**, das QGIS vorher
+  umrechnet (so bleibt die Pipeline ohne Umprojektion; vereinbart in PR #34),
+  optional ein von der Nutzerin geändertes Bundesland.
+- Umgesetzt (M10a): `plan_osm_download(study_area_wkt, buffer_meters,
+  lonlat_box)` liefert einen `SourcePlan` mit `requests`
+  (`DownloadRequest`: URL, Overpass-Abfrage, Lieferungs-KBS, Dateinamen für
+  Rohdatei und GeoPackage, Lizenz mit Link, Quellenvermerk, Zeitlimit),
+  `issues` und `area_km2`.
 - `suggest_state(...)` schlägt das Bundesland vor (E11), aus vereinfachten
   Ländergrenzen, die als Datei im Plugin liegen.
 - Ausgabe: Liste von Download-Aufträgen, je Quelle: Adresse (URL) oder
@@ -157,6 +164,14 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   und Datum (z. B. `osm_2026-11-18.gpkg`).
 - Fehler (kein Internet, Dienst antwortet nicht) werden als verständliche
   Meldung angezeigt, der Download bricht ab (E15).
+- **Overpass ist oft überlastet** (Test am 18.11.: erst HTTP 502 „alle Plätze
+  belegt“, dann 504, nach 60 s erfolgreich). Deshalb bei 429/502/504 höchstens
+  2–3 Wiederholungen mit wachsender Pause (z. B. 30 s, 60 s) und sichtbarem
+  Hinweis („Server ausgelastet, neuer Versuch in …“), danach verständlicher
+  Abbruch – keine endlose Schleife.
+- OSM: Die Abfrage (POST-Feld `data`) liefert eine `.osm`-Datei in EPSG:4326;
+  sie wird unverändert als Rohdatei gespeichert, dann mit GDAL/QGIS gelesen
+  (Layer `points`, `lines`, `multipolygons`) und ins Projekt-CRS umgerechnet.
 
 ### S11 – Mehrere Quellen in einem Lauf *(Mac, Vertrag gemeinsam)*
 
@@ -246,7 +261,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | | **Etappe A – jetzt starten** | | |
 | 1 | G6 Vertrag erweitern | gemeinsam | – |
 | 2 | M9 Recherche ALKIS-Dienste der Länder ✓ | Mac | – |
-| 3 | M10a OSM-Abfrage und Größenprüfung | Mac | – |
+| 3 | M10a OSM-Abfrage und Größenprüfung ✓ | Mac | – |
 | 4 | W14 Schritt 5 umbauen | Windows | Teil 2: 1 |
 | 5 | G10 Soziale Daten beschließen | gemeinsam | – |
 | 6 | M18 Recherche GTFS und Zensus | Mac | – |
@@ -309,7 +324,15 @@ Wartezeit starten kann.
 - **Wartet auf:** nichts. Der größte Blocker für „deutschlandweit“: 10 und
   11 warten darauf.
 
-#### 3. M10a – OSM-Abfrage und Größenprüfung (S9, Teil 1) *(Mac)*
+#### 3. M10a – OSM-Abfrage und Größenprüfung (S9, Teil 1) *(Mac)* – *erledigt*
+
+- **Stand:** `sources.py` mit `plan_osm_download`; Grenzwerte (25/50 km²)
+  und Abfrage-Regeln in `sources_catalog.json`; 10 Tests in
+  `tests/test_sources.py` (u. a. hält ein Test die abgefragten OSM-Merkmale
+  mit dem OSM-Profil in Einklang). Die erzeugte Abfrage wurde am 18.11. echt
+  an Overpass geschickt: Antwort korrekt (300 × 300 m: 116 Gebäude, ca.
+  100 KB). **Für Person Windows:** `study_area.py` kann die Grenzwerte aus
+  dem Katalog lesen (`sources.area_limits(sources.load_catalog())`).
 
 - **Absicht:** Erster Baustein für den automatischen Download, damit Person
   Windows mit 8 und 9 beginnen kann.
@@ -566,13 +589,12 @@ Durch 2 (M9) beantwortet:
 
 Neu aus M9, mit Person Windows zu klären:
 
-- **Rechteck für die OSM-Abfrage in Längen-/Breitengraden:** Overpass braucht
-  EPSG:4326, die Pipeline rechnet bisher nicht um. Vorschlag: nur die vier
-  Ecken mit einer kleinen, getesteten UTM-Formel umrechnen (keine
-  Geometrien) – oder QGIS liefert das Rechteck in 4326 mit (S9/S10).
+- ~~Rechteck für die OSM-Abfrage in Längen-/Breitengraden~~ → **entschieden
+  (PR #34):** QGIS rechnet das Rechteck in EPSG:4326 um und übergibt es an
+  `sources.py`; die Pipeline rechnet nicht um.
 - **Lizenz Sachsen-Anhalt** am Landesportal bestätigen, bis dahin kein
   ALKIS-Abruf für ST (E28).
-- **E28 Lizenzen und Quellenvermerke** bestätigen.
+- ~~E28 bestätigen~~ → **bestätigt** von Person Windows in PR #34.
 
 Zu sozialen Daten und Erreichbarkeit (in 5 klären):
 

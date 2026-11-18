@@ -2,12 +2,31 @@
   "_hinweis": "Katalog der Datenquellen für den automatischen Download (S9, M9). Enthält nur Adressen, Lizenzen und Regeln, keine Daten. Alle WFS-Adressen wurden am 'geprueft'-Datum per GetCapabilities abgefragt. Eigentümerangaben sind nie Teil der offenen Dienste und werden nie abgefragt. {jahr} im Quellenvermerk wird beim Download durch das aktuelle Jahr ersetzt.",
   "stand": "2026-11-18",
 
+  "gebiet": {
+    "_hinweis": "E13: Größe des Download-Rechtecks (Gebiet + Puffer) im Projekt-KBS. Über 'warnung_km2' eine Warnung, über 'max_km2' werden OSM/ALKIS nicht geladen. Schritt 2 (study_area.py) und die Pipeline (sources.py) sollen dieselben Werte nutzen.",
+    "warnung_km2": 25,
+    "max_km2": 50
+  },
+
   "osm": {
     "dienst": "overpass",
     "url": "https://overpass-api.de/api/interpreter",
     "crs_lieferung": "EPSG:4326",
     "lizenz": "ODbL-1.0",
     "quellenvermerk": "© OpenStreetMap-Mitwirkende, ODbL",
+    "lizenz_url": "https://opendatacommons.org/licenses/odbl/1-0/",
+    "abfrage": {
+      "_hinweis": "Was die Overpass-Abfrage holt (M10a). 'schluessel' = alle Merkmale, nach denen das OSM-Profil in mapping_rules.json einordnet, außer 'boundary' (Grenz-Relationen reichen weit über das Gebiet hinaus und machen den Download riesig). Relationen nur als Flächen (type=multipolygon). Ein Test hält die Liste mit dem Profil in Einklang.",
+      "zeitlimit_s": 300,
+      "schluessel": [
+        "amenity", "barrier", "building", "building:part", "highway", "landuse", "leisure",
+        "man_made", "natural", "place", "power", "public_transport", "railway", "shop",
+        "water", "waterway"
+      ],
+      "ohne_schluessel": ["boundary"],
+      "rohdatei": "osm_{datum}.osm",
+      "geopackage": "osm_{datum}.gpkg"
+    },
     "regeln": {
       "_hinweis": "Nutzungsregeln des öffentlichen Overpass-Servers (overpass-api.de, Stand 2026-11).",
       "max_abfragen_pro_tag": 10000,
