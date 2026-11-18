@@ -35,6 +35,9 @@ CATEGORY_ICONS = {
     "Bahnflächen": "bahn",
     "Schiffsverkehrsflächen": "schiff",
     "Nutzungsflächen": "nutzung",
+    # ALKIS vereinfacht (M12): parts of buildings and structures
+    "Gebäudeteile": "gebaeude",
+    "Bauwerke und Überdachungen": "bauwerke",
 }
 # Input layers (ALKIS table names) -> icon
 LAYER_ICONS = {
@@ -47,6 +50,10 @@ LAYER_ICONS = {
     "bauwerke_l": "bauwerke",
     "bodenschaetzung": "boden",
     "bewertung": "bewertung",
+    # layers of the ALKIS web services ("ALKIS vereinfacht", M12)
+    "GebaeudeBauwerk": "gebaeude",
+    "Nutzung": "nutzung",
+    "Flurstueck": "flurstuecke",
 }
 # Split result layers of 'nutzung' (layer_suffix in mapping_rules.json)
 SUFFIX_ICONS = {
