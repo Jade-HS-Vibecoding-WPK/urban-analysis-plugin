@@ -41,14 +41,18 @@ def test_both_styles_have_a_readable_label_for_the_gear_menu():
     assert "QGIS" in ui_style.STYLE_LABELS["classic"]
 
 
-def test_classic_looks_like_qgis_blue_accent_soft_corners_native_boxes():
+def test_classic_looks_like_qgis_blue_accent_soft_corners_visible_boxes():
     css = panel_stylesheet(style="classic")
     assert CLASSIC_COLORS["accent"] == "#2f6fb0"  # blue
     assert style_colors("classic") is CLASSIC_COLORS and style_colors("pixel") is COLORS
     assert CLASSIC_COLORS["background"] in _rule(css, "QWidget")
     assert "font-family" not in css  # QGIS font
-    assert "::indicator" not in css  # native check boxes and radio buttons
-    assert "haken.svg" not in css and "radio_" not in css  # no pixel images
+    assert "QRadioButton::indicator" not in css  # native radio buttons
+    # own check boxes: visible frame, ticked in the accent colour, smooth check
+    assert CLASSIC_COLORS["border_strong"] in _rule(css, "QCheckBox::indicator")
+    checked = _rule(css, "QCheckBox::indicator:checked")
+    assert CLASSIC_COLORS["accent"] in checked and "haken_klassisch.svg" in checked
+    assert "/haken.svg" not in css and "radio_" not in css  # no pixel images
     assert set(re.findall(r"border-radius: (\d+)px", css)) - {"0"}  # soft corners
     assert COLORS["accent"].lower() not in css.lower()  # no red-orange
 
