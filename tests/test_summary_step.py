@@ -60,11 +60,11 @@ def test_planned_layers_list_only_selected_layers_with_counts():
     assert rows == ["Gebäude – 1 200 Objekte", "Straßen – 1 Objekt"]
 
 
-def test_outputs_say_what_is_not_connected_yet():
+def test_outputs_name_the_missing_save_location():
     rows = dict(output_rows(OutputSelection(create_pdf=True)))
     assert rows["Ergebnis-Layer in QGIS"] == "ja"
     assert rows["Bereinigtes GeoPackage"] == "nein"
-    assert rows["PDF"].startswith("ja (wird mit W8")
+    assert rows["PDF"] == "ja – Speicherort fehlt (Schritt 8)"
 
 
 def test_result_rows_list_created_layers_and_skipped_objects():

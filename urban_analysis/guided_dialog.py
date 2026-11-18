@@ -8,14 +8,23 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
+import os
+from datetime import date
 from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
-from .data_pipeline import TARGET_FIELDS, GeoPackageImporter, GeoPackageImportError
+from .data_pipeline import (
+    TARGET_FIELDS,
+    GeoPackageImporter,
+    GeoPackageImportError,
+    apply_data_source,
+)
 from .outputs import (
     add_result_layers,
     build_result_layers,
+    export_pdf,
     format_count,
+    write_result_geopackage,
     result_group_name,
     result_layer_name,
     result_layers_text,
@@ -46,9 +55,49 @@ from .user_guidance import (
 
 DOCK_OBJECT_NAME = "UrbanAnalysisDock"
 NO_DATA_MESSAGE = "Noch keine Daten geladen. Bitte zuerst ein GeoPackage laden."
-EXPORT_PENDING_MESSAGE = (
-    "GeoPackage- und PDF-Ausgabe werden in einem späteren Schritt angeschlossen "
-    "(ARBEITSPLAN W8)."
+# Step 8/9 outputs (W8b).  The PDF is still the simple one without a map;
+# the real layout follows in its own step together with the sources (M10).
+OUTPUT_SUFFIXES = {"geopackage": ".gpkg", "pdf": ".pdf"}
+OUTPUT_KIND_LABELS = {"geopackage": "GeoPackage", "pdf": "PDF"}
+OUTPUT_DIALOG_TITLES = {
+    "geopackage": "Bereinigtes GeoPackage speichern unter",
+    "pdf": "PDF speichern unter",
+}
+OUTPUT_DIALOG_FILTERS = {
+    "geopackage": "GeoPackage (*.gpkg)",
+    "pdf": "PDF (*.pdf)",
+}
+LAST_OUTPUT_FOLDER_SETTING = "urban_analysis/last_output_folder"
+SAVE_AS_LABEL = "Speichern unter …"
+DATA_SOURCE_PLACEHOLDER = "z. B. ALKIS Stadt Oldenburg, Stand 2026"
+DATA_SOURCE_HINT = (
+    "Pflichtfeld. Steht bei jedem Ergebnis-Objekt im Feld „Quelle“, wenn die "
+    "Daten selbst keine Quelle mitbringen."
+)
+DATA_SOURCE_REQUIRED_MESSAGE = (
+    "Bitte eine Datenquelle eintragen (z. B. „ALKIS Stadt Oldenburg, Stand 2026“). "
+    "Sie wird bei jedem Ergebnis-Objekt im Feld „Quelle“ gespeichert."
+)
+MISSING_PATH_MESSAGES = {
+    "geopackage": "Für das bereinigte GeoPackage fehlt der Speicherort. Bitte "
+                  "„Speichern unter …“ klicken oder das Häkchen entfernen.",
+    "pdf": "Für das PDF fehlt der Speicherort. Bitte „Speichern unter …“ klicken "
+           "oder das Häkchen entfernen.",
+}
+FILE_EXISTS_MESSAGE = (
+    "Die Datei „{name}“ gibt es schon. Bitte „Speichern unter …“ klicken und dort "
+    "bestätigen, dass sie ersetzt wird, oder einen anderen Namen wählen."
+)
+SIMPLE_PDF_NOTE =" (einfaches PDF ohne Karte)"
+SIMPLE_PDF_HINT = (
+    "Vorerst ein einfaches PDF mit den Angaben zum Lauf. Die Karte mit Legende, "
+    "Maßstab und Seitengröße folgt in einem eigenen Schritt."
+)
+SAVE_FAILED_MESSAGE = (
+    "{kind} konnte nicht gespeichert werden: {reason}\n"
+    "Was tun: Ist die Datei gerade in QGIS oder einem anderen Programm geöffnet, "
+    "bitte dort schließen oder in Schritt 8 einen anderen Dateinamen wählen. "
+    "Die Ergebnis-Layer in QGIS sind trotzdem angelegt."
 )
 CRS_HINT = (
     "Das CRS muss zu den Daten im GeoPackage passen. Layer mit einem anderen CRS "
@@ -200,16 +249,87 @@ def issue_icon_key(flow, issue):
     return layer_icon_key(flow, table) if table else None
 
 
-def output_rows(output):
-    def yes_no(flag, pending=False):
+def output_slug(text):
+    """'Siedlungsstruktur' -> 'siedlungsstruktur'; safe for file names."""
+    text = (text or "ergebnis").lower()
+    for umlaut, plain in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        text = text.replace(umlaut, plain)
+    slug = "".join(char if char.isalnum() else "_" for char in text)
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_") or "ergebnis"
+
+
+def default_output_path(folder, topic, kind, day):
+    """Suggested file: <folder>/urban_analysis_<topic>_<YYYY-MM-DD>.<gpkg|pdf>."""
+    return Path(folder) / f"urban_analysis_{output_slug(topic)}_{day.isoformat()}{OUTPUT_SUFFIXES[kind]}"
+
+
+def with_output_suffix(path, kind):
+    """Add .gpkg/.pdf if the user typed a name without it."""
+    path = Path(path)
+    suffix = OUTPUT_SUFFIXES[kind]
+    return path if path.suffix.lower() == suffix else path.with_name(path.name + suffix)
+
+
+def short_folder(folder):
+    """Last two folders only ('…\\Projekt\\Ausgabe'): long paths cannot wrap
+    and would make the panel wider than the window.  The full path is the
+    tooltip."""
+    parts = Path(folder).parts
+    if len(parts) <= 3:
+        return str(Path(folder))
+    return "…" + os.sep + str(Path(*parts[-2:]))
+
+
+def output_path_text(path):
+    """Two lines below a ticked output: file name and (short) folder."""
+    path = Path(path)
+    return f"{path.name}\nim Ordner {short_folder(path.parent)}"
+
+
+def output_choice_problem(*, geopackage, pdf, paths, data_source, confirmed=()):
+    """First problem of the step-8 choices as user text, or None if all is set.
+
+    The data source is always required: it goes into the field 'Quelle' of
+    every result object (apply_data_source, S8).  A suggested file name that
+    already exists is only replaced after the user picked it in the save
+    dialog (``confirmed`` = kinds chosen there), never silently."""
+    if not (data_source or "").strip():
+        return DATA_SOURCE_REQUIRED_MESSAGE
+    for kind, wanted in (("geopackage", geopackage), ("pdf", pdf)):
+        if not wanted:
+            continue
+        path = paths.get(kind)
+        if not path:
+            return MISSING_PATH_MESSAGES[kind]
+        if kind not in confirmed and Path(path).exists():
+            return FILE_EXISTS_MESSAGE.format(name=Path(path).name)
+    return None
+
+
+def output_rows(output, paths=None):
+    """Step-9 overview of the outputs, with the chosen file names."""
+    paths = paths or {}
+
+    def chosen(flag, kind, extra=""):
         if not flag:
             return "nein"
-        return "ja (wird mit W8 angeschlossen)" if pending else "ja"
+        path = paths.get(kind)
+        return f"ja – {Path(path).name}{extra}" if path else "ja – Speicherort fehlt (Schritt 8)"
 
     return (
         ("Ergebnis-Layer in QGIS", "ja"),
-        ("Bereinigtes GeoPackage", yes_no(output.save_cleaned_geopackage, pending=True)),
-        ("PDF", yes_no(output.create_pdf, pending=True)),
+        ("Bereinigtes GeoPackage", chosen(output.save_cleaned_geopackage, "geopackage")),
+        ("PDF", chosen(output.create_pdf, "pdf", SIMPLE_PDF_NOTE)),
+    )
+
+
+def saved_rows(saved):
+    """Rows for the 'Fertig' view: one per written file, ``saved`` = [(kind, path)]."""
+    return tuple(
+        (OUTPUT_KIND_LABELS[kind], f"{Path(path).name} – im Ordner {short_folder(Path(path).parent)}")
+        for kind, path in saved
     )
 
 
@@ -598,6 +718,10 @@ def _create_dock(plugin):
             self.next_message = None  # info shown after the next page change
             self.all_done = False  # fish at the end after "Verarbeitung starten"
             self.last_reports = None  # result of the last processing run (step 9)
+            self.last_saved = []  # files written by that run: [(kind, path)]
+            self.output_paths = {}  # save locations chosen in step 8 (W8b)
+            self.output_confirmed = set()  # kinds picked in the save dialog
+            self.output_draft = {}  # step-8 input not yet confirmed
 
             # The whole plugin shares one style (theme.py), with the bundled
             # fonts if present (otherwise the system monospace font).
@@ -814,6 +938,7 @@ def _create_dock(plugin):
         def show_page(self, index):
             self.stop_drawing()
             self.last_reports = None  # step 9 starts with the overview again
+            self.last_saved = []
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -985,6 +1110,9 @@ def _create_dock(plugin):
                 self.stop_drawing()
                 plugin.reset_workflow()
                 self.settings = {}
+                self.output_paths = {}
+                self.output_confirmed = set()
+                self.output_draft = {}
                 self.next_message = None
                 for page in self.pages:
                     if page.rebuild:
@@ -1740,23 +1868,114 @@ def _create_dock(plugin):
             return reject(str(error))
         return True
 
-    # 8 Ausgabe
+    # 8 Ausgabe: QGIS layers always; GeoPackage/PDF with a save location each
+    def output_folder():
+        """Folder for the save dialog: the last one, else the project folder."""
+        last = QgsSettings().value(LAST_OUTPUT_FOLDER_SETTING, "")
+        if last and Path(str(last)).is_dir():
+            return Path(str(last))
+        home = QgsProject.instance().homePath()
+        return Path(home) if home and Path(home).is_dir() else Path.home()
+
+    def show_output_path(page, kind):
+        path = dock.output_paths.get(kind)
+        label = page.widgets[f"{kind}_path"]
+        if path:
+            label.setText(output_path_text(path))
+            label.setToolTip(str(path))
+        else:
+            label.setText("Noch kein Speicherort gewählt.")
+            label.setToolTip("")
+
+    def choose_output_path(page, kind):
+        """System save dialog; remembers the folder for the next time."""
+        current = dock.output_paths.get(kind) or default_output_path(
+            output_folder(), workflow().result.selected_topic, kind, date.today())
+        path, _filter = QFileDialog.getSaveFileName(
+            dock, OUTPUT_DIALOG_TITLES[kind], str(current), OUTPUT_DIALOG_FILTERS[kind])
+        if not path:
+            return  # dialog closed: keep the previous choice
+        chosen = with_output_suffix(path, kind)
+        QgsSettings().setValue(LAST_OUTPUT_FOLDER_SETTING, str(chosen.parent))
+        dock.output_paths[kind] = chosen
+        dock.output_confirmed.add(kind)  # the dialog asked about replacing
+        show_output_path(page, kind)
+        dock.clear_message()
+
+    def output_choice(page, kind, text, checked, hint=None):
+        box = QCheckBox(text)
+        box.setChecked(checked)
+        path_label = QLabel()
+        path_label.setWordWrap(True)
+        set_role(path_label, "hint")
+        button = QPushButton(SAVE_AS_LABEL)
+        set_role(button, "secondary")
+        button.setCursor(Qt.PointingHandCursor)
+        parts = [path_label, button]
+        if hint:
+            note = QLabel(hint)
+            note.setWordWrap(True)
+            set_role(note, "hint")
+            parts.insert(0, note)
+        details = indented(*parts)
+        page.layout.addWidget(box)
+        page.layout.addWidget(details)
+        page.widgets.update({kind: box, f"{kind}_path": path_label})
+
+        def toggled(on):
+            if on and not dock.output_paths.get(kind):
+                # visible suggestion; "Speichern unter …" changes it
+                dock.output_paths[kind] = default_output_path(
+                    output_folder(), workflow().result.selected_topic, kind, date.today())
+            show_output_path(page, kind)
+            details.setVisible(on)
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        box.toggled.connect(toggled)
+        box.toggled.connect(lambda on: dock.output_draft.__setitem__(kind, on))
+        button.clicked.connect(lambda: choose_output_path(page, kind))
+        toggled(checked)
+
     def build_output(page):
-        geopackage = QCheckBox("Bereinigtes GeoPackage speichern")
-        pdf = QCheckBox("PDF erzeugen")
-        source = QLineEdit(workflow().result.output.data_source)
-        page.layout.addWidget(geopackage)
-        page.layout.addWidget(pdf)
-        page.layout.addWidget(QLabel(UI_LABELS["data_source"]))
+        output = workflow().result.output
+        # Unconfirmed input survives a rebuild of the page (e.g. style switch).
+        draft = dock.output_draft
+        draft.setdefault("geopackage", output.save_cleaned_geopackage)
+        draft.setdefault("pdf", output.create_pdf)
+        draft.setdefault("source", output.data_source)
+        layers = QCheckBox("Ergebnis-Layer in QGIS anlegen")
+        layers.setChecked(True)
+        layers.setEnabled(False)  # always (contract: QGIS layers are mandatory)
+        page.layout.addWidget(layers)
+        output_choice(page, "geopackage", "Bereinigtes GeoPackage speichern",
+                      draft["geopackage"])
+        output_choice(page, "pdf", "PDF erzeugen", draft["pdf"], SIMPLE_PDF_HINT)
+        title = QLabel(UI_LABELS["data_source"])
+        page.layout.addWidget(title)
+        source = QLineEdit(draft["source"])
+        source.textChanged.connect(lambda text: draft.__setitem__("source", text))
+        source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
         page.layout.addWidget(source)
-        page.widgets.update(geopackage=geopackage, pdf=pdf, source=source)
+        hint = QLabel(DATA_SOURCE_HINT)
+        hint.setWordWrap(True)
+        set_role(hint, "hint")
+        page.layout.addWidget(hint)
+        page.widgets.update(source=source)
 
     def validate_output(page):
+        widgets = page.widgets
+        geopackage = widgets["geopackage"].isChecked()
+        pdf = widgets["pdf"].isChecked()
+        problem = output_choice_problem(
+            geopackage=geopackage, pdf=pdf, paths=dock.output_paths,
+            data_source=widgets["source"].text(), confirmed=dock.output_confirmed)
+        if problem:
+            return reject(problem)
         try:
             workflow().choose_output(
-                save_cleaned_geopackage=page.widgets["geopackage"].isChecked(),
-                create_pdf=page.widgets["pdf"].isChecked(),
-                data_source=page.widgets["source"].text(),
+                save_cleaned_geopackage=geopackage,
+                create_pdf=pdf,
+                data_source=widgets["source"].text(),
             )
         except ValueError as error:
             return reject(str(error))
@@ -1799,6 +2018,8 @@ def _create_dock(plugin):
                 "Angelegte Ergebnis-Layer",
                 result_rows(dock.last_reports,
                             {d.layer_id: d.category for d in flow.result.layers})))
+            if dock.last_saved:
+                page.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
             hint = QLabel(done_hint_text(result_group_name(flow.result.selected_topic)))
             hint.setWordWrap(True)
             set_role(hint, "hint")
@@ -1812,7 +2033,7 @@ def _create_dock(plugin):
             "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
         page.layout.addWidget(summary_card(
             "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
-        page.layout.addWidget(summary_card("Ausgabe", output_rows(flow.result.output)))
+        page.layout.addWidget(summary_card("Ausgabe", output_rows(flow.result.output, dock.output_paths)))
 
     def validate_summary(page):
         """'Verarbeitung starten': build the result layers and add them to QGIS."""
@@ -1823,9 +2044,19 @@ def _create_dock(plugin):
                 "Für das Kartenthema ist kein Layer ausgewählt. Bitte in Schritt 7 "
                 "mindestens eine Kategorie ankreuzen."
             )
+        output = flow.result.output
+        problem = output_choice_problem(
+            geopackage=output.save_cleaned_geopackage, pdf=output.create_pdf,
+            paths=dock.output_paths, data_source=output.data_source,
+            confirmed=dock.output_confirmed)
+        if problem:
+            return reject(problem + " (Schritt 8)")
         try:
-            # Current decisions of step 5 (and step 6) on the data (S5).
+            # Current decisions of step 5 (and step 6) on the data (S5),
+            # then the data source into empty 'source' fields (S8).
             flow.apply_attribute_decisions()
+            flow.result.harmonized_records = apply_data_source(
+                flow.result.harmonized_records, output.data_source)
         except ValueError as error:
             return reject(error_text(error))
         try:
@@ -1839,18 +2070,47 @@ def _create_dock(plugin):
         finally:
             QApplication.restoreOverrideCursor()
         plugin.result_layers = layer_objects
+        saved, failures = save_outputs(flow, selected, layer_objects)
         # Switch the page to "Fertig" with the list of created layers.
         dock.last_reports = reports
+        dock.last_saved = saved
         page.build()
         make_texts_selectable(page.widget)
         QTimer.singleShot(0, dock.fit_wrapped_labels)
         dock.primary_button.setText(RERUN_ACTION)
         text = result_layers_text(reports)
-        if flow.result.output.save_cleaned_geopackage or flow.result.output.create_pdf:
-            text += "\n" + EXPORT_PENDING_MESSAGE
-        dock.show_message(text, kind="info")
+        if saved:
+            text += "\nGespeichert: " + ", ".join(path.name for _kind, path in saved) + "."
+        if failures:
+            dock.show_message("\n\n".join([text] + failures), kind="error")
+        else:
+            dock.show_message(text, kind="info")
         dock.mark_all_done()
         return False  # last step: stay here
+
+    def save_outputs(flow, selected, layer_objects):
+        """Write the GeoPackage/PDF chosen in step 8.  Returns the written files
+        and readable error texts; a failed file does not undo the QGIS layers."""
+        output = flow.result.output
+        saved, failures = [], []
+        jobs = []
+        if output.save_cleaned_geopackage:
+            layers = [layer_objects[d.layer_id] for d in selected if d.layer_id in layer_objects]
+            jobs.append(("geopackage", lambda path: write_result_geopackage(path, layers)))
+        if output.create_pdf:
+            jobs.append(("pdf", lambda path: export_pdf(path, flow.output_plan())))
+        for kind, write in jobs:
+            path = dock.output_paths[kind]
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                saved.append((kind, Path(write(path))))
+                dock.output_confirmed.add(kind)  # rerun may replace our own file
+            except (OSError, RuntimeError, ValueError) as error:
+                failures.append(SAVE_FAILED_MESSAGE.format(
+                    kind=OUTPUT_KIND_LABELS[kind], reason=error_text(error)))
+            finally:
+                QApplication.restoreOverrideCursor()
+        return saved, failures
 
     crs_page = dock.add_page(build_crs, validate_crs)
     dock.add_page(build_area, validate_area, on_show=update_area_status)
