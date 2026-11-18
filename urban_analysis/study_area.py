@@ -33,6 +33,56 @@ def area_summary_text(polygon_count, area_m2, crs_authid):
     )
 
 
+# E13/E17: OSM/ALKIS are downloaded for the rectangle around area + buffer.
+MAX_DOWNLOAD_KM2 = 25.0
+MAX_DOWNLOAD_TEXT = "25"
+
+
+def download_box_km2(xmin, ymin, xmax, ymax, buffer_meters):
+    """Size of the download rectangle (bounding box grown by the buffer) in km²."""
+    width = (xmax - xmin) + 2 * buffer_meters
+    height = (ymax - ymin) + 2 * buffer_meters
+    return max(width, 0) * max(height, 0) / 1_000_000
+
+
+def format_km2(km2):
+    """'6,1' – one decimal with a German comma."""
+    return f"{km2:,.1f}".replace(",", " ").replace(".", ",")
+
+
+def download_size_text(km2):
+    """Line below the area, e.g. 'Gebiet mit Puffer: 6,1 km² von höchstens 25 km²'."""
+    return (
+        f"Gebiet mit Puffer: {format_km2(km2)} km² von höchstens "
+        f"{MAX_DOWNLOAD_TEXT} km² (Rechteck für den Download)"
+    )
+
+
+def is_oversized(km2):
+    return km2 > MAX_DOWNLOAD_KM2
+
+
+def oversize_warning_text(km2):
+    """Yellow hint in step 2; continuing stays possible (E17)."""
+    return (
+        f"Das Gebiet ist mit Puffer {format_km2(km2)} km² groß, also größer als "
+        f"{MAX_DOWNLOAD_TEXT} km². OSM- und ALKIS-Daten "
+        "können dafür nicht heruntergeladen werden, und eigene Dateien werden "
+        "möglicherweise sehr groß und langsam. Du kannst trotzdem weitermachen; "
+        "verkleinere sonst das Gebiet oder den Puffer."
+    )
+
+
+def oversize_question_text(km2):
+    """Question on 'Weiter' when the area is too large for downloads."""
+    return (
+        f"Das Gebiet ist mit Puffer {format_km2(km2)} km² groß (höchstens "
+        f"{MAX_DOWNLOAD_TEXT} km² für Downloads).\n\n"
+        "Die Daten werden dann möglicherweise sehr groß; OSM und ALKIS können "
+        "nicht heruntergeladen werden. Trotzdem fortfahren?"
+    )
+
+
 def study_area_from_layer(layer, target_crs, *, selected_only):
     """Merge the polygons of ``layer`` into one geometry in ``target_crs``.
 
