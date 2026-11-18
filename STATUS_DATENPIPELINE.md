@@ -69,14 +69,64 @@ unabhängig, wird aber erst nach G9 besprochen.
   „Datenquelle“ statt des vorgeschlagenen „Geschosszahl“. Möglicherweise
   ändert das Mausrad beim Scrollen über ein Auswahlfeld den Wert.
 
+## M9 – ALKIS-Dienste der 16 Länder (Recherche 18.11.2026)
+
+Ergebnis steht maschinenlesbar in `urban_analysis/sources_catalog.json`
+(nur Adressen, Lizenzen, Regeln – keine Daten). Jede WFS-Adresse wurde per
+GetCapabilities geprüft; `tests/test_sources_catalog.py` hält den Katalog
+vollständig.
+
+**Alle 16 Länder bieten ALKIS offen an** (ohne Eigentümer), aber nicht
+überall gleich:
+
+| Land | Weg | Format | Gebäude | Flurstücke | Nutzung | CRS | Lizenz |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| NI, NW, SH, HE, HH | WFS | ALKIS vereinfacht | ✓ | ✓ | ✓ | 25832 | CC BY 4.0 / dl-de/zero / dl-de/by |
+| SN, MV, BB | WFS | ALKIS vereinfacht | ✓ | ✓ | ✓ | 25833 | dl-de/by / CC BY 4.0 |
+| RP, ST, TH | WFS | ALKIS vereinfacht (weniger Layer, TH ältere Version 1.0) | ✓ | ✓ | ✓ | 25832 | dl-de/by / CC BY 4.0 |
+| BW | WFS | eigenes Schema (31 Layer) | ✓ | ✓ | ✓ | 25832 | dl-de/by |
+| HB | WFS (Server LGLN) | AAA-Vollschema (139 Layer) | ✓ | ✓ | ✓ | 25832 | CC BY 4.0 |
+| BE | WFS je Thema | eigenes Schema | ✓ | ✓ | – (nicht gefunden) | 25833 | dl-de/zero |
+| SL | WFS | nur INSPIRE | ✓ | ✓ | – | 4258 (geografisch) | dl-de/by |
+| BY | Download (Shape-ZIP) | Hausumringe, Tatsächliche Nutzung | nur Umrisse | – (nicht frei) | ✓ je Landkreis | 25832 | CC BY 4.0 |
+
+**Was daraus folgt:**
+
+- **11 Länder liefern das bundesweit gleiche Format „ALKIS vereinfacht“**
+  (Layer `GebaeudeBauwerk`, `Flurstueck`, `Nutzung`). Ein Profil in M12
+  deckt sie alle ab. Danach kommen BW, HB, BE, SL und BY mit eigenen
+  Profilen oder als Lücke (dann OSM).
+- **Geschosszahl:** Im Format gibt es das Feld `anzahlgs`, ebenso
+  `lagebeztxt` (Adresse als Text). Beide sind optional und nicht in jedem
+  Land gefüllt → in M12 mit echten Gebieten prüfen.
+- **CRS:** Die Dienste liefern in 25832 oder 25833, Saarland geografisch
+  (4258). Die Umprojektion ins Projekt-CRS macht weiterhin QGIS (W11).
+- **Ländergrenzen** (E11): VG2500 des BKG, GeoPackage ca. 3 MB, nur in
+  EPSG:25832, dl-de/by-2-0. Für Projekte in 25833 muss der Bundesland-
+  Vorschlag das Gebiet erst umrechnen → in M10b klären (siehe unten).
+- **Overpass** (OSM): höchstens ca. 10 000 Abfragen und unter 1 GB pro Tag,
+  Standard-Zeitlimit 180 s, bei Überlast HTTP 429. Ein Gebiet bis 25 km² ist
+  eine Abfrage – unkritisch.
+
+**Offen für M10a/M10b:**
+
+- **Längen-/Breitengrade für die OSM-Abfrage:** Overpass braucht das Rechteck
+  in EPSG:4326. Die Regel „keine Umprojektion in der Pipeline“ verbietet das
+  bisher. Vorschlag: nur die vier Ecken des Rechtecks mit einer kleinen,
+  getesteten UTM-Formel umrechnen (keine Geometrien) – oder QGIS liefert das
+  Rechteck in 4326 mit. Mit Person Windows abstimmen.
+- Lizenz Sachsen-Anhalt am Landesportal bestätigen (Dienst verweist auf die
+  Kostenverordnung; Seite war am 18.11. nicht erreichbar).
+- Berlin: WFS für die Tatsächliche Nutzung nicht gefunden.
+- Bayern: Download-Adresse der Hausumringe je Regierungsbezirk.
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand: 221 grün, 1 rot
-(`test_result_layers.py`, siehe oben Punkt 1).
+System-`python3` hat ein kaputtes pytest). Stand 18.11.2026 abends: 238 grün.
 
 ## Als Nächstes (Person Mac)
 
-M9 Recherche ALKIS-Dienste der Länder · M10 Quellen bestimmen (OSM-Teil und
-Größenprüfung können sofort starten) · M18 Recherche GTFS/Zensus · M6
-fehlende Werte.
+Reihenfolge laut `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6: 3 M10a OSM-Abfrage
+und Größenprüfung · 6 M18 Recherche GTFS/Zensus · 7 M6 fehlende Werte ·
+danach 10 M10b und 11 M12 (auf Basis dieser Recherche).

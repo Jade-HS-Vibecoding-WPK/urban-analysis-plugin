@@ -1,0 +1,283 @@
+{
+  "_hinweis": "Katalog der Datenquellen für den automatischen Download (S9, M9). Enthält nur Adressen, Lizenzen und Regeln, keine Daten. Alle WFS-Adressen wurden am 'geprueft'-Datum per GetCapabilities abgefragt. Eigentümerangaben sind nie Teil der offenen Dienste und werden nie abgefragt. {jahr} im Quellenvermerk wird beim Download durch das aktuelle Jahr ersetzt.",
+  "stand": "2026-11-18",
+
+  "osm": {
+    "dienst": "overpass",
+    "url": "https://overpass-api.de/api/interpreter",
+    "crs_lieferung": "EPSG:4326",
+    "lizenz": "ODbL-1.0",
+    "quellenvermerk": "© OpenStreetMap-Mitwirkende, ODbL",
+    "regeln": {
+      "_hinweis": "Nutzungsregeln des öffentlichen Overpass-Servers (overpass-api.de, Stand 2026-11).",
+      "max_abfragen_pro_tag": 10000,
+      "max_datenmenge_pro_tag_gb": 1,
+      "standard_zeitlimit_s": 180,
+      "standard_speicher_mib": 512,
+      "bei_ueberlastung": "HTTP 429 (zu viele Anfragen) oder 504 (zu groß) – verständliche Meldung, kein automatisches Wiederholen in Schleife"
+    }
+  },
+
+  "laendergrenzen": {
+    "_hinweis": "Vereinfachte Ländergrenzen für den Bundesland-Vorschlag (E11). Datei wird einmal ins Plugin gelegt, nicht bei jedem Lauf geladen. Lizenz in M10b am Datensatz selbst bestätigen.",
+    "produkt": "VG2500 (Verwaltungsgebiete 1:2 500 000)",
+    "anbieter": "Bundesamt für Kartographie und Geodäsie (BKG)",
+    "url": "https://daten.gdz.bkg.bund.de/produkte/vg/vg2500/aktuell/vg2500_01-01-2026.utm32s.gpkg.zip",
+    "format": "GeoPackage",
+    "groesse_mb": 3.2,
+    "crs": "EPSG:25832",
+    "lizenz": "dl-de/by-2-0",
+    "quellenvermerk": "© GeoBasis-DE / BKG ({jahr})"
+  },
+
+  "alkis_formate": {
+    "ave": {
+      "name": "ALKIS vereinfacht (AdV-Produkt)",
+      "_hinweis": "Bundesweit einheitliches Schema; ein Profil in mapping_rules.json reicht für alle Länder mit diesem Format (M12). Felder sind optional und nicht in jedem Land gefüllt (z. B. anzahlgs, lagebeztxt).",
+      "layer": {
+        "gebaeude": "ave:GebaeudeBauwerk",
+        "flurstuecke": "ave:Flurstueck",
+        "nutzung": "ave:Nutzung"
+      },
+      "felder": {
+        "objekt_id": "oid",
+        "gebaeudefunktion": "gebnutzbez",
+        "funktion": "funktion",
+        "geschosse": "anzahlgs",
+        "adresse_text": "lagebeztxt",
+        "nutzungsart": "nutzart",
+        "nutzung_bezeichnung": "bez"
+      }
+    },
+    "bw_nora": {
+      "name": "ALKIS-WFS Baden-Württemberg (eigenes Schema)",
+      "layer": {
+        "gebaeude": "nora:v_al_gebaeude",
+        "flurstuecke": "nora:v_al_flurstueck",
+        "nutzung": "nora:v_al_tatsaechliche_nutzung"
+      }
+    },
+    "aaa_sf": {
+      "name": "ALKIS AAA-Modell, Simple Features (Vollschema, 139 Layer)",
+      "_hinweis": "Je Nutzungsart ein eigener Layer (AX_Wohnbauflaeche, AX_Strassenverkehr …); für das Profil aufwändiger als 'ave'.",
+      "layer": {
+        "gebaeude": "adv:AX_Gebaeude",
+        "flurstuecke": "adv:AX_Flurstueck",
+        "nutzung": "adv:AX_* (je Nutzungsart ein Layer)"
+      }
+    },
+    "berlin": {
+      "name": "ALKIS Berlin (je Thema ein eigener Dienst)",
+      "layer": {
+        "gebaeude": "alkis_gebaeude:gebaeude",
+        "flurstuecke": "alkis_flurstuecke:flurstuecke"
+      }
+    },
+    "inspire": {
+      "name": "INSPIRE Flurstücke (cp) und Gebäude (bu-core2d)",
+      "_hinweis": "Nur Flurstücke und Gebäude, keine Nutzung; Lieferung in geografischen Koordinaten.",
+      "layer": {
+        "gebaeude": "bu-core2d:Building",
+        "flurstuecke": "cp:CadastralParcel"
+      }
+    },
+    "by_download": {
+      "name": "Bayern Open Data (Downloads als Shape-ZIP)",
+      "_hinweis": "Kein offener WFS für Gebäude/Flurstücke. Tatsächliche Nutzung je Landkreis, Gebäude nur als Hausumringe je Regierungsbezirk (ca. 100 MB). Flurstücke sind in Bayern nicht frei.",
+      "layer": {
+        "gebaeude": "Hausumringe",
+        "nutzung": "Tatsächliche Nutzung"
+      }
+    }
+  },
+
+  "alkis": {
+    "BW": {
+      "land": "Baden-Württemberg",
+      "dienst": "wfs",
+      "url": "https://owsproxy.lgl-bw.de/owsproxy/wfs/WFS_LGL-BW_ALKIS",
+      "format": "bw_nora",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© LGL, www.lgl-bw.de, dl-de/by-2-0",
+      "geprueft": "2026-11-18"
+    },
+    "BY": {
+      "land": "Bayern",
+      "dienst": "download",
+      "url": "https://download1.bayernwolke.de/a/tn/lkr/tn_{kreisschluessel}.zip",
+      "url_uebersicht": "https://geodaten.bayern.de/opengeodata/OpenDataDetail.html?pn=tatsaechlichenutzung",
+      "url_gebaeude_uebersicht": "https://geodaten.bayern.de/opengeodata/OpenDataDetail.html?pn=hausumringe",
+      "format": "by_download",
+      "crs": "EPSG:25832",
+      "inhalt": ["nutzung", "gebaeude_umringe"],
+      "lizenz": "CC-BY-4.0",
+      "quellenvermerk": "Bayerische Vermessungsverwaltung – www.geodaten.bayern.de, CC BY 4.0",
+      "geprueft": "2026-11-18",
+      "einschraenkung": "Kein WFS, keine Flurstücke; Nutzung je Landkreis (Shape-ZIP, monatlich), Hausumringe je Regierungsbezirk (ca. 100 MB, vierteljährlich). Download-Adresse der Hausumringe in M10b klären."
+    },
+    "BE": {
+      "land": "Berlin",
+      "dienst": "wfs",
+      "url": "https://gdi.berlin.de/services/wfs/alkis_gebaeude",
+      "url_flurstuecke": "https://gdi.berlin.de/services/wfs/alkis_flurstuecke",
+      "format": "berlin",
+      "crs": "EPSG:25833",
+      "inhalt": ["gebaeude", "flurstuecke"],
+      "lizenz": "dl-de/zero-2-0",
+      "quellenvermerk": "© Geoportal Berlin / ALKIS Berlin",
+      "geprueft": "2026-11-18",
+      "einschraenkung": "Tatsächliche Nutzung als WFS nicht gefunden – kommt vorerst aus OSM."
+    },
+    "BB": {
+      "land": "Brandenburg",
+      "dienst": "wfs",
+      "url": "https://isk.geobasis-bb.de/ows/alkis_vereinf_wfs",
+      "format": "ave",
+      "crs": "EPSG:25833",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© GeoBasis-DE/LGB, dl-de/by-2-0",
+      "geprueft": "2026-11-18",
+      "hinweis": "Alternativ OGC API Features: https://ogc-api.geobasis-bb.de/alkis-vereinfacht/v1"
+    },
+    "HB": {
+      "land": "Bremen",
+      "dienst": "wfs",
+      "url": "https://opendata.lgln.niedersachsen.de/doorman/noauth/alkishb_wfs_sf",
+      "format": "aaa_sf",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "CC-BY-4.0",
+      "quellenvermerk": "© GeoBasis-DE / Landesamt GeoInformation Bremen ({jahr}), CC BY 4.0",
+      "geprueft": "2026-11-18",
+      "einschraenkung": "Kein 'ALKIS vereinfacht' gefunden; Vollschema mit 139 Layern (über den Server des LGLN)."
+    },
+    "HH": {
+      "land": "Hamburg",
+      "dienst": "wfs",
+      "url": "https://geodienste.hamburg.de/WFS_HH_ALKIS_vereinfacht",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© FHH, LGV, dl-de/by-2-0",
+      "geprueft": "2026-11-18"
+    },
+    "HE": {
+      "land": "Hessen",
+      "dienst": "wfs",
+      "url": "https://www.gds.hessen.de/wfs2/aaa-suite/cgi-bin/alkis/vereinf/wfs",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/zero-2-0",
+      "quellenvermerk": "© HVBG",
+      "geprueft": "2026-11-18"
+    },
+    "MV": {
+      "land": "Mecklenburg-Vorpommern",
+      "dienst": "wfs",
+      "url": "https://www.geodaten-mv.de/dienste/alkis_wfs_einfach",
+      "format": "ave",
+      "crs": "EPSG:25833",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "CC-BY-4.0",
+      "quellenvermerk": "© GeoBasis-DE/M-V {jahr}, CC BY 4.0",
+      "geprueft": "2026-11-18"
+    },
+    "NI": {
+      "land": "Niedersachsen",
+      "dienst": "wfs",
+      "url": "https://opendata.lgln.niedersachsen.de/doorman/noauth/alkis_wfs_einfach",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "CC-BY-4.0",
+      "quellenvermerk": "© GeoBasis-DE/LGLN {jahr}, CC BY 4.0",
+      "geprueft": "2026-11-18"
+    },
+    "NW": {
+      "land": "Nordrhein-Westfalen",
+      "dienst": "wfs",
+      "url": "https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/zero-2-0",
+      "quellenvermerk": "© GeoBasis NRW",
+      "geprueft": "2026-11-18"
+    },
+    "RP": {
+      "land": "Rheinland-Pfalz",
+      "dienst": "wfs",
+      "url": "https://geo5.service24.rlp.de/wfs/alkis_rp.fcgi",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© GeoBasis-DE / LVermGeoRP {jahr}, dl-de/by-2-0, www.lvermgeo.rlp.de",
+      "geprueft": "2026-11-18"
+    },
+    "SL": {
+      "land": "Saarland",
+      "dienst": "wfs",
+      "url": "https://geoportal.saarland.de/gdi-sl/inspirewfs_2D_Gebaeude_ALKIS",
+      "url_flurstuecke": "https://geoportal.saarland.de/gdi-sl/inspirewfs_Flurstuecke_Grundstuecke_ALKIS",
+      "format": "inspire",
+      "crs": "EPSG:4258",
+      "inhalt": ["gebaeude", "flurstuecke"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© GeoBasis DE/LVGL-SL {jahr}, dl-de/by-2-0",
+      "geprueft": "2026-11-18",
+      "einschraenkung": "Nur INSPIRE (Gebäude, Flurstücke), keine Nutzung; Lieferung in geografischen Koordinaten (EPSG:4258), muss in QGIS umprojiziert werden."
+    },
+    "SN": {
+      "land": "Sachsen",
+      "dienst": "wfs",
+      "url": "https://geodienste.sachsen.de/aaa/public_alkis/vereinf/wfs",
+      "format": "ave",
+      "crs": "EPSG:25833",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© GeoSN, dl-de/by-2-0",
+      "geprueft": "2026-11-18"
+    },
+    "ST": {
+      "land": "Sachsen-Anhalt",
+      "dienst": "wfs",
+      "url": "https://www.geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_ALKIS_WFS_OpenData/guest",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "dl-de/by-2-0",
+      "quellenvermerk": "© GeoBasis-DE / LVermGeo ST",
+      "geprueft": "2026-11-18",
+      "einschraenkung": "Der Dienst verweist auf die Kostenverordnung; laut Metadaten kostenfrei beim Online-Abruf. Lizenz in M10b auf der Seite des LVermGeo bestätigen (war am 18.11. nicht erreichbar)."
+    },
+    "SH": {
+      "land": "Schleswig-Holstein",
+      "dienst": "wfs",
+      "url": "https://service.gdi-sh.de/WFS_SH_ALKIS_vereinf_OpenGBD",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "CC-BY-4.0",
+      "quellenvermerk": "© GeoBasis-DE/LVermGeo SH, CC BY 4.0",
+      "geprueft": "2026-11-18"
+    },
+    "TH": {
+      "land": "Thüringen",
+      "dienst": "wfs",
+      "url": "https://www.geoproxy.geoportal-th.de/geoproxy/services/adv_alkis_wfs",
+      "format": "ave",
+      "crs": "EPSG:25832",
+      "inhalt": ["gebaeude", "flurstuecke", "nutzung"],
+      "lizenz": "CC-BY-4.0",
+      "quellenvermerk": "© GDI-Th",
+      "geprueft": "2026-11-18",
+      "hinweis": "Ältere Schemaversion 1.0 von 'ALKIS vereinfacht'."
+    }
+  }
+}
