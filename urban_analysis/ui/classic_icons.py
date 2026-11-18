@@ -14,18 +14,10 @@ Shapes:
     ("text", text, colour)                   centred character
 """
 
-import math
-
 from .layer_icons import ICON_KEYS
 
 INK = "#3d4650"
-
-# Smooth S-shaped path from the lower left to the upper right (many points,
-# drawn with round joins, so it looks curved instead of bent).
-_WINDING_PATH = tuple(
-    (round(6.2 + 4.0 * t + 2.4 * math.sin(2 * math.pi * t), 2), round(14.2 - 12.0 * t, 2))
-    for t in (i / 20 for i in range(21))
-)
+_SIGN_BLUE = "#1f5aa6"   # blue of German road signs
 
 CLASSIC_ICONS = {
     "gebaeude": [
@@ -58,10 +50,33 @@ CLASSIC_ICONS = {
         ("rect", 10.6, 7.6, 2.4, 0.9, "#ffffff"),
     ],
     "wege": [
-        # a smooth winding sand path through grass (darker edge, light path)
-        ("badge", "#e6f1e4"),
-        ("line", _WINDING_PATH, "#b3925f", 3.6),
-        ("line", _WINDING_PATH, "#e3cfa6", 2.6),
+        # own simplified drawing of the German road sign 240 (StVO,
+        # "gemeinsamer Geh- und Radweg"): blue round sign, walker with child
+        # above, bicycle below
+        ("badge", "#eef3fa"),
+        ("ellipse", 8, 8, 7.3, 7.3, "#ffffff"),
+        ("ellipse", 8, 8, 6.7, 6.7, _SIGN_BLUE),
+        ("line", ((2.2, 8.2), (13.8, 8.2)), "#ffffff", 0.55),
+        # adult and child
+        ("ellipse", 6.7, 2.9, 0.8, 0.8, "#ffffff"),
+        ("line", ((6.6, 3.9), (6.4, 6.0)), "#ffffff", 1.0),
+        ("line", ((6.4, 6.0), (5.7, 7.5)), "#ffffff", 0.75),
+        ("line", ((6.4, 6.0), (7.1, 7.5)), "#ffffff", 0.75),
+        ("line", ((6.6, 4.5), (8.4, 5.4)), "#ffffff", 0.6),
+        ("ellipse", 9.2, 4.5, 0.62, 0.62, "#ffffff"),
+        ("line", ((9.1, 5.2), (9.0, 6.5)), "#ffffff", 0.8),
+        ("line", ((9.0, 6.5), (8.5, 7.5)), "#ffffff", 0.6),
+        ("line", ((9.0, 6.5), (9.5, 7.5)), "#ffffff", 0.6),
+        # bicycle: two wheels (rings) and the frame
+        ("ellipse", 5.4, 11.6, 1.75, 1.75, "#ffffff"),
+        ("ellipse", 5.4, 11.6, 1.15, 1.15, _SIGN_BLUE),
+        ("ellipse", 10.6, 11.6, 1.75, 1.75, "#ffffff"),
+        ("ellipse", 10.6, 11.6, 1.15, 1.15, _SIGN_BLUE),
+        ("line", ((5.4, 11.6), (7.7, 11.6), (9.9, 9.8), (7.1, 9.8), (5.4, 11.6)), "#ffffff", 0.55),
+        ("line", ((7.7, 11.6), (7.0, 9.5)), "#ffffff", 0.55),
+        ("line", ((9.6, 9.2), (10.6, 11.6)), "#ffffff", 0.55),
+        ("line", ((6.5, 9.4), (7.6, 9.4)), "#ffffff", 0.6),
+        ("line", ((9.2, 9.1), (10.2, 9.1)), "#ffffff", 0.6),
     ],
     "plaetze": [
         ("badge", "#f2ede3"),
