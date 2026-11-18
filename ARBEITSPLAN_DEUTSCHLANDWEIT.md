@@ -54,7 +54,7 @@ gilt.
 | E10 | **Eigene Dateien bleiben möglich:** Neben OSM und ALKIS kann man zusätzlich eigene GeoPackages laden (z. B. Kartierungen). ALKIS selbst kommt trotzdem nur automatisch (E6). |
 | E11 | **Bundesland wird automatisch erkannt und ist änderbar:** Das Plugin bringt vereinfachte Ländergrenzen mit (offene Daten des Bundes, Lizenz in M9 prüfen), schlägt das Land vor, die Nutzerin kann es ändern. |
 | E12 | **Abgleich ALKIS ↔ OSM:** Mittelpunkt des einen liegt im anderen **und** die Flächen weichen höchstens **20 %** ab → wahrscheinlich gleich. Liegt der Mittelpunkt drin, aber die Abweichung ist größer → unsicher, wird zur Entscheidung angezeigt. Der Wert steht in einer Einstellungsdatei und ist änderbar. |
-| E13 | **Gebietsgröße höchstens 25 km²** (Gebiet inklusive Puffer, gemessen am umgebenden Rechteck, das heruntergeladen wird). Darüber erscheint eine klare Meldung, und es wird nichts geladen. |
+| E13 | **Gebietsgröße: Warnung ab 25 km², Grenze 50 km²** (Gebiet inklusive Puffer, gemessen am umgebenden Rechteck, das heruntergeladen wird). Über 25 km² eine Warnung („kann lange dauern, Dateien werden groß“) mit „Trotzdem fortfahren?“; über 50 km² eine klare Meldung, und OSM/ALKIS werden nicht geladen (eigene Dateien bleiben möglich). *(geändert am 18.11.2026 auf Vorschlag von Person Windows nach dem Live-Test, PR #33; vorher harte Grenze 25 km²)* |
 | E14 | **Speicherort:** Vor jedem Download fragt das Plugin, in welchen Ordner die Daten sollen. Dateiname enthält Quelle und Datum. |
 | E15 | **Ohne Internet / Dienst antwortet nicht:** nur eine verständliche Meldung, der Download wird abgebrochen. Keine automatische Wiederverwendung alter Downloads. Ein früherer Download kann aber von Hand als „Eigene Datei“ geladen werden. |
 
@@ -63,7 +63,7 @@ Ergänzungen von Person Windows in G5:
 | Nr. | Entscheidung |
 | --- | --- |
 | E16 | **Eigener ALKIS-Export als Datei (ergänzt E6, E10):** Unter „Eigene Datei“ darf auch ein eigener ALKIS-Export geladen werden (z. B. `lkr_03403_Stadt_Oldenburg_kon.gpkg`). Das Plugin erkennt ihn am Profil und behandelt ihn als Quelle `"ALKIS"`. So bleiben Phase-1-Ablauf und Tests mit der lokalen Datei erhalten. |
-| E17 | **Gebietsgröße schon in Schritt 2 (ergänzt E13):** Schritt 2 zeigt beim Wählen oder Zeichnen die Größe von Gebiet + Puffer (umgebendes Rechteck), z. B. „6,1 km² von höchstens 25 km²“. Über der Grenze erscheint dort schon ein Hinweis; die verbindliche Prüfung bleibt in S9. |
+| E17 | **Gebietsgröße schon in Schritt 2 (ergänzt E13):** Schritt 2 zeigt beim Wählen oder Zeichnen die Größe von Gebiet + Puffer (umgebendes Rechteck), z. B. „6,1 km² von höchstens 50 km²“. Über der Grenze erscheint dort schon ein Hinweis; die verbindliche Prüfung bleibt in S9. |
 | E18 | **Zielordner jedes Mal fragen, mit Vorschlag (ergänzt E14):** Vor jedem Download fragt das Plugin nach dem Ordner (E14 bleibt). Im Auswahlfenster ist der zuletzt gewählte Ordner schon vorausgewählt; beim allerersten Download der Ordner des QGIS-Projekts. Die Nutzerin bestätigt oder wählt einen anderen. Dateiname weiter mit Quelle und Datum. *(geändert von Person Mac nach dem G5-Review)* |
 | E19 | **Vorgeschlagener Vorrang (ergänzt E7):** Schritt 6 schlägt je Kategorie eine Quelle vor – Gebäude und Nutzungsflächen: ALKIS; Straßen und Grünflächen: OSM. Die Nutzerin bestätigt oder ändert; erst dann gilt die Auswahl. Der Vorschlag steht in einer Einstellungsdatei und ist änderbar. |
 
@@ -144,8 +144,9 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   „© OpenStreetMap-Mitwirkende, ODbL“).
 - Für Bundesländer ohne frei nutzbaren ALKIS-Dienst: kein Auftrag, sondern ein
   Hinweis.
-- Ist das Rechteck aus Gebiet + Puffer größer als 25 km² (E13): keine
-  Aufträge, sondern eine Fehlermeldung mit der tatsächlichen Größe.
+- Ist das Rechteck aus Gebiet + Puffer größer als 50 km² (E13): keine
+  Aufträge, sondern eine Fehlermeldung mit der tatsächlichen Größe; über
+  25 km² ein Warnhinweis.
 
 ### S10 – Herunterladen und umprojizieren *(Windows)*
 
@@ -251,7 +252,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | 6 | M18 Recherche GTFS und Zensus | Mac | – |
 | 7 | M6 Fehlende Werte melden | Mac | – |
 | | **Etappe B – Download und mehrere Quellen** | | |
-| 8 | W10 Schritt 3 „Daten laden“ umbauen | Windows | 3 |
+| 8 | W10 Schritt 3 „Daten laden“ umbauen (Teil 1 ✓ #33) | Windows | Teil 2: 3, 10 |
 | 9 | W11 Herunterladen in QGIS | Windows | 3 |
 | 10 | M10b ALKIS-Aufträge und Bundesland | Mac | 2 |
 | 11 | M12 ALKIS-Profile für die Dienst-Daten | Mac | 2 |
@@ -313,8 +314,10 @@ Wartezeit starten kann.
 - **Absicht:** Erster Baustein für den automatischen Download, damit Person
   Windows mit 8 und 9 beginnen kann.
 - **Ziel:** `sources.py` mit Tests: OSM-Abfrage (Overpass) für das Rechteck
-  um Gebiet + Puffer, umgerechnet in Längen-/Breitengrade; Fehlermeldung über
-  25 km² mit der tatsächlichen Größe (E13); Quellenvermerk
+  um Gebiet + Puffer, umgerechnet in Längen-/Breitengrade; Warnung über
+  25 km², Fehlermeldung über 50 km² mit der tatsächlichen Größe (E13); die
+  beiden Grenzwerte in `sources_catalog.json`, damit `study_area.py`
+  (Schritt 2) dieselben Zahlen liest; Quellenvermerk
   „© OpenStreetMap-Mitwirkende, ODbL“ im Auftrag (damit füllt die Ausgabe die
   Datenquelle vor).
 - **Wartet auf:** nichts.
@@ -357,16 +360,21 @@ Wartezeit starten kann.
 
 ### Etappe B – Download und mehrere Quellen
 
-#### 8. W10 – Schritt 3 „Daten laden“ umbauen *(Windows)*
+#### 8. W10 – Schritt 3 „Daten laden“ umbauen *(Windows)* – *Teil 1 erledigt, PR #33*
 
 - **Absicht:** Statt einer Datei wählt man Quellen.
 - **Ziel:** Kästchen „OSM“, „ALKIS“ und „Eigene Datei“ (E10, mit dem
   bisherigen Dateiauswahl-Feld); Bundesland wird vorgeschlagen und ist
   änderbar (E11); ALKIS ist ausgegraut mit Erklärung, wenn das Land keinen
-  Dienst hat; Meldung, wenn das Gebiet größer als 25 km² ist (E13); ein
-  eigener ALKIS-Export wird als ALKIS erkannt (E16). Außerdem in Schritt 2:
-  Anzeige der Gebietsgröße (E17).
-- **Wartet auf:** 3 (kann mit Platzhalter-Daten beginnen).
+  Dienst hat; Warnung über 25 km², Meldung über 50 km² (E13); ein eigener
+  ALKIS-Export wird als ALKIS erkannt (E16). Außerdem in Schritt 2: Anzeige
+  der Gebietsgröße (E17).
+- **Stand:** Teil 1 (mit Platzhaltern) ist in PR #33 gemergt: Gebietsgröße
+  in Schritt 2, Quellenwahl mit Länderliste in Schritt 3, klare Meldung,
+  dass der Download noch fehlt. **Teil 2:** Bundesland-Vorschlag und
+  Einschränkungen je Land aus `sources_catalog.json` (Bayern ohne Flurstücke,
+  Berlin und Saarland ohne Nutzung, Sachsen-Anhalt bis zur Lizenzklärung).
+- **Wartet auf:** Teil 2: 3 und 10.
 
 #### 9. W11 – Herunterladen in QGIS (S10) *(Windows)*
 
