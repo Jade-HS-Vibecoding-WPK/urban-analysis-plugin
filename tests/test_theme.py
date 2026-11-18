@@ -6,14 +6,21 @@ from pathlib import Path
 
 import pytest
 
+import random
+
 from urban_analysis.theme import (
     COLORS,
     LAMP_FILES,
     ROLES,
-    busy_chunk_stylesheet,
+    WIRE_PATTERN,
+    WIRE_ROWS,
     icon_path,
+    lit_columns,
     panel_stylesheet,
     set_role,
+    spawn_sparks,
+    step_sparks,
+    wire_cells,
 )
 
 
@@ -67,14 +74,33 @@ def test_three_own_pixel_lamps_for_the_step_progress():
     assert fills["off"] != fills["dim"] != fills["on"]
 
 
-def test_busy_bar_shine_stays_inside_the_loaded_part_and_uses_lamp_colours():
-    css = busy_chunk_stylesheet(0.5)
-    assert css.startswith("QProgressBar::chunk")
-    assert COLORS["lamp"] in css and COLORS["lamp_light"] in css
-    assert "stop:0.500" in css
-    for phase in (-1, 0, 1, 2):  # always valid gradient stops 0..1
-        stops = [float(s) for s in re.findall(r"stop:([0-9.]+)", busy_chunk_stylesheet(phase))]
-        assert all(0 <= s <= 1 for s in stops) and stops == sorted(stops)
+def test_wire_is_continuous_and_stays_in_its_rows():
+    cells = wire_cells(40)
+    columns = {x for x, _y in cells}
+    assert columns == set(range(40))
+    assert all(0 <= y < WIRE_ROWS for _x, y in cells)
+    # where the row changes, a connecting cell exists in the same column
+    for x in range(1, 40):
+        before = WIRE_PATTERN[(x - 1) % len(WIRE_PATTERN)]
+        assert (x, before) in cells
+
+
+def test_lit_part_follows_the_real_progress_only():
+    assert lit_columns(0, 100, 80) == 0
+    assert lit_columns(50, 100, 80) == 40
+    assert lit_columns(100, 100, 80) == 80
+    assert lit_columns(150, 100, 80) == 80
+    assert lit_columns(10, 0, 80) == 0
+
+
+def test_sparks_start_at_the_front_rise_and_fade_out():
+    sparks = spawn_sparks(120.0, 20.0, random.Random(1), count=5)
+    assert len(sparks) == 5
+    assert all(abs(s[0] - 120.0) <= 2 and s[3] < 0 for s in sparks)  # at the front, rising
+    later = sparks
+    for _ in range(20):
+        later = step_sparks(later)
+    assert later == []  # every spark ends
 
 
 def test_toolbar_icon_is_an_own_16x16_pixel_svg():

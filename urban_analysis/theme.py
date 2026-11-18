@@ -307,25 +307,71 @@ QToolTip {{
 """
 
 
-def busy_chunk_stylesheet(phase):
-    """Stylesheet for the filled part of the busy bar with a moving shine.
+# --- Busy bar: own pixel "wire" that lights up with the real progress ------
 
-    ``phase`` runs from 0 to 1; the bright band moves across the part that is
-    already loaded, so only finished progress "shimmers".
+WIRE_COLORS = {
+    "off": "#4d0d0d",       # wire not loaded yet (dark red)
+    "off_edge": "#2e0707",
+    "on": "#e8261a",        # loaded part (bright red)
+    "on_light": "#ff8a6a",  # highlights on the loaded part
+    "spark": "#ff4a2a",     # particles at the progress front
+}
+WIRE_CELL_PX = 3            # one wire "pixel" on screen
+WIRE_ROWS = 5               # height of the wire pattern in cells
+WIRE_PATTERN = (2, 2, 2, 1, 1, 1, 2, 3, 3, 3, 2, 2)  # own zig-zag motif (row per column)
+SPARK_SPAWN = 2             # new particles per tick at the front
+SPARK_LIFE = (8, 16)        # ticks a particle lives
+
+
+def wire_cells(columns):
+    """Cells (x, y) of the wire pattern for ``columns`` columns.
+
+    Where the row changes, a connecting cell keeps the wire continuous.
     """
-    c = COLORS
-    centre = min(max(phase, 0.0), 1.0)
-    left = max(centre - 0.15, 0.0)
-    right = min(centre + 0.15, 1.0)
-    return (
-        "QProgressBar::chunk {"
-        f"border-radius: {RADIUS_PX - 1}px;"
-        "background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 {c['lamp_dark']}, stop:{left:.3f} {c['lamp']}, "
-        f"stop:{centre:.3f} {c['lamp_light']}, stop:{right:.3f} {c['lamp']}, "
-        f"stop:1 {c['lamp_dark']});"
-        "}"
-    )
+    cells = []
+    previous = None
+    for x in range(max(columns, 0)):
+        y = WIRE_PATTERN[x % len(WIRE_PATTERN)]
+        if previous is not None and previous != y:
+            cells.append((x, previous))
+        cells.append((x, y))
+        previous = y
+    return cells
+
+
+def lit_columns(value, maximum, columns):
+    """Number of wire columns that are lit for progress ``value``/``maximum``."""
+    if maximum <= 0 or columns <= 0:
+        return 0
+    fraction = min(max(value / maximum, 0.0), 1.0)
+    return int(round(fraction * columns))
+
+
+def spawn_sparks(front_x, front_y, rng, count=SPARK_SPAWN):
+    """New particles at the progress front: [x, y, vx, vy, life, max_life]."""
+    sparks = []
+    for _ in range(count):
+        life = rng.randint(*SPARK_LIFE)
+        sparks.append([
+            front_x + rng.uniform(-2.0, 2.0),
+            front_y + rng.uniform(-1.0, 1.0),
+            rng.uniform(-0.6, 0.6),
+            rng.uniform(-1.8, -0.7),  # rise upwards
+            life,
+            life,
+        ])
+    return sparks
+
+
+def step_sparks(sparks):
+    """Move particles one tick; drop the ones whose life is over."""
+    alive = []
+    for x, y, vx, vy, life, max_life in sparks:
+        life -= 1
+        if life <= 0:
+            continue
+        alive.append([x + vx, y + vy, vx * 0.95, vy * 0.92, life, max_life])
+    return alive
 
 
 def set_role(widget, role):

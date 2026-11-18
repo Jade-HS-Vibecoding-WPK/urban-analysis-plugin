@@ -8,14 +8,17 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
+import random
 from pathlib import Path
 
 from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
-from .data_pipeline import GeoPackageImporter, GeoPackageImportError
+from .data_pipeline import TARGET_FIELDS, GeoPackageImporter, GeoPackageImportError
 from .outputs import (
     add_result_layers,
     build_result_layers,
+    format_count,
     result_group_name,
+    result_layer_name,
     result_layers_text,
 )
 from .study_area import (
@@ -29,10 +32,17 @@ from .study_area import (
 from .theme import (
     LAMP_FILES,
     LAMP_SIZE_PX,
-    busy_chunk_stylesheet,
+    WIRE_CELL_PX,
+    WIRE_COLORS,
+    WIRE_PATTERN,
+    WIRE_ROWS,
     icon_path,
+    lit_columns,
     panel_stylesheet,
     set_role,
+    spawn_sparks,
+    step_sparks,
+    wire_cells,
 )
 from .ui_contract import UI_LABELS
 from .user_guidance import (
@@ -90,8 +100,8 @@ LAST_FOLDER_SETTING = "urban_analysis/last_geopackage_folder"
 ARROW_CLOSED = "▸"
 ARROW_OPEN = "▾"
 PANEL_ANIMATION_MS = 180
-BUSY_TICK_MS = 120
-BUSY_SHINE_STEP = 0.06
+BUSY_TICK_MS = 60
+WIRE_SPARK_SPACE_PX = 14  # room above the wire for rising sparks
 PROGRESS_MARGIN_PX = 10
 RESET_TOOLTIP = "Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
 RESET_QUESTION = (
@@ -109,6 +119,141 @@ UNCERTAIN_DUPLICATE_EXPLANATION_STEP6 = (
     "unverändert; die Entscheidung lässt sich mit „Zurück“ noch ändern."
 )
 DUPLICATE_EXAMPLES = 3
+MAPPING_INTRO = (
+    "Die Datenpipeline schlägt vor, welche Spalte deiner Daten in welches Feld der "
+    "Ergebnis-Layer kommt. Prüfe die Vorschläge je Layer: Häkchen = Spalte "
+    "übernehmen, rechts das Zielfeld wählen."
+)
+NO_SUGGESTIONS_TEXT = "Für diese Daten gibt es keine Vorschläge zur Attributzuordnung."
+MAPPING_SAVED_TEXT = (
+    "Zuordnung gespeichert. Auf die Daten wirkt sie, sobald die Datenpipeline das "
+    "Anwenden unterstützt (ARBEITSPLAN M4)."
+)
+MAPPING_APPLIED_TEXT = "Zuordnung übernommen: Die Daten wurden neu zugeordnet."
+
+
+SUMMARY_INTRO = (
+    "Prüfe die Übersicht. Mit „Verarbeitung starten“ werden die Ergebnis-Layer in "
+    "QGIS angelegt. Deine Eingangsdaten und Projekt-Layer bleiben unverändert."
+)
+DONE_TITLE = "Fertig ✓ – die Ergebnis-Layer sind in QGIS angelegt."
+RERUN_ACTION = "Erneut verarbeiten"
+
+
+def format_hectares(hectares):
+    text = f"{hectares:,.1f}"
+    return text.replace(",", " ").replace(".", ",")
+
+
+def objects_text(count):
+    """'1 Objekt', '1 571 Objekte'."""
+    return f"{format_count(count)} {'Objekt' if count == 1 else 'Objekte'}"
+
+
+def done_hint_text(group_name):
+    return (
+        f"Du findest sie im Layer-Bedienfeld in der Gruppe „{group_name}“. "
+        "„Erneut verarbeiten“ ersetzt diese Gruppe; andere Layer bleiben unberührt."
+    )
+
+
+def overview_rows(flow, area_ha, names):
+    """Key facts of the run as (label, value) rows for step 9."""
+    result = flow.result
+    files = sorted({layer.source_name for layer in result.layers if layer.source_name})
+    decisions = flow.duplicate_decisions
+    if decisions:
+        duplicates = ", ".join(
+            f"{names.layer(table)} {'zusammengeführt' if merge else 'behalten'}"
+            for table, merge in decisions.items()
+        )
+    else:
+        duplicates = "keine"
+    warnings = len(flow.issues_by_severity()["warning"])
+    return (
+        ("Projekt-CRS", result.project_crs),
+        ("Untersuchungsgebiet", f"{format_hectares(area_ha)} ha" if area_ha else "–"),
+        ("Puffer", f"{format_count(int(round(result.buffer_meters)))} m"),
+        ("Datei", ", ".join(files) or "–"),
+        ("Kartenthema", result.selected_topic or "–"),
+        ("Datenquelle", result.output.data_source or "– noch nicht eingetragen (Schritt 8)"),
+        ("Unsichere Dubletten", duplicates),
+        ("Hinweise aus Schritt 4", f"{warnings} Warnung(en)"),
+    )
+
+
+def planned_layer_rows(flow, names):
+    """One row per result layer that will be created, with its object count."""
+    counts = {}
+    for record in flow.result.harmonized_records:
+        counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
+    rows = []
+    for descriptor in flow.result.selected_layers():
+        name = result_layer_name(descriptor, names.layer)
+        rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}"))
+    return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
+
+
+def output_rows(output):
+    def yes_no(flag, pending=False):
+        if not flag:
+            return "nein"
+        return "ja (wird mit W8 angeschlossen)" if pending else "ja"
+
+    return (
+        ("Ergebnis-Layer in QGIS", "ja"),
+        ("Bereinigtes GeoPackage", yes_no(output.save_cleaned_geopackage, pending=True)),
+        ("PDF", yes_no(output.create_pdf, pending=True)),
+    )
+
+
+def result_rows(reports):
+    """Rows for the 'Fertig' view: created layers and anything not taken over."""
+    rows = [(None, f"{report.name} – {objects_text(report.feature_count)}") for report in reports]
+    for report in reports:
+        for reason, count in report.skipped.items():
+            rows.append((None, f"{report.name}: {format_count(count)} nicht übernommen ({reason})"))
+    return tuple(rows)
+
+
+class ReadableNames:
+    """German names from the pipeline (mapping.py); technical names as fallback."""
+
+    def __init__(self, layer=None, field=None, target=None):
+        self._layer, self._field, self._target = layer, field, target
+
+    @staticmethod
+    def _call(function, value):
+        if function is None or value is None:
+            return value
+        try:
+            return function(value) or value
+        except Exception:  # a missing name must not break the step
+            return value
+
+    def layer(self, layer_id):
+        return self._call(self._layer, layer_id)
+
+    def field(self, field):
+        return self._call(self._field, field)
+
+    def target(self, field):
+        return self._call(self._target, field)
+
+
+def readable_names():
+    try:
+        from .mapping import readable_field, readable_layer, readable_target_field
+    except ImportError:
+        return ReadableNames()
+    return ReadableNames(readable_layer, readable_field, readable_target_field)
+
+
+def mapping_detail_text(source_field, examples):
+    """Small line below a mapping row: examples from the data and the column."""
+    shown = [f"„{example}“" for example in tuple(examples or ())[:2] if example not in (None, "")]
+    prefix = f"z. B. {', '.join(shown)} · " if shown else ""
+    return f"{prefix}Spalte {source_field}"
 
 
 def cross_layer_warning_text(count):
@@ -168,16 +313,12 @@ def import_error_text(file_name, error, full_path=None):
     )
 
 
-def lamp_state(step_index, current_index, pulse_on=False):
-    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'.
-
-    While a long step runs without known progress, the current lamp pulses
-    (``pulse_on``) between 'dim' and 'on'.
-    """
+def lamp_state(step_index, current_index):
+    """Lamp of a step: 'on' when done, 'dim' for the current step, else 'off'."""
     if step_index < current_index:
         return "on"
     if step_index == current_index:
-        return "on" if pulse_on else "dim"
+        return "dim"
     return "off"
 
 
@@ -295,18 +436,20 @@ def _create_dock(plugin):
         Qgis,
         QgsApplication,
         QgsCoordinateReferenceSystem,
+        QgsGeometry,
         QgsProject,
         QgsSettings,
         QgsTask,
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
-    from qgis.PyQt.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
-    from qgis.PyQt.QtGui import QIcon
+    from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
+    from qgis.PyQt.QtGui import QColor, QIcon, QPainter
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
         QButtonGroup,
         QCheckBox,
+        QComboBox,
         QDoubleSpinBox,
         QFileDialog,
         QFrame,
@@ -316,7 +459,6 @@ def _create_dock(plugin):
         QListWidget,
         QListWidgetItem,
         QMessageBox,
-        QProgressBar,
         QPushButton,
         QRadioButton,
         QScrollArea,
@@ -343,6 +485,77 @@ def _create_dock(plugin):
             self.widgets = {}
             self.builder(self)
 
+    class WireBar(QWidget):
+        """Busy bar as an own pixel wire that lights up with the real progress.
+
+        Dark red = not loaded yet, bright red = loaded. Sparks rise at the
+        progress front while a step runs.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self._value = 0
+            self._maximum = 100
+            self.sparks = []
+            self.rng = random.Random(7)
+            self.setFixedHeight(WIRE_ROWS * WIRE_CELL_PX + WIRE_SPARK_SPACE_PX)
+
+        # QProgressBar-like interface used by the dock and tests
+        def setValue(self, value):
+            self._value = max(0, min(int(value), self._maximum))
+            self.update()
+
+        def value(self):
+            return self._value
+
+        def maximum(self):
+            return self._maximum
+
+        def reset(self):
+            self._value = 0
+            self.sparks = []
+            self.update()
+
+        def _columns(self):
+            return max(self.width() // WIRE_CELL_PX, 1)
+
+        def _top(self):
+            return self.height() - WIRE_ROWS * WIRE_CELL_PX
+
+        def tick(self):
+            """Move sparks and create new ones at the front of the lit wire."""
+            self.sparks = step_sparks(self.sparks)
+            lit = lit_columns(self._value, self._maximum, self._columns())
+            if lit > 0:
+                front = lit - 1
+                row = WIRE_PATTERN[front % len(WIRE_PATTERN)]
+                self.sparks += spawn_sparks(
+                    front * WIRE_CELL_PX + WIRE_CELL_PX / 2,
+                    self._top() + row * WIRE_CELL_PX,
+                    self.rng,
+                )
+            self.update()
+
+        def paintEvent(self, _event):
+            painter = QPainter(self)
+            columns = self._columns()
+            lit = lit_columns(self._value, self._maximum, columns)
+            top = self._top()
+            colors = {key: QColor(value) for key, value in WIRE_COLORS.items()}
+            for x, y in wire_cells(columns):
+                if x < lit:
+                    color = colors["on_light"] if (x + y) % 5 == 0 else colors["on"]
+                else:
+                    color = colors["off_edge"] if (x + y) % 4 == 0 else colors["off"]
+                painter.fillRect(x * WIRE_CELL_PX, top + y * WIRE_CELL_PX,
+                                 WIRE_CELL_PX, WIRE_CELL_PX, color)
+            for x, y, _vx, _vy, life, max_life in self.sparks:
+                spark = QColor(WIRE_COLORS["spark"])
+                spark.setAlpha(int(255 * life / max_life))
+                size = 2 if life < max_life / 2 else 3
+                painter.fillRect(int(x), int(y), size, size, spark)
+            painter.end()
+
     class GuidedDock(QgsDockWidget):
         """Side panel that walks through the nine MVP steps."""
 
@@ -359,6 +572,7 @@ def _create_dock(plugin):
             self.closing = False
             self.next_message = None  # info shown after the next page change
             self.all_done = False  # all lamps on after "Verarbeitung starten"
+            self.last_reports = None  # result of the last processing run (step 9)
 
             # The whole plugin shares one style (theme.py).
             self.setStyleSheet(panel_stylesheet())
@@ -395,20 +609,14 @@ def _create_dock(plugin):
                 progress_row.addWidget(lamp)
                 self.step_lamps.append(lamp)
             progress_row.addStretch()
-            self.pulse_on = False
 
-            # Busy bar for long steps: fills once with the real progress (if the
-            # pipeline reports it); only the loaded part shimmers. While no
-            # progress is known, the current lamp pulses so QGIS looks alive.
+            # Busy bar for long steps: a pixel wire that lights up with the
+            # real progress; sparks rise at the progress front.
             self.busy_label = QLabel()
             self.busy_label.setWordWrap(True)
             set_role(self.busy_label, "status")
-            self.busy_bar = QProgressBar()
-            self.busy_bar.setRange(0, 100)
-            self.busy_bar.setTextVisible(False)
+            self.busy_bar = WireBar()
             self.busy_text = ""
-            self.busy_progress_known = False
-            self.busy_phase = 0.0
             self.busy_timer = QTimer(self)
             self.busy_timer.setInterval(BUSY_TICK_MS)
             self.busy_timer.timeout.connect(self._advance_busy)
@@ -433,6 +641,7 @@ def _create_dock(plugin):
             scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             scroll.setWidget(self.stack)
             self.scroll = scroll
+            self.stack.installEventFilter(self)
 
             # Messages get their own small scroll area, so long texts (e.g. an
             # unexpected error) stay readable without pushing the buttons away.
@@ -480,6 +689,7 @@ def _create_dock(plugin):
 
         def show_page(self, index):
             self.stop_drawing()
+            self.last_reports = None  # step 9 starts with the overview again
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -497,6 +707,7 @@ def _create_dock(plugin):
             page.layout.activate()
             self.stack_layout.activate()
             self.stack.updateGeometry()
+            QTimer.singleShot(0, self.fit_wrapped_labels)
             self.step_label.setText(progress_text(index))
             self.update_lamps()
             self.primary_button.setText(PAGE_ACTIONS[index])
@@ -550,18 +761,42 @@ def _create_dock(plugin):
             """
             current = len(self.step_lamps) if self.all_done else self.current
             for index, lamp in enumerate(self.step_lamps):
-                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current, self.pulse_on)])
+                lamp.setPixmap(self.lamp_pixmaps[lamp_state(index, current)])
 
         def mark_all_done(self):
             self.all_done = True
             self.update_lamps()
 
+        def fit_wrapped_labels(self):
+            """Give every wrapped text its full height at the current width.
+
+            Qt underestimates the height of wrapped labels inside nested cards;
+            measuring them after the layout has its width avoids cut-off lines.
+            """
+            if not self.pages:
+                return
+            page = self.pages[self.current]
+            changed = False
+            for label in page.widget.findChildren(QLabel):
+                if not label.wordWrap() or not label.isVisibleTo(page.widget):
+                    continue
+                height = label.heightForWidth(label.width())
+                if height > 0 and label.minimumHeight() != height:
+                    label.setMinimumHeight(height)
+                    changed = True
+            if changed:
+                page.layout.activate()
+                self.stack.updateGeometry()
+
+        def eventFilter(self, watched, event):
+            if watched is self.stack and event.type() == QEvent.Resize:
+                QTimer.singleShot(0, self.fit_wrapped_labels)
+            return super().eventFilter(watched, event)
+
         def set_busy(self, text):
             """Show the busy bar and lock the panel while a step runs."""
             self.busy_text = text
-            self.busy_progress_known = False
-            self.busy_phase = 0.0
-            self.busy_bar.setValue(0)
+            self.busy_bar.reset()
             self.busy_label.setText(busy_label_text(text, None))
             self.busy_label.show()
             self.busy_bar.show()
@@ -573,14 +808,12 @@ def _create_dock(plugin):
 
         def set_busy_progress(self, percent):
             """Real progress from the background task (0-100)."""
-            self.busy_progress_known = True
             self.busy_bar.setValue(int(percent))
             self.busy_label.setText(busy_label_text(self.busy_text, percent))
 
         def clear_busy(self):
             self.busy_timer.stop()
-            self.pulse_on = False
-            self.update_lamps()
+            self.busy_bar.reset()
             self.busy_label.hide()
             self.busy_bar.hide()
             self.stack.setEnabled(True)
@@ -589,13 +822,8 @@ def _create_dock(plugin):
             self.reset_button.setEnabled(True)
 
         def _advance_busy(self):
-            # Shine moves across the loaded part of the bar only.
-            self.busy_phase = (self.busy_phase + BUSY_SHINE_STEP) % 1.0
-            self.busy_bar.setStyleSheet(busy_chunk_stylesheet(self.busy_phase))
-            if not self.busy_progress_known:
-                # Unknown progress: the current lamp pulses between dim and on.
-                self.pulse_on = not self.pulse_on
-                self.update_lamps()
+            # Sparks rise at the front of the lit wire.
+            self.busy_bar.tick()
 
         def ask_reset(self):
             """Ask, then reset the whole plugin to step 1 without data."""
@@ -1140,28 +1368,74 @@ def _create_dock(plugin):
             return reject(blocker)
         return True
 
-    # 5 Attributzuordnung
+    # 5 Attributzuordnung: per layer "column -> target field" with examples
     def build_mapping(page):
+        flow = workflow()
+        names = readable_names()
+        intro = QLabel(MAPPING_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        groups = flow.suggestions_by_layer()
+        if not groups:
+            page.layout.addWidget(QLabel(NO_SUGGESTIONS_TEXT))
         inputs = []
-        for suggestion in workflow().attribute_suggestions():
-            accepted = QCheckBox(suggestion.source_field)
-            accepted.setChecked(suggestion.accepted is not False)
-            target = QLineEdit(suggestion.user_value or suggestion.target_field)
-            page.layout.addWidget(accepted)
-            page.layout.addWidget(target)
-            inputs.append((suggestion, accepted, target))
+        for layer_id, suggestions in groups.items():
+            card = QFrame()
+            set_role(card, "issue-info")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(10, 8, 8, 8)
+            title = QLabel(names.layer(layer_id) if layer_id else "Ohne Layer-Angabe")
+            font = title.font()
+            font.setBold(True)
+            title.setFont(font)
+            card_layout.addWidget(title)
+            for suggestion in suggestions:
+                accepted = QCheckBox(names.field(suggestion.source_field))
+                accepted.setChecked(suggestion.accepted is not False)
+                accepted.setToolTip(f"Spalte „{suggestion.source_field}“ übernehmen")
+                accepted.setCursor(Qt.PointingHandCursor)
+                arrow = QLabel("→")
+                target = QComboBox()
+                for field in TARGET_FIELDS:
+                    target.addItem(names.target(field), field)
+                current = suggestion.user_value or suggestion.target_field
+                index = target.findData(current)
+                if index < 0:  # value outside the target schema stays visible
+                    target.addItem(current, current)
+                    index = target.count() - 1
+                target.setCurrentIndex(index)
+                target.setEnabled(accepted.isChecked())
+                accepted.toggled.connect(target.setEnabled)
+                row = QHBoxLayout()
+                row.addWidget(accepted, 1)
+                row.addWidget(arrow)
+                row.addWidget(target, 1)
+                card_layout.addLayout(row)
+                detail = QLabel(mapping_detail_text(suggestion.source_field, suggestion.examples))
+                detail.setWordWrap(True)
+                set_role(detail, "hint")
+                card_layout.addWidget(indented(detail))
+                inputs.append((suggestion, accepted, target))
+            page.layout.addWidget(card)
         page.widgets["inputs"] = inputs
 
     def validate_mapping(page):
+        flow = workflow()
         decisions = {}
         for suggestion, accepted, target in page.widgets["inputs"]:
-            decisions[suggestion.source_field] = (
-                target.text() if accepted.isChecked() else False
+            decisions[(suggestion.layer_id, suggestion.source_field)] = (
+                target.currentData() if accepted.isChecked() else False
             )
         try:
-            workflow().confirm_attribute_suggestions(decisions)
+            flow.confirm_attribute_suggestions(decisions)
         except (KeyError, ValueError) as error:
             return reject(error_text(error))
+        try:
+            applied = flow.apply_attribute_decisions()
+        except ValueError as error:  # e.g. a target field chosen twice
+            return reject(error_text(error))
+        dock.next_message = MAPPING_APPLIED_TEXT if applied else MAPPING_SAVED_TEXT
         return True
 
     # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
@@ -1315,13 +1589,55 @@ def _create_dock(plugin):
             return reject(str(error))
         return True
 
-    # 9 Verarbeitung starten
-    def build_summary(page):
-        summary = QLabel(str(workflow().summary()))
-        summary.setWordWrap(True)
-        page.layout.addWidget(summary)
+    # 9 Verarbeitung starten: readable overview before, result list after
+    def summary_card(title, rows):
+        card = QFrame()
+        set_role(card, "issue-info")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 8, 8)
+        heading = QLabel(title)
+        font = heading.font()
+        font.setBold(True)
+        heading.setFont(font)
+        card_layout.addWidget(heading)
+        for label, value in rows:
+            line = QLabel(f"{label}: {value}" if label else value)
+            line.setWordWrap(True)
+            card_layout.addWidget(line)
+        return card
 
-    def validate_summary(_page):
+    def study_area_hectares(result):
+        geometry = QgsGeometry.fromWkt(result.study_area_wkt or "")
+        if geometry is None or geometry.isNull():
+            return None
+        return geometry.area() / 10000
+
+    def build_summary(page):
+        flow = workflow()
+        names = readable_names()
+        if dock.last_reports is not None:
+            done = QLabel(DONE_TITLE)
+            done.setWordWrap(True)
+            set_role(done, "status")
+            page.layout.addWidget(done)
+            page.layout.addWidget(summary_card(
+                "Angelegte Ergebnis-Layer", result_rows(dock.last_reports)))
+            hint = QLabel(done_hint_text(result_group_name(flow.result.selected_topic)))
+            hint.setWordWrap(True)
+            set_role(hint, "hint")
+            page.layout.addWidget(hint)
+            return
+        intro = QLabel(SUMMARY_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        page.layout.addWidget(summary_card(
+            "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
+        page.layout.addWidget(summary_card(
+            "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
+        page.layout.addWidget(summary_card("Ausgabe", output_rows(flow.result.output)))
+
+    def validate_summary(page):
         """'Verarbeitung starten': build the result layers and add them to QGIS."""
         flow = workflow()
         selected = flow.result.selected_layers()
@@ -1330,6 +1646,11 @@ def _create_dock(plugin):
                 "Für das Kartenthema ist kein Layer ausgewählt. Bitte in Schritt 7 "
                 "mindestens eine Kategorie ankreuzen."
             )
+        try:
+            # Current decisions of step 5 (and step 6) on the data (S5).
+            flow.apply_attribute_decisions()
+        except ValueError as error:
+            return reject(error_text(error))
         try:
             from .mapping import readable_layer
         except ImportError:
@@ -1341,6 +1662,12 @@ def _create_dock(plugin):
         finally:
             QApplication.restoreOverrideCursor()
         plugin.result_layers = layer_objects
+        # Switch the page to "Fertig" with the list of created layers.
+        dock.last_reports = reports
+        page.build()
+        make_texts_selectable(page.widget)
+        QTimer.singleShot(0, dock.fit_wrapped_labels)
+        dock.primary_button.setText(RERUN_ACTION)
         text = result_layers_text(reports)
         if flow.result.output.save_cleaned_geopackage or flow.result.output.create_pdf:
             text += "\n" + EXPORT_PENDING_MESSAGE
