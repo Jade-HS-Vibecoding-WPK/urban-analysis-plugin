@@ -29,6 +29,7 @@ from .outputs import (
     write_result_geopackage,
     result_group_name,
     result_layer_name,
+    result_layer_names,
     result_layers_text,
 )
 from .study_area import (
@@ -277,8 +278,10 @@ def planned_layer_rows(flow, names):
     for record in flow.result.harmonized_records:
         counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
     rows = []
-    for descriptor in flow.result.selected_layers():
-        name = result_layer_name(descriptor, names.layer)
+    selected = flow.result.selected_layers()
+    unique = result_layer_names(selected, names.layer)
+    for descriptor in selected:
+        name = unique[descriptor.layer_id]
         rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}",
                      icon_key(descriptor.layer_id, descriptor.category)))
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)

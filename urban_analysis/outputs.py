@@ -60,6 +60,40 @@ def result_layer_name(descriptor: LayerDescriptor, readable=None) -> str:
     return descriptor.category or descriptor.name or descriptor.layer_id
 
 
+GEOMETRY_WORDS = {"point": "Punkte", "line": "Linien", "polygon": "Flächen"}
+
+
+def geometry_word(descriptor: LayerDescriptor) -> str:
+    """'Punkte', 'Linien' or 'Flächen' from the geometry type or the OSM layer id."""
+    text = f"{descriptor.geometry_type or ''} {descriptor.layer_id}".lower()
+    for key, word in (("polygon", "Flächen"), ("line", "Linien"), ("point", "Punkte")):
+        if key in text:
+            return word
+    return ""
+
+
+def result_layer_names(descriptors: Iterable[LayerDescriptor], readable=None) -> Dict[str, str]:
+    """Readable, unique names for the result layers (layer_id -> name).
+
+    The same category from lines and areas (e.g. OSM streets) gets the
+    geometry in brackets – 'Straßen (Linien)', 'Straßen (Flächen)' – instead
+    of a technical id."""
+    descriptors = list(descriptors)
+    names = {d.layer_id: result_layer_name(d, readable) for d in descriptors}
+    counts: Dict[str, int] = {}
+    for name in names.values():
+        counts[name] = counts.get(name, 0) + 1
+    for d in descriptors:
+        if counts[names[d.layer_id]] > 1 and geometry_word(d):
+            names[d.layer_id] = f"{names[d.layer_id]} ({geometry_word(d)})"
+    used = set()
+    for d in descriptors:  # still the same name: the layer id keeps them apart
+        if names[d.layer_id] in used:
+            names[d.layer_id] = f"{names[d.layer_id]} ({d.layer_id})"
+        used.add(names[d.layer_id])
+    return names
+
+
 @dataclass
 class ResultLayerReport:
     """What was written into one result layer."""
@@ -122,12 +156,10 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
 
     layer_objects = {}
     reports: List[ResultLayerReport] = []
-    used_names = set()
+    selected_layers = list(selected_layers)
+    unique_names = result_layer_names(selected_layers, readable)
     for descriptor in selected_layers:
-        name = result_layer_name(descriptor, readable)
-        if name in used_names:
-            name = f"{name} ({descriptor.layer_id})"
-        used_names.add(name)
+        name = unique_names[descriptor.layer_id]
         report = ResultLayerReport(descriptor.layer_id, name)
 
         geometries = []

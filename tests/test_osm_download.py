@@ -43,5 +43,31 @@ def test_error_texts_say_what_to_do():
     assert "400" in other and "Was tun" in other
 
 
+def test_same_category_from_lines_and_areas_gets_readable_names():
+    from urban_analysis.contracts import LayerDescriptor
+    from urban_analysis.outputs import result_layer_names
+
+    layers = [
+        LayerDescriptor("lines_strassen", "x", "LINESTRING", "osm.gpkg", category="Straßen"),
+        LayerDescriptor("multipolygons_strassen", "x", "MULTIPOLYGON", "osm.gpkg", category="Straßen"),
+        LayerDescriptor("multipolygons_gebaeude", "x", "MULTIPOLYGON", "osm.gpkg", category="Gebäude"),
+    ]
+    assert result_layer_names(layers) == {
+        "lines_strassen": "Straßen (Linien)",
+        "multipolygons_strassen": "Straßen (Flächen)",
+        "multipolygons_gebaeude": "Gebäude",
+    }
+
+
+def test_osm_categories_have_own_icons():
+    from urban_analysis.ui.classic_icons import missing_twins
+    from urban_analysis.ui.layer_icons import icon_key
+
+    for category in ("Hecken und Baumreihen", "Zäune und Mauern", "Sonstige OSM-Linien",
+                     "Sonstige OSM-Flächen", "Gewässer", "Bahnstrecken"):
+        assert icon_key(category=category) != "unbekannt", category
+    assert not missing_twins()
+
+
 def test_area_limits_come_from_the_catalog():
     assert (LARGE_AREA_KM2, MAX_DOWNLOAD_KM2) == (25.0, 50.0)
