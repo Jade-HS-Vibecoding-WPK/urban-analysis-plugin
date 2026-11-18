@@ -20,7 +20,10 @@
     "bauwerke_p": "Bauwerke (Punkte)",
     "bauwerke_l": "Bauwerke (Linien)",
     "bodenschaetzung": "Bodenschätzung",
-    "bewertung": "Bewertung"
+    "bewertung": "Bewertung",
+    "multipolygons": "OSM – Flächen",
+    "lines": "OSM – Linien",
+    "points": "OSM – Punkte"
   },
 
   "target_field_labels": {
@@ -71,7 +74,13 @@
     "ken": "Kennzeichnungsschlüssel",
     "ken__bez": "Kennzeichnung",
     "abm": "Abmarkung",
-    "untermerkmal": "Untermerkmal"
+    "untermerkmal": "Untermerkmal",
+    "osm_id": "OSM-ID",
+    "osm_way_id": "OSM-Weg-ID",
+    "other_tags": "Weitere OSM-Merkmale",
+    "addr:street": "Straße",
+    "addr:housenumber": "Hausnummer",
+    "building:levels": "Geschosszahl (OSM)"
   },
 
   "profiles": [
@@ -183,6 +192,124 @@
         "grenzpunkte": {"category": null},
         "bodenschaetzung": {"category": null},
         "bewertung": {"category": null}
+      }
+    },
+    {
+      "name": "OSM",
+      "_hinweis": "OpenStreetMap-Daten, wie QGIS/GDAL sie als GeoPackage speichert: Layer multipolygons, lines und points; häufige Merkmale als eigene Spalten (building, landuse, highway …), alle übrigen in other_tags. Die Kategorie richtet sich nach dem ersten Merkmal aus tag_fields, das einen Wert hat; die Regeln vergleichen „Schlüssel=Wert“, „Schlüssel=*“ passt zu jedem Wert. Erste passende Regel gewinnt.",
+      "requires_fields": ["osm_id", "other_tags"],
+      "_hinweis_tags": "Diese Schlüssel werden aus other_tags als eigene Spalten gelesen (Adresse, Geschosszahl, Merkmale für die Kategorie).",
+      "tags_field": "other_tags",
+      "tag_columns": ["addr:street", "addr:housenumber", "building:levels", "highway", "railway", "water", "waterway"],
+      "street_field": "addr:street",
+      "house_number_field": "addr:housenumber",
+      "_hinweis_tag_labels": "Verständliche Objektart für häufige OSM-Merkmale. Fehlt ein Eintrag, wird „Schlüssel=*“ genommen, sonst das Merkmal selbst (z. B. „shop=bakery“).",
+      "tag_labels": {
+        "building=house": "Wohnhaus",
+        "building=detached": "Einfamilienhaus",
+        "building=semidetached_house": "Doppelhaushälfte",
+        "building=terrace": "Reihenhaus",
+        "building=residential": "Wohngebäude",
+        "building=apartments": "Mehrfamilienhaus",
+        "building=garage": "Garage",
+        "building=garages": "Garagen",
+        "building=shed": "Schuppen",
+        "building=commercial": "Geschäftsgebäude",
+        "building=retail": "Einzelhandel",
+        "building=industrial": "Industriegebäude",
+        "building=school": "Schule",
+        "building=church": "Kirche",
+        "building=*": "Gebäude",
+        "highway=residential": "Wohnstraße",
+        "highway=living_street": "Verkehrsberuhigter Bereich",
+        "highway=primary": "Hauptstraße",
+        "highway=secondary": "Landesstraße",
+        "highway=tertiary": "Kreisstraße",
+        "highway=service": "Erschließungsweg",
+        "highway=footway": "Fußweg",
+        "highway=cycleway": "Radweg",
+        "highway=path": "Weg",
+        "highway=pedestrian": "Fußgängerzone",
+        "highway=steps": "Treppe",
+        "highway=*": "Straße",
+        "amenity=parking": "Parkplatz",
+        "place=square": "Platz",
+        "leisure=park": "Park",
+        "leisure=garden": "Garten",
+        "leisure=playground": "Spielplatz",
+        "leisure=pitch": "Sportplatz",
+        "leisure=sports_centre": "Sportanlage",
+        "landuse=residential": "Wohnbaufläche",
+        "landuse=commercial": "Gewerbefläche",
+        "landuse=retail": "Handelsfläche",
+        "landuse=industrial": "Industriefläche",
+        "landuse=grass": "Rasenfläche",
+        "landuse=meadow": "Wiese",
+        "landuse=forest": "Wald",
+        "landuse=allotments": "Kleingärten",
+        "landuse=cemetery": "Friedhof",
+        "landuse=railway": "Bahnfläche",
+        "natural=wood": "Wald",
+        "natural=scrub": "Gebüsch",
+        "natural=water": "Gewässer",
+        "railway=*": "Bahnstrecke",
+        "waterway=*": "Wasserlauf"
+      },
+      "layers": {
+        "multipolygons": {
+          "tag_fields": ["building", "highway", "amenity", "place", "leisure", "landuse", "natural", "water", "railway"],
+          "object_id_fields": [
+            {"field": "osm_way_id", "prefix": "way/"},
+            {"field": "osm_id", "prefix": "relation/"}
+          ],
+          "category_rules": [
+            {"category": "Gebäude", "layer_suffix": "gebaeude", "values": ["building=*"]},
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["highway=pedestrian", "highway=footway", "highway=cycleway", "highway=path"]
+            },
+            {"category": "Straßen", "layer_suffix": "strassen", "values": ["highway=*", "amenity=parking"]},
+            {"category": "Plätze", "layer_suffix": "plaetze", "values": ["place=square"]},
+            {
+              "category": "Grünflächen",
+              "layer_suffix": "gruen",
+              "values": [
+                "leisure=park", "leisure=garden", "leisure=playground", "leisure=nature_reserve",
+                "landuse=grass", "landuse=meadow", "landuse=forest", "landuse=allotments",
+                "landuse=cemetery", "landuse=village_green", "landuse=recreation_ground",
+                "natural=wood", "natural=scrub", "natural=heath", "natural=grassland", "natural=wetland"
+              ]
+            },
+            {
+              "category": "Wasserflächen",
+              "layer_suffix": "wasser",
+              "values": ["natural=water", "water=*", "landuse=reservoir", "landuse=basin"]
+            },
+            {"category": "Bahnflächen", "layer_suffix": "bahn", "values": ["landuse=railway", "railway=*"]},
+            {"category": "Nutzungsflächen", "layer_suffix": "flaechen", "values": ["landuse=*", "leisure=*"]}
+          ],
+          "default_rule": {"category": "Sonstige OSM-Flächen", "layer_suffix": "sonstige"}
+        },
+        "lines": {
+          "tag_fields": ["highway", "railway", "waterway"],
+          "object_id_fields": [{"field": "osm_id", "prefix": "way/"}],
+          "category_rules": [
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["highway=pedestrian", "highway=footway", "highway=cycleway", "highway=path", "highway=steps"]
+            },
+            {"category": "Straßen", "layer_suffix": "strassen", "values": ["highway=*"]},
+            {"category": "Bahnstrecken", "layer_suffix": "bahn", "values": ["railway=*"]},
+            {"category": "Gewässer", "layer_suffix": "wasser", "values": ["waterway=*"]}
+          ],
+          "default_rule": {"category": "Sonstige OSM-Linien", "layer_suffix": "sonstige"}
+        },
+        "points": {
+          "category": null,
+          "object_id_fields": [{"field": "osm_id", "prefix": "node/"}]
+        }
       }
     }
   ]

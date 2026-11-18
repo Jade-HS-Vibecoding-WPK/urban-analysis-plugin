@@ -32,7 +32,7 @@ from .geometry import (
     validate_study_area,
     within_distance,
 )
-from .mapping import LayerProfile, MappingRules, default_mapping_rules
+from .mapping import LayerProfile, MappingRules, default_mapping_rules, parse_tags
 
 
 TARGET_FIELDS = (
@@ -367,6 +367,8 @@ class GeoPackageImporter:
         for layer_index, layer in enumerate(layers, start=1):
             tracker.report(READ_SHARE + (1 - READ_SHARE) * (layer_index - 1) / len(layers))
             profile = self.mapping_rules.profile_for(layer.table_name, layer.fields)
+            if profile is not None:
+                layer = self._with_tag_columns(layer, profile)
             category = (
                 profile.category if profile is not None
                 else self.mapping_rules.category_from_name(layer.table_name)
@@ -726,14 +728,41 @@ class GeoPackageImporter:
         rules = cls._mapping_rules(fields)
         if profile is None:
             return rules
-        kept = [
-            rule for rule in rules if rule.target_field not in ("object_type", "category", "object_id")
-        ]
-        if profile.uses_field(fields):
+        # Fields the profile fills itself are not offered as a single column:
+        # object type and category always, the address when the profile builds
+        # it from street and number, the ID when it carries a prefix (OSM).
+        derived = {"object_type", "category", "object_id"}
+        if profile.address_fields:
+            derived.add("address")
+        kept = [rule for rule in rules if rule.target_field not in derived]
+        if profile.object_type_field and profile.uses_field(fields):
             kept.insert(0, MappingRule(str(profile.object_type_field), "object_type", 1.0))
-        if profile.object_id_field and profile.object_id_field in fields:
+        if profile.object_id_field and profile.object_id_field in fields and not profile.object_id_fields:
             kept.insert(0, MappingRule(profile.object_id_field, "object_id", 1.0))
         return tuple(kept)
+
+    @staticmethod
+    def _with_tag_columns(layer: GeoPackageLayer, profile: LayerProfile) -> GeoPackageLayer:
+        """OSM: take the profile's ``tag_columns`` out of ``other_tags`` as columns.
+
+        GDAL keeps rarer OSM tags such as ``addr:street`` or ``building:levels``
+        in one text column.  Only the keys named in the profile become extra
+        columns; existing columns are never overwritten and the original
+        ``other_tags`` value stays in the row.
+        """
+        if not profile.tags_field or profile.tags_field not in layer.fields or not profile.tag_columns:
+            return layer
+        new_columns = tuple(key for key in profile.tag_columns if key not in layer.fields)
+        if not new_columns:
+            return layer
+        rows = []
+        for row in layer.rows:
+            tags = parse_tags(row.get(profile.tags_field))
+            expanded = dict(row)
+            for key in new_columns:
+                expanded[key] = tags.get(key)
+            rows.append(expanded)
+        return replace(layer, fields=layer.fields + new_columns, rows=tuple(rows))
 
     @staticmethod
     def _layer_descriptors(
@@ -847,7 +876,11 @@ class GeoPackageImporter:
         for index, row in unique_rows:
             layer_id = layer.table_name
             attributes: Dict[str, Any] = {
-                "object_id": value("object_id", row),
+                "object_id": (
+                    profile.object_id(row)
+                    if profile is not None and profile.object_id_fields
+                    else value("object_id", row)
+                ),
                 "address": value("address", row, addresses.get(index)),
                 "floors": value("floors", row),
                 "source_name": file_path.name,
