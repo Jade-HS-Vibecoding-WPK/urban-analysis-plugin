@@ -36,6 +36,9 @@ from .mapping import LayerProfile, MappingRules, default_mapping_rules
 
 
 TARGET_FIELDS = (
+    "object_id",
+    "address",
+    "floors",
     "source_name",
     "object_type",
     "object_detail",
@@ -46,6 +49,9 @@ TARGET_FIELDS = (
     "source",
 )
 TARGET_FIELD_ALIASES: Mapping[str, Tuple[str, ...]] = {
+    "object_id": ("object_id", "objid", "osm_id", "gml_id"),
+    "address": ("address", "adresse", "anschrift"),
+    "floors": ("floors", "geschosse", "geschosszahl", "building:levels", "building_levels"),
     "object_type": (
         "object_type",
         "objecttype",
@@ -236,6 +242,30 @@ def _coerce_year(value: Any) -> Optional[int]:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_floors(value: Any) -> Optional[int]:
+    """Whole, non-negative number of floors; anything else stays empty (no estimate)."""
+    if value in (None, ""):
+        return None
+    try:
+        number = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or not number.is_integer():
+        return None
+    return int(number)
+
+
+def _coerce(target: str, value: Any) -> Any:
+    """Convert a source value to the type of its target field."""
+    if target == "area_m2":
+        return _coerce_area(value)
+    if target == "year":
+        return _coerce_year(value)
+    if target == "floors":
+        return _coerce_floors(value)
+    return value
 
 
 #: Share of the progress bar used for reading and clipping; the rest is
@@ -696,9 +726,13 @@ class GeoPackageImporter:
         rules = cls._mapping_rules(fields)
         if profile is None:
             return rules
-        kept = [rule for rule in rules if rule.target_field not in ("object_type", "category")]
+        kept = [
+            rule for rule in rules if rule.target_field not in ("object_type", "category", "object_id")
+        ]
         if profile.uses_field(fields):
             kept.insert(0, MappingRule(str(profile.object_type_field), "object_type", 1.0))
+        if profile.object_id_field and profile.object_id_field in fields:
+            kept.insert(0, MappingRule(profile.object_id_field, "object_id", 1.0))
         return tuple(kept)
 
     @staticmethod
@@ -794,24 +828,36 @@ class GeoPackageImporter:
                 continue
             seen.add(duplicate_key)
             unique_rows.append((index, row))
+        # The address is built per row ("Hauptstraße 2") before rows of one
+        # object are combined, so street and number of a corner house stay
+        # together ("Hauptstraße 2; Nebenweg 1").
+        addresses: Dict[int, Optional[str]] = {}
+        if profile is not None and profile.address_fields:
+            addresses = {index: profile.address(row) for index, row in unique_rows}
         if profile is not None and geometry_column:
             unique_rows = GeoPackageImporter._combine_object_rows(
-                unique_rows, layer, profile, geometry_column, issues, display_name,
+                unique_rows, layer, profile, geometry_column, issues, display_name, addresses,
             )
+
+        def value(target: str, row: Mapping[str, Any], default: Any = None) -> Any:
+            return _coerce(target, row.get(rules[target])) if target in rules else default
 
         records: List[HarmonizedRecord] = []
         kept_rows: List[Mapping[str, Any]] = []
         for index, row in unique_rows:
             layer_id = layer.table_name
             attributes: Dict[str, Any] = {
+                "object_id": value("object_id", row),
+                "address": value("address", row, addresses.get(index)),
+                "floors": value("floors", row),
                 "source_name": file_path.name,
-                "object_type": row.get(rules["object_type"]) if "object_type" in rules else layer.table_name,
+                "object_type": value("object_type", row, layer.table_name),
                 "object_detail": None,
-                "category": row.get(rules["category"]) if "category" in rules else category,
-                "status": row.get(rules["status"]) if "status" in rules else None,
-                "area_m2": _coerce_area(row.get(rules["area_m2"])) if "area_m2" in rules else None,
-                "year": _coerce_year(row.get(rules["year"])) if "year" in rules else None,
-                "source": row.get(rules["source"]) if "source" in rules else None,
+                "category": value("category", row, category),
+                "status": value("status", row),
+                "area_m2": value("area_m2", row),
+                "year": value("year", row),
+                "source": value("source", row),
             }
             if profile is not None:
                 classification = profile.classify(row, layer.fields)
@@ -865,8 +911,13 @@ class GeoPackageImporter:
         geometry_column: str,
         issues: List[ValidationIssue],
         display_name: Optional[str] = None,
+        addresses: Optional[Dict[int, Optional[str]]] = None,
     ) -> List[Tuple[int, Mapping[str, Any]]]:
         """Combine rows that are one object with several addresses.
+
+        ``addresses`` (row index -> address of that row) is updated in place:
+        the kept row of a combined object gets all its addresses joined with
+        ``"; "``.
 
         Exports such as ALKIS store a building with two house numbers (e.g. a
         corner house) as two rows with the same object ID and the same
@@ -916,6 +967,13 @@ class GeoPackageImporter:
             combined[positions[0]] = merged
             dropped.update(positions[1:])
             object_count += 1
+            if addresses is not None:
+                joined: List[str] = []
+                for position in positions:
+                    address = addresses.get(rows[position][0])
+                    if address and address not in joined:
+                        joined.append(address)
+                addresses[rows[positions[0]][0]] = "; ".join(joined) or None
 
         if not object_count:
             return rows
@@ -1164,12 +1222,7 @@ def apply_attribute_decisions(
             attributes["source"] = record.attributes.get("source")
         for target in TARGET_FIELDS:
             if target in decided:
-                value = row.get(decided[target])
-                if target == "area_m2":
-                    value = _coerce_area(value)
-                elif target == "year":
-                    value = _coerce_year(value)
-                attributes[target] = value
+                attributes[target] = _coerce(target, row.get(decided[target]))
             elif target in suggested_targets:
                 attributes[target] = layer_categories.get(record.layer_id) if target == "category" else None
 
