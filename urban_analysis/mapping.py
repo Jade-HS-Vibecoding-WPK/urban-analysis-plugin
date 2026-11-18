@@ -102,6 +102,16 @@ class LayerProfile:
     #: OSM: ID columns with prefix, first one with a value wins, e.g.
     #: ``(("osm_way_id", "way/"), ("osm_id", "relation/"))``.
     object_id_fields: Tuple[Tuple[str, str], ...] = ()
+    #: Column with the detail of the object type, e.g. ``bez`` ("Rad- und
+    #: Fußweg") next to ``nutzart`` ("Weg") in "ALKIS vereinfacht".  Rules
+    #: then compare "type, detail" like the combined export values.
+    detail_field: Optional[str] = None
+    #: Column the category rules look at instead of the object type, e.g.
+    #: ``gebnutzbez`` (Gebäude / Bauteil / Bauwerk) while the object type
+    #: comes from ``funktion`` ("Wohngebäude").
+    category_field: Optional[str] = None
+    #: Column with a ready address text, e.g. ``lagebeztxt`` ("Hauptstraße 2").
+    address_field: Optional[str] = None
 
     def object_id(self, row: Mapping[str, Any]) -> Optional[str]:
         """Object ID of a row from ``object_id_fields`` (with prefix), else ``None``."""
@@ -127,10 +137,20 @@ class LayerProfile:
     @property
     def address_fields(self) -> Tuple[str, ...]:
         """Columns that may differ between rows of one object (its addresses)."""
-        return tuple(field for field in (self.street_field, self.house_number_field) if field)
+        return tuple(
+            field for field in (self.street_field, self.house_number_field, self.address_field) if field
+        )
 
     def address(self, row: Mapping[str, Any]) -> Optional[str]:
-        """One address from a row, e.g. ``Hauptstraße 2``; ``None`` if both are empty."""
+        """One address from a row, e.g. ``Hauptstraße 2``; ``None`` if empty.
+
+        A ready address text (``address_field``) wins; otherwise street and
+        house number are joined.
+        """
+        if self.address_field:
+            text = row.get(self.address_field)
+            if text not in (None, "") and str(text).strip():
+                return str(text).strip()
         parts = []
         for field in (self.street_field, self.house_number_field):
             value = row.get(field) if field else None
@@ -170,6 +190,13 @@ class LayerProfile:
             value = str(raw).strip() if raw not in (None, "") else None
             if value is not None:
                 object_type, object_detail = self.split_type(value)
+                detail = row.get(self.detail_field) if self.detail_field else None
+                if detail not in (None, "") and str(detail).strip():
+                    object_detail = str(detail).strip()
+                    value = f"{object_type}, {object_detail}"
+        if self.category_field:
+            raw = row.get(self.category_field)
+            value = str(raw).strip() if raw not in (None, "") and str(raw).strip() else None
 
         if not self.splits_layer:
             return Classification(self.category, object_type, object_detail)
@@ -248,6 +275,7 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         object_id_field = profile.get("object_id_field")
         street_field = profile.get("street_field")
         house_number_field = profile.get("house_number_field")
+        address_field = profile.get("address_field")
         tags_field = profile.get("tags_field")
         tag_columns = tuple(str(key) for key in profile.get("tag_columns", ()))
         tag_labels = {
@@ -280,6 +308,9 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
                         (str(entry["field"]), str(entry.get("prefix", "")))
                         for entry in layer.get("object_id_fields", ())
                     ),
+                    detail_field=layer.get("detail_field"),
+                    category_field=layer.get("category_field"),
+                    address_field=str(address_field) if address_field else None,
                 )
             )
     name_categories = tuple(

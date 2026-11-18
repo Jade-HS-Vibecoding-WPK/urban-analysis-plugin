@@ -144,13 +144,41 @@ Neues Modul `urban_analysis/sources.py` (QGIS-frei, ohne Zusatzpakete):
   Der öffentliche Server war zunächst überlastet (HTTP 502, dann 504),
   nach 60 s erfolgreich → W11 braucht wenige Wiederholungen mit Pause.
 
+## M12 Teil 1 – Profil „ALKIS vereinfacht“ (18.11.2026)
+
+Neues Profil in `mapping_rules.json` für die 11 Länder mit dem
+AdV-Format (NI, NW, SH, HE, HH, SN, MV, BB, RP, ST, TH). Erkannt an den
+Layernamen `GebaeudeBauwerk`, `Nutzung`, `Flurstueck` (ohne `ave:`-Präfix,
+so speichert W11) und der Spalte `oid`.
+
+- **Gebäude:** Objektart aus `funktion` (z. B. Wohngebäude, Garage). Der
+  Layer enthält auch Überdachungen, Arkaden und Gebäudeteile; die Spalte
+  `gebnutzbez` trennt sie in **Gebäude**, **Gebäudeteile** und **Bauwerke
+  und Überdachungen**.
+- **Nutzung:** Hauptart aus `nutzart` („Weg“), Detail aus `bez` („Rad- und
+  Fußweg“). Die Regeln entsprechen dem ALKIS-Export, aber mit ß
+  („Straßenverkehr“, „Fließgewässer“), wie die Dienste es schreiben.
+- **Objekt-ID** aus `oid`, **Adresse** fertig aus `lagebeztxt` (auch
+  mehrere Nummern wie „Weg 4, 6“), **Geschosszahl** aus `anzahlgs`.
+- Kleine Erweiterung in `mapping.py`: `detail_field`, `category_field`,
+  `address_field` im Profil (bestehende Profile unverändert).
+- **Echt geprüft** mit einer Stichprobe aus dem Niedersachsen-Dienst
+  (500 × 500 m Donnerschwee, nur im Scratch-Ordner, nicht im Repo):
+  648 Gebäude, 62 Bauwerke/Überdachungen, 15 Gebäudeteile, 139
+  Nutzungsflächen (53 Rad-/Fußwege, 27 Straßen, 59 Nutzungsflächen),
+  keine falschen Hinweise. Alle Gebäude mit Objekt-ID, 365 von 725 mit
+  Adresse; **Niedersachsen liefert keine Geschosszahl**.
+- Tests: `tests/test_alkis_vereinfacht.py` (5).
+
+Offen (Teil 2): Profile für BW, HB, Berlin, Saarland, Bayern.
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 18.11.2026 abends: 257 grün.
+System-`python3` hat ein kaputtes pytest). Stand 18.11.2026 abends: 262 grün.
 
 ## Als Nächstes (Person Mac)
 
-Reihenfolge laut `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6: 6 M18 Recherche
-GTFS/Zensus · 7 M6 fehlende Werte · 10 M10b ALKIS-Aufträge und Bundesland ·
-11 M12 ALKIS-Profil „ALKIS vereinfacht“.
+Reihenfolge laut `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6: 10 M10b
+ALKIS-Aufträge und Bundesland · 6 M18 Recherche GTFS/Zensus · 7 M6 fehlende
+Werte · M12 Teil 2 (weitere Länderformate).

@@ -51,7 +51,7 @@ TARGET_FIELDS = (
 TARGET_FIELD_ALIASES: Mapping[str, Tuple[str, ...]] = {
     "object_id": ("object_id", "objid", "osm_id", "gml_id"),
     "address": ("address", "adresse", "anschrift"),
-    "floors": ("floors", "geschosse", "geschosszahl", "building:levels", "building_levels"),
+    "floors": ("floors", "geschosse", "geschosszahl", "anzahlgs", "building:levels", "building_levels"),
     "object_type": (
         "object_type",
         "objecttype",
