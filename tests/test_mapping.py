@@ -9,6 +9,7 @@ from urban_analysis.mapping import (
     readable_field,
     readable_layer,
     readable_target_field,
+    parse_tags,
     target_field_explanation,
 )
 from urban_analysis.data_pipeline import TARGET_FIELDS
@@ -23,6 +24,24 @@ def test_every_target_field_has_a_name_and_a_short_explanation():
         assert explanation, field
         assert explanation.endswith("."), field
         assert len(explanation) <= 120, field
+
+
+def test_osm_other_tags_are_read_like_gdal_writes_them():
+    text = '"addr:street"=>"Am \\"Ring\\"","building:levels"=>"3","note"=>"a=>b, c"'
+    assert parse_tags(text) == {"addr:street": 'Am "Ring"', "building:levels": "3", "note": "a=>b, c"}
+    assert parse_tags(None) == {}
+    assert parse_tags("") == {}
+
+
+def test_osm_tag_patterns_and_labels():
+    rules = default_mapping_rules()
+    houses = rules.profile_for("multipolygons", ("osm_id", "other_tags", "building"))
+    assert houses is not None and houses.profile_name == "OSM"
+    assert houses.tag_label("building=house") == "Wohnhaus"
+    assert houses.tag_label("building=kiosk") == "Gebäude"
+    assert houses.tag_label("shop=bakery") == "Geschäft"
+    assert houses.tag_label("craft=carpenter") == "craft=carpenter"
+    assert rules.profile_for("multipolygons", ("osm_id",)) is None
 
 
 def test_explanations_for_the_user_guidance():
