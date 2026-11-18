@@ -1847,17 +1847,19 @@ def _create_dock(plugin):
                 target.setEnabled(accepted.isChecked())
                 accepted.toggled.connect(target.setEnabled)
                 # Column name on its own line, the target field below it, so
-                # long names are never cut off in a narrow panel.  Examples
-                # appear on hover (tooltip) to keep the list short.
+                # long names are never cut off in a narrow panel; then a short
+                # grey line with examples (G9: examples stay visible).
                 detail = mapping_detail_text(suggestion.source_field, suggestion.examples)
-                accepted.setToolTip(detail)
-                target.setToolTip(detail)
                 card_layout.addWidget(accepted)
                 row = QHBoxLayout()
-                row.setContentsMargins(INDENT_PX, 0, 0, 4)
+                row.setContentsMargins(INDENT_PX, 0, 0, 0)
                 row.addWidget(arrow)
                 row.addWidget(target, 1)
                 card_layout.addLayout(row)
+                examples = QLabel(detail)
+                examples.setWordWrap(True)
+                set_role(examples, "hint")
+                card_layout.addWidget(indented(examples))
                 inputs.append((suggestion, accepted, target))
         page.widgets["inputs"] = inputs
 
