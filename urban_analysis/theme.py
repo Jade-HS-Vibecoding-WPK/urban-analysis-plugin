@@ -170,6 +170,7 @@ ROLES = (
     "status",     # live feedback such as the area summary
     "error",      # message: something must be fixed
     "info",       # message: neutral information
+    "warning",    # message: possible problem, you may still continue
     "issue-error",    # one review hint (step 4), by severity
     "issue-warning",
     "issue-info",
@@ -280,6 +281,13 @@ QLabel[uaRole="error"] {{
 QLabel[uaRole="info"] {{
     background-color: {c['info_bg']};
     color: {c['info']};
+    border: 2px solid {c['outline']};
+    border-radius: {r}px;
+    padding: 6px;
+}}
+QLabel[uaRole="warning"] {{
+    background-color: {c['warning_bg']};
+    color: {c['warning']};
     border: 2px solid {c['outline']};
     border-radius: {r}px;
     padding: 6px;
@@ -540,6 +548,13 @@ QLabel[uaRole="info"] {{
     background-color: {c['info_bg']};
     color: {c['info']};
     border: 1px solid {c['info']};
+    border-radius: {r}px;
+    padding: 6px;
+}}
+QLabel[uaRole="warning"] {{
+    background-color: {c['warning_bg']};
+    color: {c['warning']};
+    border: 1px solid #d99a00;
     border-radius: {r}px;
     padding: 6px;
 }}
