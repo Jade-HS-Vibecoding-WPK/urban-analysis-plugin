@@ -1279,8 +1279,15 @@ def _create_dock(plugin):
         panel_layout.setContentsMargins(12, 8, 12, 12)
         panel.setMaximumHeight(0)
         panel.hide()
-        page.layout.addWidget(button)
-        page.layout.addWidget(panel)
+        # Button and panel sit in one box without spacing, so the opened
+        # panel hangs directly (flush) below its button.
+        group = QWidget()
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        group_layout.setSpacing(0)
+        group_layout.addWidget(button)
+        group_layout.addWidget(panel)
+        page.layout.addWidget(group)
         page.widgets[f"{key}_button"] = button
         page.widgets[f"{key}_panel"] = panel
 
