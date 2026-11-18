@@ -14,9 +14,18 @@ Shapes:
     ("text", text, colour)                   centred character
 """
 
+import math
+
 from .layer_icons import ICON_KEYS
 
 INK = "#3d4650"
+
+# Smooth S-shaped path from the lower left to the upper right (many points,
+# drawn with round joins, so it looks curved instead of bent).
+_WINDING_PATH = tuple(
+    (round(6.2 + 4.0 * t + 2.4 * math.sin(2 * math.pi * t), 2), round(14.2 - 12.0 * t, 2))
+    for t in (i / 20 for i in range(21))
+)
 
 CLASSIC_ICONS = {
     "gebaeude": [
@@ -49,16 +58,10 @@ CLASSIC_ICONS = {
         ("rect", 10.6, 7.6, 2.4, 0.9, "#ffffff"),
     ],
     "wege": [
-        # path in perspective on grass, narrowing to the back, dashed middle
-        # line: walking and cycling side by side
+        # a smooth winding sand path through grass (darker edge, light path)
         ("badge", "#e6f1e4"),
-        ("poly", ((4.2, 14.4), (11.8, 14.4), (9.1, 2.4), (6.9, 2.4)), "#dcc59d"),
-        ("line", ((4.2, 14.4), (6.9, 2.4)), "#b3925f", 0.8),
-        ("line", ((11.8, 14.4), (9.1, 2.4)), "#b3925f", 0.8),
-        ("line", ((8, 13.6), (8, 11.6)), "#ffffff", 0.9),
-        ("line", ((8, 9.6), (8, 8.0)), "#ffffff", 0.8),
-        ("line", ((8, 6.4), (8, 5.2)), "#ffffff", 0.7),
-        ("line", ((8, 4.0), (8, 3.2)), "#ffffff", 0.6),
+        ("line", _WINDING_PATH, "#b3925f", 3.6),
+        ("line", _WINDING_PATH, "#e3cfa6", 2.6),
     ],
     "plaetze": [
         ("badge", "#f2ede3"),
