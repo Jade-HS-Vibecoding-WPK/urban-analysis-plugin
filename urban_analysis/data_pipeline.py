@@ -748,16 +748,19 @@ class GeoPackageImporter:
         GDAL keeps rarer OSM tags such as ``addr:street`` or ``building:levels``
         in one text column.  Only the keys named in the profile become extra
         columns; existing columns are never overwritten and the original
-        ``other_tags`` value stays in the row.
+        ``other_tags`` value stays in the row.  A key becomes a column only if
+        at least one row has it, so step 5 never offers an empty column (e.g.
+        building levels on lines).
         """
         if not profile.tags_field or profile.tags_field not in layer.fields or not profile.tag_columns:
             return layer
-        new_columns = tuple(key for key in profile.tag_columns if key not in layer.fields)
+        wanted = [key for key in profile.tag_columns if key not in layer.fields]
+        parsed = [parse_tags(row.get(profile.tags_field)) for row in layer.rows]
+        new_columns = tuple(key for key in wanted if any(tags.get(key) for tags in parsed))
         if not new_columns:
             return layer
         rows = []
-        for row in layer.rows:
-            tags = parse_tags(row.get(profile.tags_field))
+        for row, tags in zip(layer.rows, parsed):
             expanded = dict(row)
             for key in new_columns:
                 expanded[key] = tags.get(key)

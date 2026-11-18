@@ -39,7 +39,8 @@ def test_osm_tag_patterns_and_labels():
     assert houses is not None and houses.profile_name == "OSM"
     assert houses.tag_label("building=house") == "Wohnhaus"
     assert houses.tag_label("building=kiosk") == "Gebäude"
-    assert houses.tag_label("shop=bakery") == "shop=bakery"
+    assert houses.tag_label("shop=bakery") == "Geschäft"
+    assert houses.tag_label("craft=carpenter") == "craft=carpenter"
     assert rules.profile_for("multipolygons", ("osm_id",)) is None
 
 

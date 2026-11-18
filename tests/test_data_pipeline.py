@@ -1115,7 +1115,7 @@ def make_osm_geopackage(path):
                 ('points', 'geom', 'POINT', 25832);
             CREATE TABLE multipolygons (
                 fid INTEGER PRIMARY KEY, geom BLOB, osm_id TEXT, osm_way_id TEXT, name TEXT,
-                type TEXT, amenity TEXT, building TEXT, landuse TEXT, leisure TEXT,
+                type TEXT, amenity TEXT, barrier TEXT, building TEXT, landuse TEXT, leisure TEXT,
                 "natural" TEXT, place TEXT, other_tags TEXT
             );
             CREATE TABLE lines (
@@ -1138,6 +1138,17 @@ def make_osm_geopackage(path):
                 (4, square(7, 1), None, "14", None, "residential", None, None, None),
                 (5, square(1, 4), "5", None, None, None, None, "water", '"type"=>"multipolygon"'),
                 (6, square(3, 4), None, "16", None, None, None, None, '"shop"=>"bakery"'),
+            ],
+        )
+        # Found in the first real OSM test (Donnerschwee): single parking
+        # spaces, hedges, school grounds and building parts.
+        connection.executemany(
+            "INSERT INTO multipolygons (fid, geom, osm_way_id, amenity, barrier, other_tags) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (7, square(5, 4), "17", "parking_space", None, None),
+                (8, square(7, 4), "18", None, "hedge", None),
+                (9, square(1, 6), "19", "school", None, None),
+                (10, square(3, 6), "20", None, None, '"building:part"=>"yes","roof:shape"=>"flat"'),
             ],
         )
         connection.executemany(
@@ -1183,6 +1194,10 @@ def test_osm_areas_get_categories_and_readable_object_types(tmp_path):
         4: ("multipolygons_flaechen", "Nutzungsflächen", "Wohnbaufläche"),
         5: ("multipolygons_wasser", "Wasserflächen", "Gewässer"),
         6: ("multipolygons_sonstige", "Sonstige OSM-Flächen", None),
+        7: ("multipolygons_strassen", "Straßen", "Stellplatz"),
+        8: ("multipolygons_gruen", "Grünflächen", "Hecke"),
+        9: ("multipolygons_flaechen", "Nutzungsflächen", "Schulgelände"),
+        10: ("multipolygons_sonstige", "Sonstige OSM-Flächen", "Gebäudeteil"),
     }
 
 
@@ -1203,6 +1218,9 @@ def test_osm_ids_address_and_floors(tmp_path):
     assert targets[("multipolygons", "floors")] == "building:levels"
     assert ("multipolygons", "object_id") not in targets
     assert ("multipolygons", "address") not in targets
+    # No building has levels on lines or points: no empty column in step 5.
+    assert ("lines", "floors") not in targets
+    assert ("points", "floors") not in targets
 
 
 def test_osm_lines_are_split_into_paths_streets_and_railways(tmp_path):

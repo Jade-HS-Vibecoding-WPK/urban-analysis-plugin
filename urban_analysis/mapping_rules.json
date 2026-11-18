@@ -200,7 +200,7 @@
       "requires_fields": ["osm_id", "other_tags"],
       "_hinweis_tags": "Diese Schlüssel werden aus other_tags als eigene Spalten gelesen (Adresse, Geschosszahl, Merkmale für die Kategorie).",
       "tags_field": "other_tags",
-      "tag_columns": ["addr:street", "addr:housenumber", "building:levels", "highway", "railway", "water", "waterway"],
+      "tag_columns": ["addr:street", "addr:housenumber", "building:levels", "building:part", "highway", "railway", "water", "waterway"],
       "street_field": "addr:street",
       "house_number_field": "addr:housenumber",
       "_hinweis_tag_labels": "Verständliche Objektart für häufige OSM-Merkmale. Fehlt ein Eintrag, wird „Schlüssel=*“ genommen, sonst das Merkmal selbst (z. B. „shop=bakery“).",
@@ -232,7 +232,28 @@
         "highway=pedestrian": "Fußgängerzone",
         "highway=steps": "Treppe",
         "highway=*": "Straße",
+        "building:part=*": "Gebäudeteil",
         "amenity=parking": "Parkplatz",
+        "amenity=parking_space": "Stellplatz",
+        "amenity=bicycle_parking": "Fahrradstellplatz",
+        "amenity=school": "Schulgelände",
+        "amenity=kindergarten": "Kita",
+        "amenity=college": "Hochschulgelände",
+        "amenity=university": "Hochschulgelände",
+        "amenity=hospital": "Krankenhausgelände",
+        "amenity=social_facility": "Soziale Einrichtung",
+        "amenity=fuel": "Tankstelle",
+        "amenity=car_wash": "Autowaschanlage",
+        "amenity=events_venue": "Veranstaltungsort",
+        "amenity=exhibition_centre": "Ausstellungsgelände",
+        "amenity=parcel_locker": "Paketstation",
+        "amenity=recycling": "Wertstoffsammelstelle",
+        "amenity=*": "Einrichtung",
+        "shop=mall": "Einkaufszentrum",
+        "shop=*": "Geschäft",
+        "barrier=hedge": "Hecke",
+        "barrier=*": "Absperrung",
+        "natural=shrubbery": "Gebüsch",
         "place=square": "Platz",
         "leisure=park": "Park",
         "leisure=garden": "Garten",
@@ -257,7 +278,7 @@
       },
       "layers": {
         "multipolygons": {
-          "tag_fields": ["building", "highway", "amenity", "place", "leisure", "landuse", "natural", "water", "railway"],
+          "tag_fields": ["building", "highway", "amenity", "place", "leisure", "landuse", "natural", "water", "railway", "barrier", "shop", "building:part"],
           "object_id_fields": [
             {"field": "osm_way_id", "prefix": "way/"},
             {"field": "osm_id", "prefix": "relation/"}
@@ -269,7 +290,11 @@
               "layer_suffix": "fuss_radwege",
               "values": ["highway=pedestrian", "highway=footway", "highway=cycleway", "highway=path"]
             },
-            {"category": "Straßen", "layer_suffix": "strassen", "values": ["highway=*", "amenity=parking"]},
+            {
+              "category": "Straßen",
+              "layer_suffix": "strassen",
+              "values": ["highway=*", "amenity=parking", "amenity=parking_space", "amenity=bicycle_parking"]
+            },
             {"category": "Plätze", "layer_suffix": "plaetze", "values": ["place=square"]},
             {
               "category": "Grünflächen",
@@ -278,7 +303,8 @@
                 "leisure=park", "leisure=garden", "leisure=playground", "leisure=nature_reserve",
                 "landuse=grass", "landuse=meadow", "landuse=forest", "landuse=allotments",
                 "landuse=cemetery", "landuse=village_green", "landuse=recreation_ground",
-                "natural=wood", "natural=scrub", "natural=heath", "natural=grassland", "natural=wetland"
+                "natural=wood", "natural=scrub", "natural=shrubbery", "natural=heath", "natural=grassland",
+                "natural=wetland", "barrier=hedge"
               ]
             },
             {
@@ -287,7 +313,16 @@
               "values": ["natural=water", "water=*", "landuse=reservoir", "landuse=basin"]
             },
             {"category": "Bahnflächen", "layer_suffix": "bahn", "values": ["landuse=railway", "railway=*"]},
-            {"category": "Nutzungsflächen", "layer_suffix": "flaechen", "values": ["landuse=*", "leisure=*"]}
+            {
+              "category": "Nutzungsflächen",
+              "layer_suffix": "flaechen",
+              "values": [
+                "landuse=*", "leisure=*",
+                "amenity=school", "amenity=kindergarten", "amenity=college", "amenity=university",
+                "amenity=hospital", "amenity=social_facility", "amenity=fuel", "amenity=car_wash",
+                "amenity=events_venue", "amenity=exhibition_centre"
+              ]
+            }
           ],
           "default_rule": {"category": "Sonstige OSM-Flächen", "layer_suffix": "sonstige"}
         },
