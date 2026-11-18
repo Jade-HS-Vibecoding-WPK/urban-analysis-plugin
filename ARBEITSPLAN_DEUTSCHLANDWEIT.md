@@ -192,9 +192,10 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 
 ## 6. Schritte Person Mac – Datenpipeline
 
-### M8 – Gebäude mit mehreren Adressen *(erledigt, PR #21 gemergt)*
+### M8 – Gebäude mit mehreren Adressen *(erledigt, PR noch offen)*
 
-- Siehe E8. In QGIS mit echten ALKIS-Daten geprüft.
+- Branch `feature/pipeline-objekt-zeilen`, Commit `64c52fb`. Siehe E8.
+- **Noch offen:** in QGIS mit echten ALKIS-Daten prüfen, dann PR.
 
 ### M9 – Recherche: ALKIS-Dienste der 16 Bundesländer
 
