@@ -9,6 +9,7 @@ they always reflect the data that is currently loaded.
 """
 
 import os
+import re
 from datetime import date
 from pathlib import Path
 
@@ -450,6 +451,30 @@ def readable_names():
     return ReadableNames(readable_layer, readable_field, readable_target_field)
 
 
+MORE_LABEL = "Mehr erfahren ▸"
+LESS_LABEL = "Weniger ▾"
+_ABBREVIATIONS = ("z. B", "d. h", "u. a", "z. T", "ca", "bzw", "Nr", "evtl", "ggf", "usw", "inkl")
+
+
+def split_summary(message, details=None):
+    """Short text for a hint plus the rest for 'Mehr erfahren' (W13).
+
+    With ``details`` from the pipeline (G6) the message is the short text.
+    Until then the first sentence is the summary and the rest goes below
+    'Mehr erfahren'; abbreviations like 'z. B.' do not end a sentence."""
+    text = (message or "").strip()
+    if details:
+        return text, str(details).strip()
+    for match in re.finditer(r"[.!?]\s+(?=[A-ZÄÖÜ„\"(])", text):
+        before = text[:match.start()]
+        last_word = before.split()[-1] if before.split() else ""
+        # 'z.' of 'z. B.' (one letter) or a known abbreviation: no sentence end
+        if len(last_word) <= 1 or before.endswith(_ABBREVIATIONS):
+            continue
+        return text[:match.start() + 1], text[match.end():].strip()
+    return text, ""
+
+
 def mapping_detail_text(source_field, examples):
     """Small line below a mapping row: examples from the data and the column."""
     shown = [f"„{example}“" for example in tuple(examples or ())[:2] if example not in (None, "")]
@@ -699,7 +724,7 @@ def _create_dock(plugin):
         QgsTask,
     )
     from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
-    from qgis.PyQt.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
+    from qgis.PyQt.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer
 
     from .ui.widgets.pixel_button import PixelButton
     from .ui.widgets.pixel_scene import PixelScene
@@ -730,6 +755,7 @@ def _create_dock(plugin):
         from qgis.PyQt.QtWidgets import QAction, QActionGroup
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
+        QAbstractSpinBox,
         QApplication,
         QButtonGroup,
         QCheckBox,
@@ -769,6 +795,33 @@ def _create_dock(plugin):
             _clear_layout(self.layout)
             self.widgets = {}
             self.builder(self)
+            guard_wheel(self.widget)
+
+    class WheelGuard(QObject):
+        """The mouse wheel never changes a choice list or number field by
+        accident: it scrolls the panel instead.  Values change only after a
+        click (list opens) or typing."""
+
+        def eventFilter(self, watched, event):
+            if event.type() != QEvent.Wheel:
+                return False
+            if isinstance(watched, QAbstractSpinBox) and watched.hasFocus():
+                return False  # typing in it: wheel may change the number
+            parent = watched.parentWidget()
+            while parent is not None and not isinstance(parent, QScrollArea):
+                parent = parent.parentWidget()
+            if parent is not None:
+                bar = parent.verticalScrollBar()
+                steps = event.angleDelta().y() / 120
+                bar.setValue(bar.value() - round(steps * bar.singleStep() * 3))
+            return True  # never passed on to the list / number field
+
+    wheel_guard = WheelGuard()
+
+    def guard_wheel(widget):
+        for child in widget.findChildren(QComboBox) + widget.findChildren(QAbstractSpinBox):
+            child.setFocusPolicy(Qt.StrongFocus)  # no focus by merely hovering
+            child.installEventFilter(wheel_guard)
 
     class GuidedDock(QgsDockWidget):
         """Side panel that walks through the nine MVP steps."""
@@ -1753,20 +1806,41 @@ def _create_dock(plugin):
         set_role(card, f"issue-{severity}")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 6, 8, 6)
-        text = QLabel(issue.message)
+        short, more = split_summary(issue.message, getattr(issue, "details", None))
+        text = QLabel(short)
         text.setWordWrap(True)
         key = issue_icon_key(flow, issue)
         card_layout.addWidget(with_icon(key, text) if key else text)
-        details = []
-        if issue.rule:
-            details.append(f"Regel: {issue.rule}")
         if issue.code in DECIDED_IN_HARMONIZATION:
-            details.append("Entscheidung in Schritt 6 „Harmonisierung“")
-        if details:
-            meta = QLabel(" · ".join(details))
-            meta.setWordWrap(True)
-            set_role(meta, "hint")
-            card_layout.addWidget(meta)
+            step6 = QLabel("Entscheidung in Schritt 6 „Harmonisierung“")
+            step6.setWordWrap(True)
+            set_role(step6, "hint")
+            card_layout.addWidget(step6)
+        extra = [part for part in (more, f"Regel: {issue.rule}" if issue.rule else "") if part]
+        if extra:
+            # short summary first; the explanation folds out on demand (W13)
+            more_label = QLabel("\n\n".join(extra))
+            more_label.setWordWrap(True)
+            set_role(more_label, "hint")
+            more_label.hide()
+            toggle = QPushButton(MORE_LABEL)
+            toggle.setFlat(True)
+            toggle.setCursor(Qt.PointingHandCursor)
+            toggle.setStyleSheet("text-align: left; padding: 0; border: none; background: transparent;"
+                                 "text-decoration: underline;")
+
+            def flip(_checked=False, label=more_label, button=toggle):
+                label.setVisible(not label.isVisible())
+                button.setText(LESS_LABEL if label.isVisible() else MORE_LABEL)
+                QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+            toggle.clicked.connect(flip)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(toggle)
+            row.addStretch()
+            card_layout.addLayout(row)
+            card_layout.addWidget(more_label)
         if flow.needs_review_confirmation(issue):
             confirm = QCheckBox("Gelesen und bestätigt")
             confirm.setChecked(issue.confirmed is True)
