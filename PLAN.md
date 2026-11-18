@@ -138,10 +138,10 @@ drei neue:
 | `address` *(neu, E20)* | Adresse | Straße und Hausnummer, z. B. „Hauptstraße 2“; bei mehreren Adressen mit „; “ getrennt. |
 | `floors` *(neu)* | Geschosszahl | Anzahl der oberirdischen Geschosse eines Gebäudes (ALKIS-Gebäude, OSM `building:levels`). |
 | `source_name` | Dateiname | Datei oder Download, aus dem das Objekt stammt. |
-| `object_type` | Objektart | Was das Objekt ist, z. B. Gebäude, Straße, Grünfläche. |
-| `object_detail` | Nutzungsdetail | Genauere Art der Nutzung, z. B. Wohnen, Gewerbe, Spielplatz. |
+| `object_type` | Objektart | Was das Objekt genau ist, z. B. Wohngebäude, Garage oder Wohnbaufläche. |
+| `object_detail` | Nutzungsdetail | Genauere Angabe zur Objektart, wenn die Quelle eine hat, z. B. „Park“ bei einer Erholungsfläche. |
 | `category` | Kategorie | Gruppe im Kartenthema, z. B. Gebäude, Straßen, Grünflächen. |
-| `status` | Status | Ob es das Objekt gibt, z. B. Bestand oder geplant. |
+| `status` | Status | Zustand des Objekts laut Quelle, z. B. „in Betrieb“ oder „außer Betrieb“; oft leer. |
 | `area_m2` | Fläche (m²) | Grundfläche in Quadratmetern. |
 | `year` | Jahr | Baujahr oder Jahr der Erfassung, wenn bekannt. |
 | `source` | Datenquelle | Herkunft der Daten, wird in Schritt 8 eingetragen. |
