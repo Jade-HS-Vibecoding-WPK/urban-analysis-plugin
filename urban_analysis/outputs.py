@@ -14,7 +14,7 @@ from .user_guidance import OutputPlan
 RESULT_LAYER_PROPERTY = "urban_analysis/result_layer"
 RESULT_GROUP_PROPERTY = "urban_analysis/result_group"
 DOUBLE_FIELDS = ("area_m2",)
-INTEGER_FIELDS = ("year",)
+INTEGER_FIELDS = ("year", "floors")
 SKIP_NO_GEOMETRY = "ohne Geometrie"
 SKIP_UNREADABLE = "Geometrie nicht lesbar"
 SKIP_OTHER_TYPE = "anderer Geometrietyp als der Layer"
