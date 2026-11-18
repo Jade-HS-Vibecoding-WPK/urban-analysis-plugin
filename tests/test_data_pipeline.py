@@ -1079,3 +1079,187 @@ def test_unknown_or_double_targets_are_rejected(tmp_path):
     suggestion_for(result, "buildings", "type").user_value = "year"
     with pytest.raises(ValueError, match="zweimal zugeordnet"):
         apply_attribute_decisions(result)
+
+
+# --- M11: OpenStreetMap as GDAL/QGIS stores it -------------------------------
+
+
+def wkb_linestring(points):
+    data = struct.pack("<BII", 1, 2, len(points))
+    for x, y in points:
+        data += struct.pack("<dd", x, y)
+    return data
+
+
+def square(x, y, size=1):
+    return gpkg_polygon([(x, y), (x + size, y), (x + size, y + size), (x, y + size), (x, y)])
+
+
+def make_osm_geopackage(path):
+    """Layers multipolygons/lines/points with the default GDAL OSM columns."""
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER
+            );
+            INSERT INTO gpkg_spatial_ref_sys VALUES
+                ('ETRS89 / UTM zone 32N', 25832, 'EPSG', 25832);
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT, srs_id INTEGER
+            );
+            INSERT INTO gpkg_geometry_columns VALUES
+                ('multipolygons', 'geom', 'MULTIPOLYGON', 25832),
+                ('lines', 'geom', 'LINESTRING', 25832),
+                ('points', 'geom', 'POINT', 25832);
+            CREATE TABLE multipolygons (
+                fid INTEGER PRIMARY KEY, geom BLOB, osm_id TEXT, osm_way_id TEXT, name TEXT,
+                type TEXT, amenity TEXT, barrier TEXT, building TEXT, landuse TEXT, leisure TEXT,
+                "natural" TEXT, place TEXT, other_tags TEXT
+            );
+            CREATE TABLE lines (
+                fid INTEGER PRIMARY KEY, geom BLOB, osm_id TEXT, name TEXT, highway TEXT,
+                waterway TEXT, barrier TEXT, railway TEXT, other_tags TEXT
+            );
+            CREATE TABLE points (
+                fid INTEGER PRIMARY KEY, geom BLOB, osm_id TEXT, name TEXT, other_tags TEXT
+            );
+            """
+        )
+        house_tags = '"addr:street"=>"Hauptstraße","addr:housenumber"=>"2","building:levels"=>"3"'
+        connection.executemany(
+            "INSERT INTO multipolygons (fid, geom, osm_id, osm_way_id, building, landuse, leisure, "
+            '"natural", other_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                (1, square(1, 1), None, "11", "house", None, None, None, house_tags),
+                (2, square(3, 1), None, "12", "yes", None, None, None, None),
+                (3, square(5, 1), None, "13", None, "grass", "park", None, None),
+                (4, square(7, 1), None, "14", None, "residential", None, None, None),
+                (5, square(1, 4), "5", None, None, None, None, "water", '"type"=>"multipolygon"'),
+                (6, square(3, 4), None, "16", None, None, None, None, '"shop"=>"bakery"'),
+            ],
+        )
+        # Found in the first real OSM test (Donnerschwee): single parking
+        # spaces, hedges, school grounds and building parts.
+        connection.executemany(
+            "INSERT INTO multipolygons (fid, geom, osm_way_id, amenity, barrier, other_tags) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (7, square(5, 4), "17", "parking_space", None, None),
+                (8, square(7, 4), "18", None, "hedge", None),
+                (9, square(1, 6), "19", "school", None, None),
+                (10, square(3, 6), "20", None, None, '"building:part"=>"yes","roof:shape"=>"flat"'),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO lines (fid, geom, osm_id, highway, railway, other_tags) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (1, gpkg_blob(wkb_linestring([(1, 7), (5, 7)])), "21", "footway", None, None),
+                (2, gpkg_blob(wkb_linestring([(1, 8), (5, 8)])), "22", "residential", None, '"maxspeed"=>"30"'),
+                (3, gpkg_blob(wkb_linestring([(1, 9), (5, 9)])), "23", None, "rail", None),
+            ],
+        )
+        # GDAL stores closed ways with building:part, barrier or tree rows as
+        # lines; the real Donnerschwee test had about 1 000 of them.
+        part_tags = '"building:part"=>"yes","roof:shape"=>"flat","building:levels"=>"2"'
+        connection.executemany(
+            "INSERT INTO lines (fid, geom, osm_id, barrier, other_tags) VALUES (?, ?, ?, ?, ?)",
+            [
+                (4, gpkg_blob(wkb_linestring([(6, 1), (6, 2), (7, 2), (6, 1)])), "24", None, part_tags),
+                (5, gpkg_blob(wkb_linestring([(6, 3), (9, 3)])), "25", "fence", None),
+                (6, gpkg_blob(wkb_linestring([(6, 4), (9, 4)])), "26", "hedge", None),
+                (7, gpkg_blob(wkb_linestring([(6, 5), (9, 5)])), "27", None, '"natural"=>"tree_row"'),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO points VALUES (1, ?, '31', 'Bäckerei', '\"shop\"=>\"bakery\"')", (gpkg_point(4, 5),)
+        )
+
+
+def import_osm(path):
+    return GeoPackageImporter().import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",
+        buffer_meters=0,
+    )
+
+
+def osm_records(result, table):
+    return {record.source_row_id: record for record in result.harmonized_records if record.source_layer == table}
+
+
+def test_osm_areas_get_categories_and_readable_object_types(tmp_path):
+    path = tmp_path / "osm.gpkg"
+    make_osm_geopackage(path)
+
+    areas = osm_records(import_osm(path), "multipolygons")
+
+    summary = {
+        fid: (record.layer_id, record.attributes["category"], record.attributes["object_type"])
+        for fid, record in areas.items()
+    }
+    assert summary == {
+        1: ("multipolygons_gebaeude", "Gebäude", "Wohnhaus"),
+        2: ("multipolygons_gebaeude", "Gebäude", "Gebäude"),
+        3: ("multipolygons_gruen", "Grünflächen", "Park"),
+        4: ("multipolygons_flaechen", "Nutzungsflächen", "Wohnbaufläche"),
+        5: ("multipolygons_wasser", "Wasserflächen", "Gewässer"),
+        6: ("multipolygons_sonstige", "Sonstige OSM-Flächen", None),
+        7: ("multipolygons_strassen", "Straßen", "Stellplatz"),
+        8: ("multipolygons_gruen", "Grünflächen", "Hecke"),
+        9: ("multipolygons_flaechen", "Nutzungsflächen", "Schulgelände"),
+        10: ("multipolygons_sonstige", "Sonstige OSM-Flächen", "Gebäudeteil"),
+    }
+
+
+def test_osm_ids_address_and_floors(tmp_path):
+    path = tmp_path / "osm.gpkg"
+    make_osm_geopackage(path)
+
+    result = import_osm(path)
+    areas = osm_records(result, "multipolygons")
+
+    house = areas[1].attributes
+    assert (house["object_id"], house["address"], house["floors"]) == ("way/11", "Hauptstraße 2", 3)
+    assert areas[5].attributes["object_id"] == "relation/5"
+    assert osm_records(result, "lines")[1].attributes["object_id"] == "way/21"
+    assert osm_records(result, "points")[1].attributes["object_id"] == "node/31"
+    assert areas[1].source_attributes["other_tags"].startswith('"addr:street"')
+    targets = {(s.layer_id, s.target_field): s.source_field for s in result.attribute_suggestions}
+    assert targets[("multipolygons", "floors")] == "building:levels"
+    assert ("multipolygons", "object_id") not in targets
+    assert ("multipolygons", "address") not in targets
+    # Building parts (lines) have levels; no point has: no empty column in step 5.
+    assert targets[("lines", "floors")] == "building:levels"
+    assert ("points", "floors") not in targets
+
+
+def test_osm_lines_are_split_into_paths_streets_and_railways(tmp_path):
+    path = tmp_path / "osm.gpkg"
+    make_osm_geopackage(path)
+
+    lines = osm_records(import_osm(path), "lines")
+
+    summary = {fid: (record.attributes["category"], record.attributes["object_type"]) for fid, record in lines.items()}
+    assert summary == {
+        1: ("Fuß- und Radwege", "Fußweg"),
+        2: ("Straßen", "Wohnstraße"),
+        3: ("Bahnstrecken", "Bahnstrecke"),
+        4: ("Gebäudeteile", "Gebäudeteil"),
+        5: ("Zäune und Mauern", "Zaun"),
+        6: ("Hecken und Baumreihen", "Hecke"),
+        7: ("Hecken und Baumreihen", "Baumreihe"),
+    }
+    assert lines[4].attributes["floors"] == 2
+
+
+def test_osm_import_has_no_false_hints(tmp_path):
+    path = tmp_path / "osm.gpkg"
+    make_osm_geopackage(path)
+
+    codes = {issue.code for issue in import_osm(path).issues}
+
+    assert "uncertain-duplicate" not in codes
+    assert "missing-category" not in codes
+    assert "several-addresses" not in codes
