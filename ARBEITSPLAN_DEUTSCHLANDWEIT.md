@@ -1,7 +1,8 @@
 # Arbeitsplan Phase 2: Deutschlandweit mit OSM und ALKIS
 
 Stand: 18.11.2026 – **E5–E15 von Person Windows bestätigt (G5), ergänzt um
-E16–E19. Zustimmung der Person Mac zu E16–E19 im Review des G5-PR.**
+E16–E19. Person Mac stimmt E16, E17 und E19 zu; E18 auf Wunsch der Person
+Mac geändert (jedes Mal fragen, letzter Ordner als Vorschlag).**
 
 Der erste Arbeitsplan (`ARBEITSPLAN.md`) ist im Wesentlichen erledigt: Das
 Plugin läuft in QGIS von Schritt 1 bis 9 mit einer lokalen GeoPackage-Datei.
@@ -57,7 +58,7 @@ Ergänzungen von Person Windows in G5:
 | --- | --- |
 | E16 | **Eigener ALKIS-Export als Datei (ergänzt E6, E10):** Unter „Eigene Datei“ darf auch ein eigener ALKIS-Export geladen werden (z. B. `lkr_03403_Stadt_Oldenburg_kon.gpkg`). Das Plugin erkennt ihn am Profil und behandelt ihn als Quelle `"ALKIS"`. So bleiben Phase-1-Ablauf und Tests mit der lokalen Datei erhalten. |
 | E17 | **Gebietsgröße schon in Schritt 2 (ergänzt E13):** Schritt 2 zeigt beim Wählen oder Zeichnen die Größe von Gebiet + Puffer (umgebendes Rechteck), z. B. „6,1 km² von höchstens 25 km²“. Über der Grenze erscheint dort schon ein Hinweis; die verbindliche Prüfung bleibt in S9. |
-| E18 | **Zielordner einmal fragen (ändert E14):** Beim ersten Download fragt das Plugin nach dem Ordner (Vorschlag: Ordner des QGIS-Projekts) und merkt ihn sich. Schritt 3 zeigt den Ordner an und hat einen Knopf „Ordner ändern“. Dateiname weiter mit Quelle und Datum. |
+| E18 | **Zielordner jedes Mal fragen, mit Vorschlag (ergänzt E14):** Vor jedem Download fragt das Plugin nach dem Ordner (E14 bleibt). Im Auswahlfenster ist der zuletzt gewählte Ordner schon vorausgewählt; beim allerersten Download der Ordner des QGIS-Projekts. Die Nutzerin bestätigt oder wählt einen anderen. Dateiname weiter mit Quelle und Datum. *(geändert von Person Mac nach dem G5-Review)* |
 | E19 | **Vorgeschlagener Vorrang (ergänzt E7):** Schritt 6 schlägt je Kategorie eine Quelle vor – Gebäude und Nutzungsflächen: ALKIS; Straßen und Grünflächen: OSM. Die Nutzerin bestätigt oder ändert; erst dann gilt die Auswahl. Der Vorschlag steht in einer Einstellungsdatei und ist änderbar. |
 
 Weiter gilt unverändert:
@@ -287,14 +288,15 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   bisherigen Dateiauswahl-Feld); Bundesland wird vorgeschlagen und ist
   änderbar (E11); ALKIS ist ausgegraut mit Erklärung, wenn das Land keinen
   Dienst hat; Meldung, wenn das Gebiet größer als 25 km² ist (E13);
-  Zielordner wird angezeigt, „Ordner ändern“ (E18); ein eigener ALKIS-Export
+  ein eigener ALKIS-Export
   wird als ALKIS erkannt (E16). Außerdem in Schritt 2: Anzeige der
   Gebietsgröße (E17).
 - **Warten auf:** M10 (kann mit Platzhalter-Daten beginnen).
 
 ### W11 – Herunterladen in QGIS (S10)
 
-- **Ziel:** Ordner abfragen und merken (E14, E18), Download als `QgsTask`
+- **Ziel:** Vor jedem Download den Ordner abfragen, zuletzt gewählter Ordner
+  als Vorschlag vorausgewählt (E14, E18), Download als `QgsTask`
   mit Fortschritt (Schrittleiste/Ladebalken im klassischen Stil, Angel-Szene
   im Pixel-Stil) und dem vorhandenen „Laden abbrechen“, Speichern als GeoPackage mit Quelle und Datum im Namen,
   Umprojektion ins Projekt-CRS, verständliche Fehler und Abbruch ohne
