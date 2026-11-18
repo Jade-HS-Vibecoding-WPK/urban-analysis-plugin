@@ -1687,7 +1687,27 @@ def _create_dock(plugin):
             return reject(blocker)
         return True
 
-    # 5 Attributzuordnung: per layer "column -> target field" with examples
+    def collapsible(page, key, text, icon_key=None, opened=False):
+        """Fold-out section (choice button + panel) with an optional layer icon;
+        keeps long pages short.  Returns the panel's layout."""
+        panel_layout = choice_with_panel(page, key, text)
+        button = page.widgets[f"{key}_button"]
+        if icon_key:
+            button.setIcon(layer_icon(icon_key))
+            button.setIconSize(icon_size())
+        page.widgets.setdefault("sections", []).append(key)
+        if opened:
+            button.setChecked(True)
+        return panel_layout
+
+    def open_sections(page, keys=None):
+        """Open fold-out sections, e.g. so a validation message can be seen."""
+        for key in page.widgets.get("sections", []) if keys is None else keys:
+            button = page.widgets.get(f"{key}_button")
+            if button is not None and not button.isChecked():
+                button.setChecked(True)
+
+    # 5 Attributzuordnung: one fold-out per layer, "column -> target field"
     def build_mapping(page):
         flow = workflow()
         names = readable_names()
@@ -1699,16 +1719,13 @@ def _create_dock(plugin):
         if not groups:
             page.layout.addWidget(QLabel(NO_SUGGESTIONS_TEXT))
         inputs = []
-        for layer_id, suggestions in groups.items():
-            card = QFrame()
-            set_role(card, "issue-info")
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(10, 8, 8, 8)
-            title = QLabel(names.layer(layer_id) if layer_id else "Ohne Layer-Angabe")
-            font = title.font()
-            font.setBold(True)
-            title.setFont(font)
-            card_layout.addWidget(with_icon(layer_icon_key(flow, layer_id), title))
+        for number, (layer_id, suggestions) in enumerate(groups.items()):
+            layer_name = names.layer(layer_id) if layer_id else "Ohne Layer-Angabe"
+            count = len(suggestions)
+            card_layout = collapsible(
+                page, f"map_{number}",
+                f"{layer_name} ({count} {'Spalte' if count == 1 else 'Spalten'})",
+                layer_icon_key(flow, layer_id))
             for suggestion in suggestions:
                 accepted = QCheckBox(names.field(suggestion.source_field))
                 accepted.setChecked(suggestion.accepted is not False)
@@ -1727,19 +1744,18 @@ def _create_dock(plugin):
                 target.setEnabled(accepted.isChecked())
                 accepted.toggled.connect(target.setEnabled)
                 # Column name on its own line, the target field below it, so
-                # long names are never cut off in a narrow panel.
+                # long names are never cut off in a narrow panel.  Examples
+                # appear on hover (tooltip) to keep the list short.
+                detail = mapping_detail_text(suggestion.source_field, suggestion.examples)
+                accepted.setToolTip(detail)
+                target.setToolTip(detail)
                 card_layout.addWidget(accepted)
                 row = QHBoxLayout()
-                row.setContentsMargins(INDENT_PX, 0, 0, 0)
+                row.setContentsMargins(INDENT_PX, 0, 0, 4)
                 row.addWidget(arrow)
                 row.addWidget(target, 1)
                 card_layout.addLayout(row)
-                detail = QLabel(mapping_detail_text(suggestion.source_field, suggestion.examples))
-                detail.setWordWrap(True)
-                set_role(detail, "hint")
-                card_layout.addWidget(indented(detail))
                 inputs.append((suggestion, accepted, target))
-            page.layout.addWidget(card)
         page.widgets["inputs"] = inputs
 
     def validate_mapping(page):
@@ -1752,10 +1768,12 @@ def _create_dock(plugin):
         try:
             flow.confirm_attribute_suggestions(decisions)
         except (KeyError, ValueError) as error:
+            open_sections(page)
             return reject(error_text(error))
         try:
             applied = flow.apply_attribute_decisions()
         except ValueError as error:  # e.g. a target field chosen twice
+            open_sections(page)
             return reject(error_text(error))
         dock.next_message = MAPPING_APPLIED_TEXT if applied else MAPPING_SAVED_TEXT
         return True
@@ -1773,14 +1791,24 @@ def _create_dock(plugin):
         intro.setWordWrap(True)
         set_role(intro, "hint")
         page.layout.addWidget(intro)
-        for layer in layers:
-            page.layout.addWidget(duplicate_card(flow, layer))
+        names = readable_names()
+        page.widgets["duplicate_sections"] = {}
+        for number, layer in enumerate(layers):
+            key = f"dup_{number}"
+            page.widgets["duplicate_sections"][layer.table_name] = key
+            # open only where a decision is still missing
+            panel = collapsible(
+                page, key,
+                duplicate_title_text(names.layer(layer.table_name), layer.group_count,
+                                     layer.record_count),
+                layer_icon_key(flow, layer.table_name),
+                opened=layer.table_name not in flow.duplicate_decisions)
+            panel.addWidget(duplicate_card(flow, layer))
 
     def duplicate_card(flow, layer):
-        card = QFrame()
-        set_role(card, "issue-warning")
+        card = QWidget()
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(10, 8, 8, 8)
+        card_layout.setContentsMargins(0, 0, 0, 0)
         names = readable_names()
         descriptors = {d.layer_id: d for d in flow.result.layers}
 
@@ -1792,16 +1820,6 @@ def _create_dock(plugin):
                 return names.layer(layer_id)
             return result_layer_name(descriptor, names.layer)
 
-        title = QLabel(
-            duplicate_title_text(
-                names.layer(layer.table_name), layer.group_count, layer.record_count
-            )
-        )
-        title.setWordWrap(True)
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
-        card_layout.addWidget(with_icon(layer_icon_key(flow, layer.table_name), title))
         for group, records in layer.groups[:DUPLICATE_EXAMPLES]:
             example = QLabel(f"• {describe_group(records, result_label)}")
             example.setWordWrap(True)
@@ -1819,14 +1837,14 @@ def _create_dock(plugin):
             card_layout.addWidget(warning)
 
         keep = QRadioButton("Behalten")
-        keep_hint = QLabel("Alle Objekte bleiben erhalten.")
+        keep.setToolTip("Alle Objekte bleiben erhalten.")
         merge = QRadioButton("Zusammenführen")
-        merge_hint = QLabel(merge_hint_text(layer.removable_count))
+        merge.setToolTip(merge_hint_text(layer.removable_count))
         for button in (keep, merge):
             button.setCursor(Qt.PointingHandCursor)
-        for hint in (keep_hint, merge_hint):
-            hint.setWordWrap(True)
-            set_role(hint, "hint")
+        merge_hint = QLabel(merge_hint_text(layer.removable_count))
+        merge_hint.setWordWrap(True)
+        set_role(merge_hint, "hint")
         choice = QButtonGroup(card)
         choice.addButton(keep)
         choice.addButton(merge)
@@ -1842,17 +1860,23 @@ def _create_dock(plugin):
 
         keep.toggled.connect(lambda checked: checked and chosen(False))
         merge.toggled.connect(lambda checked: checked and chosen(True))
-        card_layout.addWidget(keep)
-        card_layout.addWidget(indented(keep_hint))
-        card_layout.addWidget(merge)
-        card_layout.addWidget(indented(merge_hint))
+        # both choices in one row, the effect of merging below
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 4, 0, 0)
+        row.addWidget(keep)
+        row.addWidget(merge)
+        row.addStretch()
+        card_layout.addLayout(row)
+        card_layout.addWidget(merge_hint)
         card._choice_group = choice  # keep the group alive with the card
         return card
 
-    def validate_harmonization(_page):
+    def validate_harmonization(page):
         flow = workflow()
         open_layers = flow.open_duplicate_decisions()
         if open_layers:
+            sections = page.widgets.get("duplicate_sections", {})
+            open_sections(page, [sections[name] for name in open_layers if name in sections])
             return reject(
                 "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
                 "Noch offen: " + ", ".join(readable_names().layer(name) for name in open_layers)
