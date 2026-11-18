@@ -200,7 +200,7 @@
       "requires_fields": ["osm_id", "other_tags"],
       "_hinweis_tags": "Diese Schlüssel werden aus other_tags als eigene Spalten gelesen (Adresse, Geschosszahl, Merkmale für die Kategorie).",
       "tags_field": "other_tags",
-      "tag_columns": ["addr:street", "addr:housenumber", "building:levels", "building:part", "highway", "railway", "water", "waterway"],
+      "tag_columns": ["addr:street", "addr:housenumber", "building:levels", "building:part", "highway", "railway", "water", "waterway", "natural", "public_transport", "boundary", "power"],
       "street_field": "addr:street",
       "house_number_field": "addr:housenumber",
       "_hinweis_tag_labels": "Verständliche Objektart für häufige OSM-Merkmale. Fehlt ein Eintrag, wird „Schlüssel=*“ genommen, sonst das Merkmal selbst (z. B. „shop=bakery“).",
@@ -251,8 +251,25 @@
         "amenity=*": "Einrichtung",
         "shop=mall": "Einkaufszentrum",
         "shop=*": "Geschäft",
+        "building:part=roof": "Dach",
         "barrier=hedge": "Hecke",
+        "barrier=fence": "Zaun",
+        "barrier=wall": "Mauer",
+        "barrier=retaining_wall": "Stützmauer",
+        "barrier=kerb": "Bordstein",
+        "barrier=gate": "Tor",
         "barrier=*": "Absperrung",
+        "natural=tree_row": "Baumreihe",
+        "public_transport=platform": "Bahnsteig oder Haltestellenkante",
+        "public_transport=*": "ÖPNV-Anlage",
+        "boundary=administrative": "Verwaltungsgrenze",
+        "boundary=postal_code": "Postleitzahlgrenze",
+        "boundary=*": "Grenze",
+        "man_made=pier": "Steg",
+        "man_made=quay": "Kaimauer",
+        "power=line": "Stromleitung",
+        "power=cable": "Stromkabel",
+        "power=*": "Stromanlage",
         "natural=shrubbery": "Gebüsch",
         "place=square": "Platz",
         "leisure=park": "Park",
@@ -327,7 +344,11 @@
           "default_rule": {"category": "Sonstige OSM-Flächen", "layer_suffix": "sonstige"}
         },
         "lines": {
-          "tag_fields": ["highway", "railway", "waterway"],
+          "_hinweis": "GDAL legt geschlossene Wege mit building:part, barrier oder natural=tree_row als Linien ab, nicht als Flächen. Gebäudeteile (3D-Gebäudemodell) bekommen deshalb einen eigenen Layer und doppeln nicht die Gebäude.",
+          "tag_fields": [
+            "highway", "railway", "waterway", "building:part", "barrier", "natural",
+            "public_transport", "boundary", "man_made", "power"
+          ],
           "object_id_fields": [{"field": "osm_id", "prefix": "way/"}],
           "category_rules": [
             {
@@ -337,7 +358,10 @@
             },
             {"category": "Straßen", "layer_suffix": "strassen", "values": ["highway=*"]},
             {"category": "Bahnstrecken", "layer_suffix": "bahn", "values": ["railway=*"]},
-            {"category": "Gewässer", "layer_suffix": "wasser", "values": ["waterway=*"]}
+            {"category": "Gewässer", "layer_suffix": "wasser", "values": ["waterway=*"]},
+            {"category": "Gebäudeteile", "layer_suffix": "gebaeudeteile", "values": ["building:part=*"]},
+            {"category": "Hecken und Baumreihen", "layer_suffix": "hecken_baeume", "values": ["barrier=hedge", "natural=tree_row"]},
+            {"category": "Zäune und Mauern", "layer_suffix": "zaeune_mauern", "values": ["barrier=*"]}
           ],
           "default_rule": {"category": "Sonstige OSM-Linien", "layer_suffix": "sonstige"}
         },

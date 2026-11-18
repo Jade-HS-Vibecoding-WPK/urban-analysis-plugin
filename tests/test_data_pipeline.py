@@ -1120,7 +1120,7 @@ def make_osm_geopackage(path):
             );
             CREATE TABLE lines (
                 fid INTEGER PRIMARY KEY, geom BLOB, osm_id TEXT, name TEXT, highway TEXT,
-                waterway TEXT, railway TEXT, other_tags TEXT
+                waterway TEXT, barrier TEXT, railway TEXT, other_tags TEXT
             );
             CREATE TABLE points (
                 fid INTEGER PRIMARY KEY, geom BLOB, osm_id TEXT, name TEXT, other_tags TEXT
@@ -1157,6 +1157,18 @@ def make_osm_geopackage(path):
                 (1, gpkg_blob(wkb_linestring([(1, 7), (5, 7)])), "21", "footway", None, None),
                 (2, gpkg_blob(wkb_linestring([(1, 8), (5, 8)])), "22", "residential", None, '"maxspeed"=>"30"'),
                 (3, gpkg_blob(wkb_linestring([(1, 9), (5, 9)])), "23", None, "rail", None),
+            ],
+        )
+        # GDAL stores closed ways with building:part, barrier or tree rows as
+        # lines; the real Donnerschwee test had about 1 000 of them.
+        part_tags = '"building:part"=>"yes","roof:shape"=>"flat","building:levels"=>"2"'
+        connection.executemany(
+            "INSERT INTO lines (fid, geom, osm_id, barrier, other_tags) VALUES (?, ?, ?, ?, ?)",
+            [
+                (4, gpkg_blob(wkb_linestring([(6, 1), (6, 2), (7, 2), (6, 1)])), "24", None, part_tags),
+                (5, gpkg_blob(wkb_linestring([(6, 3), (9, 3)])), "25", "fence", None),
+                (6, gpkg_blob(wkb_linestring([(6, 4), (9, 4)])), "26", "hedge", None),
+                (7, gpkg_blob(wkb_linestring([(6, 5), (9, 5)])), "27", None, '"natural"=>"tree_row"'),
             ],
         )
         connection.execute(
@@ -1218,8 +1230,8 @@ def test_osm_ids_address_and_floors(tmp_path):
     assert targets[("multipolygons", "floors")] == "building:levels"
     assert ("multipolygons", "object_id") not in targets
     assert ("multipolygons", "address") not in targets
-    # No building has levels on lines or points: no empty column in step 5.
-    assert ("lines", "floors") not in targets
+    # Building parts (lines) have levels; no point has: no empty column in step 5.
+    assert targets[("lines", "floors")] == "building:levels"
     assert ("points", "floors") not in targets
 
 
@@ -1234,7 +1246,12 @@ def test_osm_lines_are_split_into_paths_streets_and_railways(tmp_path):
         1: ("Fuß- und Radwege", "Fußweg"),
         2: ("Straßen", "Wohnstraße"),
         3: ("Bahnstrecken", "Bahnstrecke"),
+        4: ("Gebäudeteile", "Gebäudeteil"),
+        5: ("Zäune und Mauern", "Zaun"),
+        6: ("Hecken und Baumreihen", "Hecke"),
+        7: ("Hecken und Baumreihen", "Baumreihe"),
     }
+    assert lines[4].attributes["floors"] == 2
 
 
 def test_osm_import_has_no_false_hints(tmp_path):
