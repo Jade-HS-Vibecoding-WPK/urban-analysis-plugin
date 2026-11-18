@@ -1,6 +1,7 @@
 # Arbeitsplan Phase 2: Deutschlandweit mit OSM und ALKIS
 
-Stand: 18.11.2026 – **Entwurf, noch nicht mit Person Windows abgestimmt.**
+Stand: 18.11.2026 – **E5–E15 von Person Windows bestätigt (G5), ergänzt um
+E16–E19. Zustimmung der Person Mac zu E16–E19 im Review des G5-PR.**
 
 Der erste Arbeitsplan (`ARBEITSPLAN.md`) ist im Wesentlichen erledigt: Das
 Plugin läuft in QGIS von Schritt 1 bis 9 mit einer lokalen GeoPackage-Datei.
@@ -48,7 +49,16 @@ gilt.
 | E12 | **Abgleich ALKIS ↔ OSM:** Mittelpunkt des einen liegt im anderen **und** die Flächen weichen höchstens **20 %** ab → wahrscheinlich gleich. Liegt der Mittelpunkt drin, aber die Abweichung ist größer → unsicher, wird zur Entscheidung angezeigt. Der Wert steht in einer Einstellungsdatei und ist änderbar. |
 | E13 | **Gebietsgröße höchstens 25 km²** (Gebiet inklusive Puffer, gemessen am umgebenden Rechteck, das heruntergeladen wird). Darüber erscheint eine klare Meldung, und es wird nichts geladen. |
 | E14 | **Speicherort:** Vor jedem Download fragt das Plugin, in welchen Ordner die Daten sollen. Dateiname enthält Quelle und Datum. |
-| E15 | **Ohne Internet / Dienst antwortet nicht:** nur eine verständliche Meldung, der Download wird abgebrochen. Keine automatische Wiederverwendung alter Downloads. |
+| E15 | **Ohne Internet / Dienst antwortet nicht:** nur eine verständliche Meldung, der Download wird abgebrochen. Keine automatische Wiederverwendung alter Downloads. Ein früherer Download kann aber von Hand als „Eigene Datei“ geladen werden. |
+
+Ergänzungen von Person Windows in G5:
+
+| Nr. | Entscheidung |
+| --- | --- |
+| E16 | **Eigener ALKIS-Export als Datei (ergänzt E6, E10):** Unter „Eigene Datei“ darf auch ein eigener ALKIS-Export geladen werden (z. B. `lkr_03403_Stadt_Oldenburg_kon.gpkg`). Das Plugin erkennt ihn am Profil und behandelt ihn als Quelle `"ALKIS"`. So bleiben Phase-1-Ablauf und Tests mit der lokalen Datei erhalten. |
+| E17 | **Gebietsgröße schon in Schritt 2 (ergänzt E13):** Schritt 2 zeigt beim Wählen oder Zeichnen die Größe von Gebiet + Puffer (umgebendes Rechteck), z. B. „6,1 km² von höchstens 25 km²“. Über der Grenze erscheint dort schon ein Hinweis; die verbindliche Prüfung bleibt in S9. |
+| E18 | **Zielordner einmal fragen (ändert E14):** Beim ersten Download fragt das Plugin nach dem Ordner (Vorschlag: Ordner des QGIS-Projekts) und merkt ihn sich. Schritt 3 zeigt den Ordner an und hat einen Knopf „Ordner ändern“. Dateiname weiter mit Quelle und Datum. |
+| E19 | **Vorgeschlagener Vorrang (ergänzt E7):** Schritt 6 schlägt je Kategorie eine Quelle vor – Gebäude und Nutzungsflächen: ALKIS; Straßen und Grünflächen: OSM. Die Nutzerin bestätigt oder ändert; erst dann gilt die Auswahl. Der Vorschlag steht in einer Einstellungsdatei und ist änderbar. |
 
 Weiter gilt unverändert:
 
@@ -148,7 +158,7 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 - **Absicht:** `CLAUDE.md` und `PLAN.md` sagen noch „Download erst nach dem
   MVP“. Beide Claude-Sessions halten sich daran, solange es dort steht.
 - **Ziel:** Ein PR ändert `CLAUDE.md` (Abschnitt Daten, Getroffene
-  Entscheidungen E5–E9, Dateitabelle um `sources.py`,
+  Entscheidungen E5–E19, Dateitabelle um `sources.py`,
   `sources_catalog.json`, `mapping.py`, `mapping_rules.json`, `geometry.py`)
   und `PLAN.md` (§2, §3.2, §6). Beide haben zugestimmt.
 - **Warten auf:** nichts.
@@ -182,10 +192,9 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 
 ## 6. Schritte Person Mac – Datenpipeline
 
-### M8 – Gebäude mit mehreren Adressen *(erledigt, PR noch offen)*
+### M8 – Gebäude mit mehreren Adressen *(erledigt, PR #21 gemergt)*
 
-- Branch `feature/pipeline-objekt-zeilen`, Commit `64c52fb`. Siehe E8.
-- **Noch offen:** in QGIS mit echten ALKIS-Daten prüfen, dann PR.
+- Siehe E8. In QGIS mit echten ALKIS-Daten geprüft.
 
 ### M9 – Recherche: ALKIS-Dienste der 16 Bundesländer
 
@@ -276,13 +285,17 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 - **Ziel:** Kästchen „OSM“, „ALKIS“ und „Eigene Datei“ (E10, mit dem
   bisherigen Dateiauswahl-Feld); Bundesland wird vorgeschlagen und ist
   änderbar (E11); ALKIS ist ausgegraut mit Erklärung, wenn das Land keinen
-  Dienst hat; Meldung, wenn das Gebiet größer als 25 km² ist (E13).
+  Dienst hat; Meldung, wenn das Gebiet größer als 25 km² ist (E13);
+  Zielordner wird angezeigt, „Ordner ändern“ (E18); ein eigener ALKIS-Export
+  wird als ALKIS erkannt (E16). Außerdem in Schritt 2: Anzeige der
+  Gebietsgröße (E17).
 - **Warten auf:** M10 (kann mit Platzhalter-Daten beginnen).
 
 ### W11 – Herunterladen in QGIS (S10)
 
-- **Ziel:** Ordner abfragen (E14), Download als `QgsTask` mit Fortschritt
-  (Lampen/Leitung), Speichern als GeoPackage mit Quelle und Datum im Namen,
+- **Ziel:** Ordner abfragen und merken (E14, E18), Download als `QgsTask`
+  mit Fortschritt (Schrittleiste/Ladebalken im klassischen Stil, Angel-Szene
+  im Pixel-Stil) und dem vorhandenen „Laden abbrechen“, Speichern als GeoPackage mit Quelle und Datum im Namen,
   Umprojektion ins Projekt-CRS, verständliche Fehler und Abbruch ohne
   Internet (E15).
 - **Warten auf:** M10.
@@ -290,7 +303,8 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 ### W12 – Vorrang je Kategorie (S12)
 
 - **Ziel:** In Schritt 6 je Kategorie eine Auswahl „ALKIS / OSM“ mit Anzahl
-  der betroffenen Objekte; Ergebnis an `apply_source_priority`.
+  der betroffenen Objekte, vorausgewählt nach E19; Ergebnis erst nach
+  Bestätigung an `apply_source_priority`.
 - **Warten auf:** M14.
 
 ### W13 – „Mehr erfahren“ anzeigen (S13)
@@ -329,7 +343,7 @@ M12 und dem ALKIS-Teil von M10 · M10 vor W10/W11 · M14 vor W12.
 ## 9. Offene Fragen
 
 Die Fragen F1–F6 sind am 18.11.2026 von Person Mac entschieden worden
-(→ E10–E15). Person Windows bestätigt sie in G5 oder schlägt Änderungen vor.
+(→ E10–E15). Person Windows hat sie in G5 bestätigt und um E16–E19 ergänzt.
 
 Noch offen und erst nach M9 entscheidbar:
 

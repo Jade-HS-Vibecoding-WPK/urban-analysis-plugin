@@ -44,17 +44,25 @@ Das Plugin selbst bleibt gebietsunabhängig – Donnerschwee ist nur Testgebiet.
   im Testcode) und brauchen keine echten Daten.
 - Manuelle Abnahme: ALKIS-Ausschnitt Donnerschwee plus Puffer, lokal bei
   beiden unter demselben Dateinamen in `daten/`.
-- Im MVP lädt der Nutzer eigene lokale GeoPackages. Der Download von
-  OSM-/WMS-Daten aus dem Plugin ist eine spätere Erweiterung und wird erst
-  nach der MVP-Abnahme umgesetzt.
+- **Phase 2 (seit 18.11.2026):** Das Plugin holt Daten selbst – OSM für ganz
+  Deutschland und ALKIS automatisch von den Diensten der Bundesländer, wo
+  diese frei nutzbar sind. Details und Entscheidungen E5–E19 stehen in
+  `ARBEITSPLAN_DEUTSCHLANDWEIT.md`.
+- Heruntergeladene Daten werden **nie committed**. Sie landen im Ordner, den
+  die Nutzerin wählt, oder im gitignorierten `daten/`.
+- Eigene lokale GeoPackages bleiben möglich („Eigene Datei“), auch ein
+  eigener ALKIS-Export wie `…_kon.gpkg` (E16).
 
 ## Dateibesitz (nicht gleichzeitig in beiden Sessions ändern)
 
 | Bereich | Wer | Dateien |
 | --- | --- | --- |
-| Datenpipeline | macOS-Person | `urban_analysis/data_pipeline.py`, `tests/test_data_pipeline.py` |
-| Benutzerführung & Integration | Windows-Person | `urban_analysis/urban_analysis_plugin.py`, `urban_analysis/guided_dialog.py`, `urban_analysis/outputs.py`, `urban_analysis/user_guidance.py`, zugehörige Tests |
-| Gemeinsam (nur nach Absprache, eigener PR) | beide | `urban_analysis/contracts.py`, `urban_analysis/ui_contract.py`, `metadata.txt`, `CLAUDE.md`, `PLAN.md`, `.gitignore` |
+| Datenpipeline | macOS-Person | `urban_analysis/data_pipeline.py`, `urban_analysis/geometry.py`, `urban_analysis/mapping.py`, `urban_analysis/mapping_rules.json`, `urban_analysis/sources.py` und `urban_analysis/sources_catalog.json` (beide neu in Phase 2), `STATUS_DATENPIPELINE.md`, Tests `test_data_pipeline.py`, `test_geometry.py`, `test_mapping.py` (und künftige Tests zu `sources.py`) |
+| Benutzerführung & Integration | Windows-Person | `urban_analysis/urban_analysis_plugin.py`, `urban_analysis/guided_dialog.py`, `urban_analysis/outputs.py`, `urban_analysis/user_guidance.py`, `urban_analysis/study_area.py`, `urban_analysis/theme.py`, `urban_analysis/icons/`, `urban_analysis/ui/**`, Tests `test_plugin_menu.py`, `test_user_guidance.py`, `test_outputs.py`, `test_study_area.py`, `test_theme.py`, `test_data_loading.py`, `test_review_step.py`, `test_mapping_step.py`, `test_harmonization_step.py`, `test_result_layers.py`, `test_summary_step.py`, `test_pixel_motion.py`, `test_scene.py`, `test_layer_icons.py`, `test_style_switch.py` |
+| Gemeinsam (nur nach Absprache, eigener PR) | beide | `urban_analysis/contracts.py`, `urban_analysis/ui_contract.py`, `metadata.txt`, `CLAUDE.md`, `PLAN.md`, `ARBEITSPLAN*.md`, `.gitignore`, `tests/test_contracts.py`, `tests/test_plugin_integration.py` |
+
+`tests/test_data_loading.py` nutzt Hilfsfunktionen aus
+`tests/test_data_pipeline.py` nur lesend.
 
 Wenn eine Änderung eine Datei des anderen Bereichs oder eine gemeinsame Datei
 erfordert: anhalten und nachfragen, statt sie selbst zu ändern.
@@ -92,3 +100,15 @@ Siehe `PLAN.md` §6. Getroffene Entscheidungen hier kurz nachtragen.
     Prüfhinweis gemeldet.
   - Die Benutzerführung liefert das Untersuchungsgebiet als WKT im Projekt-CRS
     an die Pipeline (z. B. aus einem in QGIS gewählten Polygon).
+- **Phase 2 – deutschlandweit mit OSM und ALKIS (2026-11-18):** Die Regel
+  „Download erst nach der MVP-Abnahme“ entfällt (E5). Alle Entscheidungen
+  E5–E19 stehen in `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §2. Kurz:
+  - ALKIS automatisch von Landesdiensten, wo frei nutzbar; sonst nur OSM mit
+    deutlichem Hinweis (E6). Eigene Dateien, auch eigene ALKIS-Exporte, bleiben
+    möglich (E10, E16).
+  - Bei gleichen Objekten aus ALKIS und OSM wählt die Nutzerin je Kategorie
+    die Quelle; das Plugin schlägt einen Vorrang vor (E7, E19).
+  - Gebiet + Puffer höchstens 25 km², Größe schon in Schritt 2 sichtbar
+    (E13, E17).
+  - Umprojektion (z. B. OSM aus EPSG:4326) passiert in QGIS vor der Pipeline;
+    die Pipeline selbst projiziert weiterhin nicht um.
