@@ -49,9 +49,16 @@ CLASSIC_ICONS = {
         ("rect", 10.6, 7.6, 2.4, 0.9, "#ffffff"),
     ],
     "wege": [
-        ("badge", "#f4eddd"),
-        ("line", ((4, 14), (6.5, 10.5), (5.5, 7.5), (9, 5), (12, 2.5)), "#c39a5b", 2.6),
-        ("line", ((4, 14), (6.5, 10.5), (5.5, 7.5), (9, 5), (12, 2.5)), "#f4eddd", 0.6),
+        # path in perspective on grass, narrowing to the back, dashed middle
+        # line: walking and cycling side by side
+        ("badge", "#e6f1e4"),
+        ("poly", ((4.2, 14.4), (11.8, 14.4), (9.1, 2.4), (6.9, 2.4)), "#dcc59d"),
+        ("line", ((4.2, 14.4), (6.9, 2.4)), "#b3925f", 0.8),
+        ("line", ((11.8, 14.4), (9.1, 2.4)), "#b3925f", 0.8),
+        ("line", ((8, 13.6), (8, 11.6)), "#ffffff", 0.9),
+        ("line", ((8, 9.6), (8, 8.0)), "#ffffff", 0.8),
+        ("line", ((8, 6.4), (8, 5.2)), "#ffffff", 0.7),
+        ("line", ((8, 4.0), (8, 3.2)), "#ffffff", 0.6),
     ],
     "plaetze": [
         ("badge", "#f2ede3"),
