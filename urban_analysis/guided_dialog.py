@@ -91,7 +91,8 @@ LAST_FOLDER_SETTING = "urban_analysis/last_geopackage_folder"
 ARROW_CLOSED = "▸"
 ARROW_OPEN = "▾"
 PANEL_ANIMATION_MS = 180
-RESET_TOOLTIP = "Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
+STYLE_BUTTON_TOOLTIP = "Stil wechseln: Klassisch oder Pixel"
+RESET_TOOLTIP ="Plugin auf Anfang zurücksetzen: alle Eingaben und geladenen Daten verwerfen."
 RESET_QUESTION = (
     "Alles auf Anfang zurücksetzen?\n\n"
     "Alle Eingaben und die geladenen Daten im Plugin werden verworfen, du beginnst "
@@ -502,7 +503,7 @@ def _create_dock(plugin):
                 for view in self._views:
                     getattr(view, name)(*args, **kwargs)
             return call
-    from .ui.widgets.icons import gear_icon, icon_size, layer_icon, with_icon
+    from .ui.widgets.icons import icon_size, layer_icon, palette_icon, with_icon
     from .ui import style as ui_style
     from qgis.PyQt.QtWidgets import QMenu
 
@@ -704,10 +705,10 @@ def _create_dock(plugin):
             return bar
 
         def _style_button(self):
-            """Gear button: choose 'Klassisch (QGIS-Stil)' or 'Pixel-Stil'."""
+            """Palette button: choose 'Klassisch (QGIS-Stil)' or 'Pixel-Stil'."""
             button = QToolButton()
-            button.setIcon(gear_icon())
-            button.setToolTip("Darstellung wählen")
+            button.setIcon(palette_icon())
+            button.setToolTip(STYLE_BUTTON_TOOLTIP)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             menu = QMenu(button)

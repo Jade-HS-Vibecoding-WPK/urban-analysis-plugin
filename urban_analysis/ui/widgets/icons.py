@@ -4,8 +4,6 @@ Pixel style: the 16 px tiles doubled without smoothing (stay sharp).
 Classic style: flat vector shapes (``classic_icons``) drawn smooth.
 """
 
-import math
-
 from qgis.PyQt.QtCore import QPointF, QRectF, QSize, Qt
 from qgis.PyQt.QtGui import (
     QColor, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF,
@@ -100,26 +98,31 @@ def icon_size():
     return QSize(ICON_PX, ICON_PX)
 
 
-def gear_icon(color="#5b6470", size=32, teeth=8):
-    """Own simple gear (drawn, smooth edges) for the 'Darstellung' button."""
+PALETTE_DOTS = ("#2f6fb0", "#e8655a", "#4f9a4a")  # blue, red-orange, green
+
+
+def palette_icon(size=32, outline="#5b6470", body="#f1ece2"):
+    """Own painter's palette with three colour dots (drawn, smooth edges):
+    the button that switches the look of the side panel."""
     pixmap = QPixmap(size, size)
     pixmap.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    centre = size / 2
-    outer, inner, hole = size * 0.46, size * 0.33, size * 0.15
-    points = []
-    steps = teeth * 4
-    for i in range(steps):
-        angle = 2 * math.pi * (i + 0.5) / steps
-        radius = outer if i % 4 in (1, 2) else inner
-        points.append(QPointF(centre + radius * math.cos(angle), centre + radius * math.sin(angle)))
-    gear = QPainterPath()
-    gear.addPolygon(QPolygonF(points))
-    gear.closeSubpath()
-    middle = QPainterPath()
-    middle.addEllipse(QPointF(centre, centre), hole, hole)
-    painter.fillPath(gear.subtracted(middle), QColor(color))
+    k = size / 32
+    shape = QPainterPath()
+    shape.addEllipse(QPointF(16 * k, 16.5 * k), 13.5 * k, 11.5 * k)
+    thumb = QPainterPath()
+    thumb.addEllipse(QPointF(21.5 * k, 21 * k), 3.2 * k, 3 * k)
+    notch = QPainterPath()
+    notch.addEllipse(QPointF(29.5 * k, 21 * k), 4 * k, 3.4 * k)
+    shape = shape.subtracted(thumb).subtracted(notch)
+    painter.setPen(QPen(QColor(outline), 1.6 * k))
+    painter.setBrush(QColor(body))
+    painter.drawPath(shape)
+    painter.setPen(Qt.PenStyle.NoPen)
+    for colour, (x, y) in zip(PALETTE_DOTS, ((9.5, 13), (16, 9.5), (22.5, 12))):
+        painter.setBrush(QColor(colour))
+        painter.drawEllipse(QPointF(x * k, y * k), 2.9 * k, 2.9 * k)
     painter.end()
     return QIcon(pixmap)
 
