@@ -61,6 +61,14 @@ Ergänzungen von Person Windows in G5:
 | E18 | **Zielordner jedes Mal fragen, mit Vorschlag (ergänzt E14):** Vor jedem Download fragt das Plugin nach dem Ordner (E14 bleibt). Im Auswahlfenster ist der zuletzt gewählte Ordner schon vorausgewählt; beim allerersten Download der Ordner des QGIS-Projekts. Die Nutzerin bestätigt oder wählt einen anderen. Dateiname weiter mit Quelle und Datum. *(geändert von Person Mac nach dem G5-Review)* |
 | E19 | **Vorgeschlagener Vorrang (ergänzt E7):** Schritt 6 schlägt je Kategorie eine Quelle vor – Gebäude und Nutzungsflächen: ALKIS; Straßen und Grünflächen: OSM. Die Nutzerin bestätigt oder ändert; erst dann gilt die Auswahl. Der Vorschlag steht in einer Einstellungsdatei und ist änderbar. |
 
+Vorschläge von Person Mac nach dem QGIS-Test (18.11.2026, in G9 gemeinsam zu
+bestätigen):
+
+| Nr. | Vorschlag |
+| --- | --- |
+| E20 | **Zielschema um Objekt-ID und Adresse erweitern:** Die Ergebnis-Layer bekommen zwei neue Felder: `object_id` (Original-ID der Quelle, z. B. ALKIS `objid`, später OSM `osm_id`) und `address` (Straße und Hausnummer, je Adresse zusammengesetzt, mehrere Adressen getrennt mit „; “, z. B. „Hauptstraße 2; Nebenweg 1“). Bisher kennen die Ergebnis-Layer nur die 8 Felder aus `PLAN.md` §3.4; IDs, Straßen und Hausnummern sind dort nicht zu finden, obwohl die Pipeline sie im Hintergrund behält. |
+| E21 | **Schritt 5 verständlich machen:** Schritt 5 soll klar sagen, *was* die Nutzerin entscheidet und *warum*. Heute sieht man nur einzelne vorgeschlagene Spalten, kann nur eines der 8 Zielfelder wählen und versteht Begriffe wie „Nutzungsdetail“ oder „Status“ nicht. Wie Schritt 5 künftig aussieht, legen wir in G9 gemeinsam fest. |
+
 Weiter gilt unverändert:
 
 - `data_pipeline.py` bleibt QGIS-frei und ohne Zusatzpakete (kein shapely,
@@ -189,14 +197,51 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   Dubletten-Rückfragen bei nur einer Quelle.
 - **Warten auf:** alles.
 
+### G9 – Zielschema und Schritt 5 gemeinsam neu denken (E20, E21)
+
+- **Absicht:** Im QGIS-Test fehlten in den Ergebnis-Layern die Objekt-IDs,
+  Straßen und Hausnummern, und Schritt 5 (Attributzuordnung) war nicht
+  verständlich. Beides hängt am Zielschema, das in `PLAN.md` gemeinsam
+  festgelegt ist.
+- **Ziel:** Gemeinsam entschieden und in `PLAN.md` §3.4 nachgetragen:
+  1. Welche Felder haben die Ergebnis-Layer? (Vorschlag E20: zusätzlich
+     `object_id` und `address`.)
+  2. Was entscheidet die Nutzerin in Schritt 5? Diskussionsstart: Alle
+     Spalten eines Layers werden mit Beispielwerten gezeigt; je Spalte wählt
+     man „→ Zielfeld“, „als Originalspalte behalten“ oder „weglassen“.
+     Vorschläge der Pipeline sind vorausgewählt.
+  3. Verständliche deutsche Namen und eine Ein-Satz-Erklärung je Zielfeld.
+- **Warten auf:** nichts. Vor M16 und W14.
+
 ---
 
 ## 6. Schritte Person Mac – Datenpipeline
 
-### M8 – Gebäude mit mehreren Adressen *(erledigt, PR noch offen)*
+### M8 – Gebäude mit mehreren Adressen *(erledigt, PR #21 gemergt)*
 
-- Branch `feature/pipeline-objekt-zeilen`, Commit `64c52fb`. Siehe E8.
-- **Noch offen:** in QGIS mit echten ALKIS-Daten prüfen, dann PR.
+- Siehe E8. **Noch offen:** in QGIS mit echten ALKIS-Daten prüfen.
+- **Bekannte Schwäche:** Straße (`bez`) und Hausnummer (`hnr`) werden
+  getrennt zusammengefasst. Bei einem Eckhaus steht dann „Hauptstraße,
+  Nebenweg“ und „2, 1“ – welche Nummer zu welcher Straße gehört, ist nicht
+  mehr eindeutig. Wird in M16 behoben.
+
+### M16 – Objekt-ID und Adresse in die Ergebnis-Layer (E20)
+
+- **Absicht:** Nutzende müssen jedes Objekt bis zur Quelle zurückverfolgen
+  und Adressen finden können. Die ID braucht außerdem M14 (Abgleich ALKIS ↔
+  OSM).
+- **Ziel:** Neue Zielfelder `object_id` und `address` in `TARGET_FIELDS`,
+  mit deutschen Namen in `mapping_rules.json`. `address` wird **je Zeile**
+  aus Straße und Hausnummer gebildet („Hauptstraße 2“) und erst danach beim
+  Zusammenfassen (M8) mit „; “ verbunden. Welche Spalten ID, Straße und
+  Hausnummer sind, steht im Profil in `mapping_rules.json`. Tests, auch für
+  das Eckhaus.
+- **Dateien:** `data_pipeline.py`, `mapping.py`, `mapping_rules.json`,
+  `tests/test_data_pipeline.py`. Branch z. B. `feature/pipeline-id-adresse`.
+- **Achtung:** `tests/test_result_layers.py` (Windows) prüft fest „genau 8
+  Felder“. Die Ergebnis-Layer übernehmen neue Felder automatisch; nur dieser
+  Test muss im selben Zug von Person Windows angepasst werden → Absprache.
+- **Warten auf:** G9 (Punkt 1).
 
 ### M9 – Recherche: ALKIS-Dienste der 16 Bundesländer
 
@@ -261,8 +306,10 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 ### M15 – Hinweistexte kürzen und „Mehr erfahren“ füllen (S13)
 
 - **Ziel:** Alle Pipeline-Hinweise haben eine kurze `message` und eine
-  ausführliche `details`.
-- **Warten auf:** G6.
+  ausführliche `details`. Außerdem (E21): verständliche Namen und eine
+  Ein-Satz-Erklärung je Zielfeld in `mapping_rules.json`, damit Schritt 5
+  sie anzeigen kann.
+- **Warten auf:** G6; Zielfeld-Texte: G9.
 
 ### M7 – Ende-zu-Ende-Test ohne QGIS *(aus Phase 1, erweitert)*
 
@@ -316,6 +363,15 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
   `details` auf.
 - **Warten auf:** G6.
 
+### W14 – Schritt 5 „Attributzuordnung“ umbauen (E21)
+
+- **Absicht:** Schritt 5 war im QGIS-Test nicht verständlich.
+- **Ziel:** Schritt 5 so umgebaut, wie in G9 (Punkt 2) beschlossen: klare
+  Erklärung oben, alle Spalten mit Beispielwerten, verständliche Zielfeld-
+  Namen mit Erklärung (aus M15). Dazu `tests/test_result_layers.py` an die
+  neuen Zielfelder aus M16 anpassen.
+- **Warten auf:** G9; Zielfeld-Texte: M15.
+
 ### W9 – Plugin-ZIP und Test auf Windows *(aus Phase 1)*
 
 - **Warten auf:** W11.
@@ -329,7 +385,8 @@ Etappe   Person Mac                     Gemeinsam              Person Windows
 ──────   ───────────────────────────    ───────────────────    ──────────────────────────
 1        M8 in QGIS prüfen + PR         G5 Regeln anpassen     W8b Ausgabe GPKG/PDF
          M9 Recherche Länder            G6 Vertrag (S11/S13)   Review M8
-         M11 OSM-Profil
+         M11 OSM-Profil                 G9 Zielschema+Schritt 5
+         M16 Objekt-ID + Adresse                               W14 Schritt 5 umbauen
 2        M10 Quellen bestimmen (S9)                            W10 Schritt 3 umbauen
          M12 ALKIS-Profile                                     W13 „Mehr erfahren“
          M13 Mehrere Quellen (S11)                             W11 Download in QGIS (S10)
@@ -339,7 +396,8 @@ Etappe   Person Mac                     Gemeinsam              Person Windows
 ```
 
 **Wer auf wen wartet:** G5 vor allem anderen · G6 vor M13, M15, W13 · M9 vor
-M12 und dem ALKIS-Teil von M10 · M10 vor W10/W11 · M14 vor W12.
+M12 und dem ALKIS-Teil von M10 · M10 vor W10/W11 · M14 vor W12 · G9 vor M16
+und W14 · M16 vor M14 (Abgleich braucht die Objekt-ID).
 
 ---
 
