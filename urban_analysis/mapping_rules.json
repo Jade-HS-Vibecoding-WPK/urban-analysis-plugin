@@ -25,6 +25,9 @@
 
   "target_field_labels": {
     "_hinweis": "Deutsche Namen der Zielfelder für die Benutzerführung.",
+    "object_id": "Objekt-ID",
+    "address": "Adresse",
+    "floors": "Geschosszahl",
     "source_name": "Dateiname",
     "object_type": "Objektart",
     "object_detail": "Nutzungsdetail",
@@ -33,6 +36,21 @@
     "area_m2": "Fläche (m²)",
     "year": "Jahr",
     "source": "Datenquelle"
+  },
+
+  "target_field_explanations": {
+    "_hinweis": "Ein Satz je Zielfeld für das Infosymbol (ⓘ) in Schritt 5 und in der Attributtabelle. Kurz halten; die Beispiele müssen zu dem passen, was die Pipeline wirklich einträgt.",
+    "object_id": "Kennung des Objekts in der Quelle, damit man es dort wiederfindet.",
+    "address": "Straße und Hausnummer, z. B. „Hauptstraße 2“; mehrere Adressen sind mit „; “ getrennt.",
+    "floors": "Anzahl der oberirdischen Geschosse, wenn die Quelle sie angibt; sonst leer.",
+    "source_name": "Datei oder Download, aus dem das Objekt stammt.",
+    "object_type": "Was das Objekt genau ist, z. B. Wohngebäude, Garage oder Wohnbaufläche.",
+    "object_detail": "Genauere Angabe zur Objektart, wenn die Quelle eine hat, z. B. „Park“ bei einer Erholungsfläche.",
+    "category": "Gruppe im Kartenthema, z. B. Gebäude, Straßen oder Grünflächen.",
+    "status": "Zustand des Objekts laut Quelle, z. B. „in Betrieb“ oder „außer Betrieb“; oft leer.",
+    "area_m2": "Fläche in Quadratmetern, wenn die Quelle sie angibt; sonst leer.",
+    "year": "Baujahr oder Jahr der Erfassung, wenn die Quelle es angibt.",
+    "source": "Herkunft der Daten mit Lizenzvermerk, z. B. „© OpenStreetMap-Mitwirkende“; wird in Schritt 8 ergänzt."
   },
 
   "field_labels": {
@@ -61,9 +79,11 @@
       "name": "ALKIS",
       "_hinweis": "ALKIS-Export (z. B. lkr_03403_Stadt_Oldenburg_kon.gpkg). Ein Layer gehört zum Profil, wenn sein Name hier steht und er alle requires_fields hat.",
       "requires_fields": ["objid"],
-      "_hinweis_object_id_field": "Spalte mit der Objekt-ID. Zeilen mit gleicher ID und gleicher Geometrie, die sich NUR in den address_fields unterscheiden, sind ein Objekt mit mehreren Adressen (z. B. Eckhaus) und werden zu einem Objekt zusammengefasst; alle Adressen bleiben erhalten. Unterscheiden sie sich in anderen Spalten, wird nichts zusammengefasst und der Fall wird zur Entscheidung angezeigt.",
+      "_hinweis_object_id_field": "Spalte mit der Objekt-ID. Sie kommt ins Zielfeld object_id (Objekt-ID). Zeilen mit gleicher ID und gleicher Geometrie, die sich NUR in Straße und Hausnummer unterscheiden, sind ein Objekt mit mehreren Adressen (z. B. Eckhaus) und werden zu einem Objekt zusammengefasst; alle Adressen bleiben erhalten. Unterscheiden sie sich in anderen Spalten, wird nichts zusammengefasst und der Fall wird zur Entscheidung angezeigt.",
       "object_id_field": "objid",
-      "address_fields": ["hnr", "bez"],
+      "_hinweis_address": "Spalten für Straße und Hausnummer. Daraus wird je Zeile die Adresse gebildet (z. B. „Hauptstraße 2“), mehrere Adressen eines Objekts werden mit „; “ verbunden.",
+      "street_field": "bez",
+      "house_number_field": "hnr",
       "layers": {
         "gebaeude": {
           "category": "Gebäude",

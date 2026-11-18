@@ -443,6 +443,97 @@ def test_rows_are_not_combined_without_object_id_rule(tmp_path):
     assert "several-addresses" not in {issue.code for issue in result.issues}
 
 
+def make_street_geopackage(path):
+    """ALKIS-like buildings with street (bez), house number (hnr) and floors."""
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER
+            );
+            INSERT INTO gpkg_spatial_ref_sys VALUES
+                ('ETRS89 / UTM zone 32N', 25832, 'EPSG', 25832);
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT,
+                srs_id INTEGER
+            );
+            INSERT INTO gpkg_geometry_columns VALUES
+                ('gebaeude', 'geom', 'MULTIPOLYGON', 25832);
+            CREATE TABLE gebaeude (
+                fid INTEGER PRIMARY KEY, geom BLOB, objid TEXT, gfk__bez TEXT,
+                bez TEXT, hnr TEXT, geschosse TEXT
+            );
+            """
+        )
+        corner = gpkg_polygon([(1, 1), (3, 1), (3, 3), (1, 3), (1, 1)])
+        single = gpkg_polygon([(5, 1), (7, 1), (7, 3), (5, 3), (5, 1)])
+        shed = gpkg_polygon([(8, 1), (9, 1), (9, 2), (8, 2), (8, 1)])
+        connection.executemany(
+            "INSERT INTO gebaeude VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (1, corner, "ECK", "Wohngebäude", "Hauptstraße", "2", "3"),
+                (2, corner, "ECK", "Wohngebäude", "Nebenweg", "1", "3"),
+                (3, single, "EINZEL", "Wohngebäude", "Hauptstraße", "4", "2,0"),
+                (4, shed, "SCHUPPEN", "Schuppen", None, None, "1,5"),
+            ],
+        )
+
+
+def test_object_id_comes_from_the_profile_and_is_suggested(tmp_path):
+    path = tmp_path / "streets.gpkg"
+    make_street_geopackage(path)
+
+    result = import_houses(path)
+
+    ids = [record.attributes["object_id"] for record in result.harmonized_records]
+    assert ids == ["ECK", "EINZEL", "SCHUPPEN"]
+    suggestion = next(s for s in result.attribute_suggestions if s.target_field == "object_id")
+    assert (suggestion.source_field, suggestion.confidence) == ("objid", 1.0)
+
+
+def test_address_keeps_street_and_number_together_for_a_corner_house(tmp_path):
+    path = tmp_path / "streets.gpkg"
+    make_street_geopackage(path)
+
+    result = import_houses(path)
+
+    addresses = {record.attributes["object_id"]: record.attributes["address"] for record in result.harmonized_records}
+    assert addresses == {
+        "ECK": "Hauptstraße 2; Nebenweg 1",
+        "EINZEL": "Hauptstraße 4",
+        "SCHUPPEN": None,
+    }
+    assert any(issue.code == "several-addresses" for issue in result.issues)
+
+
+def test_floors_are_whole_numbers_or_stay_empty(tmp_path):
+    path = tmp_path / "streets.gpkg"
+    make_street_geopackage(path)
+
+    result = import_houses(path)
+
+    floors = {record.attributes["object_id"]: record.attributes["floors"] for record in result.harmonized_records}
+    assert floors == {"ECK": 3, "EINZEL": 2, "SCHUPPEN": None}
+    suggestion = next(s for s in result.attribute_suggestions if s.target_field == "floors")
+    assert suggestion.source_field == "geschosse"
+
+
+def test_new_target_fields_follow_step_5_decisions(tmp_path):
+    path = tmp_path / "streets.gpkg"
+    make_street_geopackage(path)
+    result = import_houses(path)
+    for suggestion in result.attribute_suggestions:
+        if suggestion.target_field == "object_id":
+            suggestion.accepted = False
+
+    records = apply_attribute_decisions(result)
+
+    assert all(record.attributes["object_id"] is None for record in records)
+    assert records[0].attributes["address"] == "Hauptstraße 2; Nebenweg 1"
+    assert records[0].attributes["floors"] == 3
+
+
 def test_different_objects_at_the_same_place_need_confirmation(tmp_path):
     path = tmp_path / "houses.gpkg"
     make_house_number_geopackage(path, same_object=False)

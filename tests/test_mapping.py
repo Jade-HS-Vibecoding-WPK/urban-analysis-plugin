@@ -9,7 +9,27 @@ from urban_analysis.mapping import (
     readable_field,
     readable_layer,
     readable_target_field,
+    target_field_explanation,
 )
+from urban_analysis.data_pipeline import TARGET_FIELDS
+
+
+def test_every_target_field_has_a_name_and_a_short_explanation():
+    """Schema and texts stay in sync: a new target field needs both (M15)."""
+    rules = default_mapping_rules()
+    for field in TARGET_FIELDS:
+        assert rules.target_field_name(field) != field, field
+        explanation = rules.target_field_explanation(field)
+        assert explanation, field
+        assert explanation.endswith("."), field
+        assert len(explanation) <= 120, field
+
+
+def test_explanations_for_the_user_guidance():
+    assert readable_target_field("object_id") == "Objekt-ID"
+    assert readable_target_field("floors") == "Geschosszahl"
+    assert target_field_explanation("object_type").startswith("Was das Objekt genau ist")
+    assert target_field_explanation("unbekannt") is None
 
 
 def test_rules_file_loads_and_knows_alkis_layers():
