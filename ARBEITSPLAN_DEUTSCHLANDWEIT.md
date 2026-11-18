@@ -172,6 +172,11 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 - OSM: Die Abfrage (POST-Feld `data`) liefert eine `.osm`-Datei in EPSG:4326;
   sie wird unverändert als Rohdatei gespeichert, dann mit GDAL/QGIS gelesen
   (Layer `points`, `lines`, `multipolygons`) und ins Projekt-CRS umgerechnet.
+- ALKIS „vereinfacht“ (11 Länder): Die WFS-Layer `ave:GebaeudeBauwerk`,
+  `ave:Nutzung`, `ave:Flurstueck` werden **ohne Präfix** als
+  `GebaeudeBauwerk`, `Nutzung`, `Flurstueck` ins GeoPackage geschrieben,
+  Spaltennamen wie geliefert (`oid`, `funktion`, `nutzart`, `bez`,
+  `lagebeztxt`, `anzahlgs` …) – so erkennt das Profil aus M12 die Daten.
 
 ### S11 – Mehrere Quellen in einem Lauf *(Mac, Vertrag gemeinsam)*
 
@@ -270,7 +275,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | 8 | W10 Schritt 3 „Daten laden“ umbauen (Teil 1 ✓ #33) | Windows | Teil 2: 3, 10 |
 | 9 | W11 Herunterladen in QGIS | Windows | 3 |
 | 10 | M10b ALKIS-Aufträge und Bundesland | Mac | 2 |
-| 11 | M12 ALKIS-Profile für die Dienst-Daten | Mac | 2 |
+| 11 | M12 ALKIS-Profile für die Dienst-Daten (Teil 1 ✓ „ALKIS vereinfacht“) | Mac | 2 |
 | 12 | M13 Mehrere Quellen in einem Lauf | Mac | 1 |
 | 13 | M15 Teil 2: „Mehr erfahren“-Texte | Mac | 1 |
 | 14 | W13 „Mehr erfahren“ anzeigen | Windows | 1, 13 |
@@ -421,13 +426,23 @@ Wartezeit starten kann.
   anbietet. Tests.
 - **Wartet auf:** 2.
 
-#### 11. M12 – ALKIS-Profil(e) für die Dienst-Daten *(Mac)*
+#### 11. M12 – ALKIS-Profil(e) für die Dienst-Daten *(Mac)* – *Teil 1 erledigt*
 
 - **Absicht:** Die Felder aus den Diensten der Länder heißen anders als im
   bisherigen Export (`…_kon.gpkg`).
 - **Ziel:** Je Lieferformat aus 2 ein Profil in `mapping_rules.json` (mit
   Objekt-ID, Adresse und – wenn vorhanden – Geschosszahl), mit Tests.
-- **Wartet auf:** 2.
+- **Stand Teil 1:** Profil **„ALKIS vereinfacht“** für die 11 Länder mit
+  diesem Format. Gebäude werden von Überdachungen/Bauwerken und
+  Gebäudeteilen getrennt (Spalte `gebnutzbez`), Objektart aus `funktion`;
+  Nutzung mit Hauptart (`nutzart`) und Detail (`bez`); Adresse aus
+  `lagebeztxt`, Geschosszahl aus `anzahlgs` (Niedersachsen liefert keine).
+  Mit einer echten Stichprobe aus Niedersachsen (500 × 500 m Donnerschwee)
+  geprüft: 648 Gebäude, 62 Bauwerke, 15 Gebäudeteile, 139 Nutzungsflächen,
+  keine falschen Hinweise.
+- **Teil 2 (offen):** Profile für BW (eigenes Schema), HB (AAA-Vollschema),
+  Berlin, Saarland (INSPIRE) und Bayern (Downloads).
+- **Wartet auf:** Teil 2: nichts.
 
 #### 12. M13 – Mehrere Quellen in einem Lauf (S11) *(Mac)*
 
