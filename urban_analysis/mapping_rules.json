@@ -23,7 +23,10 @@
     "bewertung": "Bewertung",
     "multipolygons": "OSM – Flächen",
     "lines": "OSM – Linien",
-    "points": "OSM – Punkte"
+    "points": "OSM – Punkte",
+    "GebaeudeBauwerk": "ALKIS – Gebäude und Bauwerke",
+    "Nutzung": "ALKIS – Tatsächliche Nutzung",
+    "Flurstueck": "ALKIS – Flurstücke"
   },
 
   "target_field_labels": {
@@ -80,7 +83,15 @@
     "other_tags": "Weitere OSM-Merkmale",
     "addr:street": "Straße",
     "addr:housenumber": "Hausnummer",
-    "building:levels": "Geschosszahl (OSM)"
+    "building:levels": "Geschosszahl (OSM)",
+    "oid": "ALKIS-Objekt-ID",
+    "gebnutzbez": "Gebäude oder Bauwerk",
+    "funktion": "Funktion",
+    "gfkzshh": "Gebäudefunktion (Schlüssel)",
+    "anzahlgs": "Geschosszahl (ALKIS)",
+    "lagebeztxt": "Adresse (ALKIS)",
+    "nutzart": "Nutzungsart",
+    "rellage": "Lage zur Erdoberfläche"
   },
 
   "profiles": [
@@ -192,6 +203,73 @@
         "grenzpunkte": {"category": null},
         "bodenschaetzung": {"category": null},
         "bewertung": {"category": null}
+      }
+    },
+    {
+      "name": "ALKIS vereinfacht",
+      "_hinweis": "AdV-Produkt „ALKIS vereinfacht“ aus den WFS-Diensten der Länder (M9: NI, NW, SH, HE, HH, SN, MV, BB, RP, ST, TH). Der Download (W11) speichert die Layer ohne Präfix als GebaeudeBauwerk, Nutzung und Flurstueck. Ein Gebäude ist eine Zeile; die Adresse steht fertig in lagebeztxt, die Geschosszahl (anzahlgs) liefern nicht alle Länder.",
+      "requires_fields": ["oid"],
+      "object_id_field": "oid",
+      "address_field": "lagebeztxt",
+      "layers": {
+        "GebaeudeBauwerk": {
+          "_hinweis": "Objektart aus funktion (z. B. Wohngebäude, Garage); eingeordnet nach gebnutzbez, denn der Layer enthält auch Überdachungen, Arkaden und Gebäudeteile.",
+          "object_type_field": "funktion",
+          "category_field": "gebnutzbez",
+          "category_rules": [
+            {"category": "Gebäude", "layer_suffix": "gebaeude", "values": ["Gebäude"]},
+            {"category": "Gebäudeteile", "layer_suffix": "gebaeudeteile", "values": ["Bauteil"]}
+          ],
+          "default_rule": {"category": "Bauwerke und Überdachungen", "layer_suffix": "bauwerke"}
+        },
+        "Nutzung": {
+          "_hinweis": "Hauptart aus nutzart (z. B. Weg), Detail aus bez (z. B. Rad- und Fußweg). Die Regeln vergleichen „Hauptart, Detail“ wie beim ALKIS-Export, aber mit ß (Straßenverkehr, Fließgewässer).",
+          "object_type_field": "nutzart",
+          "detail_field": "bez",
+          "category_rules": [
+            {
+              "category": "Fuß- und Radwege",
+              "layer_suffix": "fuss_radwege",
+              "values": ["Straßenverkehr, Fußgängerzone", "Platz, Fußgängerzone", "Weg"]
+            },
+            {
+              "category": "Straßen",
+              "layer_suffix": "strassen",
+              "values": ["Platz, Parkplatz", "Platz, Rastplatz", "Straßenverkehr"]
+            },
+            {"category": "Plätze", "layer_suffix": "plaetze", "values": ["Platz"]},
+            {
+              "category": "Grünflächen",
+              "layer_suffix": "gruen",
+              "values": [
+                "Sport-, Freizeit- und Erholungsfläche, Grünfläche",
+                "Sport-, Freizeit- und Erholungsfläche, Siedlungsgrünfläche",
+                "Sport-, Freizeit- und Erholungsfläche, Park",
+                "Sport-, Freizeit- und Erholungsfläche, Grünanlage",
+                "Sport-, Freizeit- und Erholungsfläche, Kleingarten",
+                "Sport-, Freizeit- und Erholungsfläche, Spielplatz",
+                "Sport-, Freizeit- und Erholungsfläche, Botanischer Garten",
+                "Friedhof",
+                "Wald",
+                "Gehölz",
+                "Heide",
+                "Moor",
+                "Sumpf",
+                "Landwirtschaft, Grünland",
+                "Unland/Vegetationslose Fläche"
+              ]
+            },
+            {
+              "category": "Wasserflächen",
+              "layer_suffix": "wasser",
+              "values": ["Fließgewässer", "Stehendes Gewässer", "Hafenbecken", "Meer"]
+            },
+            {"category": "Bahnflächen", "layer_suffix": "bahn", "values": ["Bahnverkehr"]},
+            {"category": "Schiffsverkehrsflächen", "layer_suffix": "schiff", "values": ["Schiffsverkehr"]}
+          ],
+          "default_rule": {"category": "Nutzungsflächen", "layer_suffix": "flaechen"}
+        },
+        "Flurstueck": {"category": null}
       }
     },
     {
