@@ -108,25 +108,49 @@ vollständig.
   Standard-Zeitlimit 180 s, bei Überlast HTTP 429. Ein Gebiet bis 25 km² ist
   eine Abfrage – unkritisch.
 
-**Offen für M10a/M10b:**
+**Offen für M10b:**
 
-- **Längen-/Breitengrade für die OSM-Abfrage:** Overpass braucht das Rechteck
-  in EPSG:4326. Die Regel „keine Umprojektion in der Pipeline“ verbietet das
-  bisher. Vorschlag: nur die vier Ecken des Rechtecks mit einer kleinen,
-  getesteten UTM-Formel umrechnen (keine Geometrien) – oder QGIS liefert das
-  Rechteck in 4326 mit. Mit Person Windows abstimmen.
 - Lizenz Sachsen-Anhalt am Landesportal bestätigen (Dienst verweist auf die
   Kostenverordnung; Seite war am 18.11. nicht erreichbar).
 - Berlin: WFS für die Tatsächliche Nutzung nicht gefunden.
 - Bayern: Download-Adresse der Hausumringe je Regierungsbezirk.
+- Ländergrenzen nur in EPSG:25832: Für den Bundesland-Vorschlag reicht das
+  Rechteck in EPSG:4326, das QGIS ohnehin liefert – Grenzen dafür einmalig
+  als vereinfachte 4326-Datei ins Plugin legen.
+
+## M10a – OSM-Abfrage und Größenprüfung (18.11.2026)
+
+Neues Modul `urban_analysis/sources.py` (QGIS-frei, ohne Zusatzpakete):
+
+- `plan_osm_download(study_area_wkt, buffer_meters, lonlat_box)` →
+  `SourcePlan` mit `requests`, `issues`, `area_km2`.
+- **Größe (E13):** Rechteck aus Gebiet + Puffer im Projekt-KBS – gleiche
+  Rechnung wie Schritt 2. Über 25 km² Warnung (`area-large`, mit
+  Bestätigung), über 50 km² Fehler (`area-too-large`) und kein Auftrag.
+  Grenzwerte stehen in `sources_catalog.json` (`gebiet`), damit Schritt 2
+  dieselben Zahlen lesen kann.
+- **Koordinaten:** Das Rechteck für Overpass kommt von QGIS schon in
+  EPSG:4326 (vereinbart in PR #34). Werte, die nicht nach Grad aussehen
+  (z. B. UTM-Meter) oder vertauscht sind, werden als Fehler gemeldet.
+- **Auftrag** (`DownloadRequest`): Overpass-URL, Abfrage in Overpass QL,
+  Lieferung EPSG:4326, Dateinamen `osm_<Datum>.osm` (Rohdatei) und
+  `osm_<Datum>.gpkg`, Lizenz ODbL mit Link, Quellenvermerk (E28),
+  Zeitlimit 300 s.
+- **Abfrage:** alle Knoten und Wege mit einem der Merkmale, nach denen das
+  OSM-Profil einordnet (ohne `boundary`), plus Flächen-Relationen; ein Test
+  hält Katalog und Profil in Einklang.
+- **Echt geprüft:** Die erzeugte Abfrage lieferte für 300 × 300 m in
+  Donnerschwee 704 Punkte, 144 Wege, 1 Relation (116 Gebäude, ca. 100 KB).
+  Der öffentliche Server war zunächst überlastet (HTTP 502, dann 504),
+  nach 60 s erfolgreich → W11 braucht wenige Wiederholungen mit Pause.
 
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 18.11.2026 abends: 238 grün.
+System-`python3` hat ein kaputtes pytest). Stand 18.11.2026 abends: 257 grün.
 
 ## Als Nächstes (Person Mac)
 
-Reihenfolge laut `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6: 3 M10a OSM-Abfrage
-und Größenprüfung · 6 M18 Recherche GTFS/Zensus · 7 M6 fehlende Werte ·
-danach 10 M10b und 11 M12 (auf Basis dieser Recherche).
+Reihenfolge laut `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6: 6 M18 Recherche
+GTFS/Zensus · 7 M6 fehlende Werte · 10 M10b ALKIS-Aufträge und Bundesland ·
+11 M12 ALKIS-Profil „ALKIS vereinfacht“.
