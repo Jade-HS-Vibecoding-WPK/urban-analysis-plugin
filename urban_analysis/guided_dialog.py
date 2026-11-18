@@ -32,9 +32,17 @@ from .outputs import (
 from .study_area import (
     DRAW_INSTRUCTIONS,
     StudyAreaError,
+    MAX_DOWNLOAD_TEXT,
     add_drawn_area_layer,
     area_summary_text,
     create_polygon_draw_tool,
+    download_box_km2,
+    download_size_text,
+    format_km2,
+    is_large,
+    is_oversized,
+    oversize_question_text,
+    oversize_warning_text,
     study_area_from_layer,
 )
 from .theme import (
@@ -122,17 +130,46 @@ PAGE_ACTIONS = (
     UI_LABELS["start_processing"],
 )
 
-SOURCE_LOCAL_LABEL = "Lokale Daten"
-SOURCE_ONLINE_LABEL = "Online-Suche"
-ONLINE_PENDING_MESSAGE = (
-    "Die Online-Suche nach offenen Daten wird in einem späteren Schritt gebaut. "
-    "Bitte vorerst „Lokale Daten“ verwenden."
+# Step 3 (W10): sources OSM / ALKIS / own file.  OSM and ALKIS are
+# placeholders until M10 (sources.py: suggest_state, download jobs) and W11
+# (download in QGIS); only "Eigene Datei" loads data for now.
+SOURCE_OSM_LABEL = "OpenStreetMap (OSM)"
+SOURCE_ALKIS_LABEL = "ALKIS (amtliche Daten)"
+SOURCE_OWN_LABEL = "Eigene Datei"
+SOURCE_OSM_HINT = (
+    "Offene Daten für ganz Deutschland: Gebäude, Straßen, Grünflächen, Nutzungen. "
+    "Quellenvermerk: © OpenStreetMap-Mitwirkende (ODbL)."
+)
+SOURCE_ALKIS_HINT = (
+    "Amtliches Liegenschaftskataster deines Bundeslands. Ob das Land ALKIS frei "
+    "anbietet, prüft das Plugin, sobald der Quellen-Katalog fertig ist."
+)
+CHOOSE_STATE_ITEM = "Bundesland wählen …"
+# Placeholder until M10 suggests the state from the study area (E11).
+GERMAN_STATES = (
+    "Baden-Württemberg", "Bayern", "Berlin", "Brandenburg", "Bremen", "Hamburg",
+    "Hessen", "Mecklenburg-Vorpommern", "Niedersachsen", "Nordrhein-Westfalen",
+    "Rheinland-Pfalz", "Saarland", "Sachsen", "Sachsen-Anhalt",
+    "Schleswig-Holstein", "Thüringen",
 )
 LOCAL_DATA_HINT = (
-    "Eine GeoPackage-Datei (.gpkg) von deinem Rechner, z. B. ALKIS-Daten. "
-    "Pro Durchlauf wird eine Datei geladen."
+    "Eine GeoPackage-Datei (.gpkg) von deinem Rechner, z. B. eine eigene "
+    "Kartierung oder ein eigener ALKIS-Export. Pro Durchlauf wird eine Datei geladen."
 )
-CHOOSE_SOURCE_MESSAGE = "Bitte zuerst wählen, woher die Daten kommen: „Lokale Daten“ oder „Online-Suche“."
+CHOOSE_SOURCE_MESSAGE = (
+    "Bitte mindestens eine Quelle ankreuzen: „OpenStreetMap“, „ALKIS“ oder "
+    "„Eigene Datei“."
+)
+CHOOSE_STATE_MESSAGE = "Für ALKIS bitte das Bundesland wählen."
+DOWNLOAD_PENDING_MESSAGE = (
+    "Das Herunterladen von OSM- und ALKIS-Daten wird in einem späteren Schritt "
+    "angeschlossen. Bitte vorerst nur „Eigene Datei“ ankreuzen."
+)
+DOWNLOAD_TOO_LARGE_MESSAGE = (
+    "Das Gebiet ist mit Puffer {size} km² groß. OSM- und ALKIS-Daten können nur "
+    "für höchstens {limit} km² heruntergeladen werden. Bitte in Schritt 2 das "
+    "Gebiet oder den Puffer verkleinern oder nur „Eigene Datei“ verwenden."
+)
 CHOOSE_FILE_MESSAGE = "Bitte zuerst mit „Datei wählen …“ eine GeoPackage-Datei auswählen."
 MISSING_AREA_MESSAGE = (
     "Projekt-CRS und Untersuchungsgebiet fehlen. Bitte mit „Zurück“ Schritt 1 und 2 "
@@ -251,6 +288,23 @@ def issue_icon_key(flow, issue):
     candidates = set(LAYER_ICONS) | {d.layer_id for d in flow.result.layers}
     table = issue_table_name(issue.message, sorted(candidates))
     return layer_icon_key(flow, table) if table else None
+
+
+def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_data):
+    """Check the step-3 sources.  Returns None (go on: load the file or keep
+    the loaded data) or (kind, text) with kind 'error' or 'info'."""
+    if not (osm or alkis or own):
+        return None if has_data else ("error", CHOOSE_SOURCE_MESSAGE)
+    if alkis and not state:
+        return ("error", CHOOSE_STATE_MESSAGE)
+    if (osm or alkis) and download_km2 is not None and is_oversized(download_km2):
+        return ("error", DOWNLOAD_TOO_LARGE_MESSAGE.format(
+            size=format_km2(download_km2), limit=MAX_DOWNLOAD_TEXT))
+    if own and path is None and not has_data:
+        return ("error", CHOOSE_FILE_MESSAGE)
+    if osm or alkis:
+        return ("info", DOWNLOAD_PENDING_MESSAGE)  # until W11, never silent
+    return None
 
 
 def output_slug(text):
@@ -1281,9 +1335,16 @@ def _create_dock(plugin):
         page.layout.addWidget(indented(layer_box, selected_only, no_layer_hint))
         page.layout.addWidget(use_drawing)
         page.layout.addWidget(indented(draw_button, draw_hint))
+        size = QLabel()  # E17: size of the download rectangle
+        size.setWordWrap(True)
+        set_role(size, "hint")
+        size.hide()
+
         page.layout.addWidget(status)
         page.layout.addWidget(QLabel(UI_LABELS["buffer"]))
         page.layout.addWidget(buffer_input)
+        page.layout.addWidget(size)
+        page.widgets.update(size=size, download_km2=None)
         page.widgets.update(
             use_layer=use_layer,
             use_drawing=use_drawing,
@@ -1378,6 +1439,9 @@ def _create_dock(plugin):
 
     def update_area_status(page):
         status = page.widgets["status"]
+        size = page.widgets["size"]
+        page.widgets["download_km2"] = None
+        size.hide()
         try:
             geometry, count = chosen_area(page)
         except StudyAreaError as error:
@@ -1386,12 +1450,34 @@ def _create_dock(plugin):
             return
         set_role(status, "status")
         status.setText(area_summary_text(count, geometry.area(), target_crs().authid()))
+        if target_crs().mapUnits() != Qgis.DistanceUnit.Meters:
+            return  # sizes in degrees make no sense; CRS hint is in step 1
+        box = geometry.boundingBox()
+        km2 = download_box_km2(box.xMinimum(), box.yMinimum(), box.xMaximum(),
+                               box.yMaximum(), page.widgets["buffer"].value())
+        page.widgets["download_km2"] = km2
+        if is_large(km2):
+            set_role(size, "warning")
+            size.setText(download_size_text(km2) + "\n\n" + oversize_warning_text(km2))
+        else:
+            set_role(size, "hint")
+            size.setText(download_size_text(km2))
+        size.show()
+        QTimer.singleShot(0, dock.fit_wrapped_labels)
 
     def validate_area(page):
         try:
             geometry, _count = chosen_area(page)
         except StudyAreaError as error:
             return reject(str(error))
+        update_area_status(page)
+        km2 = page.widgets["download_km2"]
+        if km2 is not None and is_large(km2):
+            answer = QMessageBox.question(
+                dock, "Großes Gebiet", oversize_question_text(km2),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return False
         project_crs = target_crs().authid()
         study_area_wkt = geometry.asWkt()
         buffer_meters = page.widgets["buffer"].value()
@@ -1408,11 +1494,11 @@ def _create_dock(plugin):
             project_crs=project_crs,
             study_area_wkt=study_area_wkt,
             buffer_meters=buffer_meters,
+            download_km2=km2,  # step 3 blocks downloads above the limit (E13)
         )
         return True
 
-    # 3 Daten laden: two choice buttons on top of each other; the chosen one
-    # opens a panel below it (local: file chooser, online: later extension).
+    # Choice button with a panel that opens below it (used in step 4).
     def choice_with_panel(page, key, text):
         button = QPushButton(choice_label(text, False))
         button.setCheckable(True)
@@ -1474,37 +1560,49 @@ def _create_dock(plugin):
         page.widgets[f"{key}_animation"] = animation
         animation.start()
 
+    def hint_label(text):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        set_role(label, "hint")
+        return label
+
+    def source_choice(page, key, text, *details):
+        """Check box for one source; its details show only while ticked."""
+        box = QCheckBox(text)
+        panel = indented(*details)
+        panel.hide()
+        page.layout.addWidget(box)
+        page.layout.addWidget(panel)
+
+        def toggled(on):
+            panel.setVisible(on)
+            dock.clear_message()
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        box.toggled.connect(toggled)
+        page.widgets[key] = box
+
     def build_data(page):
-        question = QLabel("Woher sollen die Daten kommen?")
+        question = QLabel("Woher sollen die Daten kommen? Mehrere Quellen sind möglich.")
         question.setWordWrap(True)
         page.layout.addWidget(question)
 
-        local = choice_with_panel(page, "local", SOURCE_LOCAL_LABEL)
-        local_hint = QLabel(LOCAL_DATA_HINT)
-        local_hint.setWordWrap(True)
-        set_role(local_hint, "hint")
+        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT))
+
+        state = QComboBox()
+        state.addItem(CHOOSE_STATE_ITEM)
+        state.addItems(GERMAN_STATES)
+        source_choice(page, "alkis", SOURCE_ALKIS_LABEL, hint_label(SOURCE_ALKIS_HINT), state)
+
         choose_button = QPushButton("Datei wählen …")
         set_role(choose_button, "secondary")
         choose_button.setCursor(Qt.PointingHandCursor)
-        file_info = QLabel("Noch keine Datei gewählt.")
-        file_info.setWordWrap(True)
-        set_role(file_info, "hint")
-        local.addWidget(local_hint)
-        local.addWidget(choose_button)
-        local.addWidget(file_info)
+        file_info = hint_label("Noch keine Datei gewählt.")
+        source_choice(page, "own", SOURCE_OWN_LABEL, hint_label(LOCAL_DATA_HINT),
+                      choose_button, file_info)
 
-        online = choice_with_panel(page, "online", SOURCE_ONLINE_LABEL)
-        online_hint = QLabel(ONLINE_PENDING_MESSAGE)
-        online_hint.setWordWrap(True)
-        set_role(online_hint, "hint")
-        online.addWidget(online_hint)
-
-        group = QButtonGroup(page.widget)
-        group.setExclusive(True)
-        group.addButton(page.widgets["local_button"])
-        group.addButton(page.widgets["online_button"])
         page.widgets.update(
-            group=group, choose_button=choose_button, file_info=file_info, path=None
+            state=state, choose_button=choose_button, file_info=file_info, path=None
         )
         choose_button.clicked.connect(lambda: choose_file(page))
 
@@ -1528,17 +1626,22 @@ def _create_dock(plugin):
 
     def validate_data(page):
         widgets = page.widgets
-        if widgets["online_button"].isChecked():
-            dock.show_message(ONLINE_PENDING_MESSAGE, kind="info")
+        state = widgets["state"]
+        problem = source_choice_problem(
+            osm=widgets["osm"].isChecked(),
+            alkis=widgets["alkis"].isChecked(),
+            state=state.currentText() if state.currentIndex() > 0 else None,
+            own=widgets["own"].isChecked(),
+            path=widgets["path"],
+            download_km2=dock.settings.get("download_km2"),
+            has_data=plugin.workflow is not None,
+        )
+        if problem is not None:
+            kind, text = problem
+            dock.show_message(text, kind=kind)
             return False
-        if not widgets["local_button"].isChecked():
-            if plugin.workflow is not None:
-                return True  # data already passed in via the Python console
-            return reject(CHOOSE_SOURCE_MESSAGE)
-        if widgets["path"] is None:
-            if plugin.workflow is not None:
-                return True
-            return reject(CHOOSE_FILE_MESSAGE)
+        if not widgets["own"].isChecked() or widgets["path"] is None:
+            return True  # data already loaded (earlier run or Python console)
         if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
             return reject(MISSING_AREA_MESSAGE)
         start_import(widgets["path"])
