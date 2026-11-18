@@ -61,6 +61,9 @@
       "name": "ALKIS",
       "_hinweis": "ALKIS-Export (z. B. lkr_03403_Stadt_Oldenburg_kon.gpkg). Ein Layer gehört zum Profil, wenn sein Name hier steht und er alle requires_fields hat.",
       "requires_fields": ["objid"],
+      "_hinweis_object_id_field": "Spalte mit der Objekt-ID. Zeilen mit gleicher ID und gleicher Geometrie, die sich NUR in den address_fields unterscheiden, sind ein Objekt mit mehreren Adressen (z. B. Eckhaus) und werden zu einem Objekt zusammengefasst; alle Adressen bleiben erhalten. Unterscheiden sie sich in anderen Spalten, wird nichts zusammengefasst und der Fall wird zur Entscheidung angezeigt.",
+      "object_id_field": "objid",
+      "address_fields": ["hnr", "bez"],
       "layers": {
         "gebaeude": {
           "category": "Gebäude",
