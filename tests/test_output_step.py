@@ -61,6 +61,18 @@ def test_each_chosen_output_needs_a_save_location():
     assert output_choice_problem(geopackage=False, pdf=False, paths={}, **common) is None
 
 
+def test_input_file_can_never_be_the_output(tmp_path):
+    raw = tmp_path / "alkis_export.gpkg"
+    raw.write_bytes(b"rohdaten")
+    choice = dict(geopackage=True, pdf=False, data_source="ALKIS",
+                  input_paths={tmp_path / "." / "alkis_export.gpkg"})
+    # even after "Ersetzen" in the save dialog
+    problem = output_choice_problem(paths={"geopackage": raw}, confirmed={"geopackage"}, **choice)
+    assert "Eingabedatei" in problem and "alkis_export.gpkg" in problem
+    other = tmp_path / "ergebnis.gpkg"
+    assert output_choice_problem(paths={"geopackage": other}, **choice) is None
+
+
 def test_existing_file_is_only_replaced_after_the_save_dialog(tmp_path):
     existing = tmp_path / "ergebnis.gpkg"
     existing.write_bytes(b"alt")

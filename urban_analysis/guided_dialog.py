@@ -84,6 +84,10 @@ MISSING_PATH_MESSAGES = {
     "pdf": "Für das PDF fehlt der Speicherort. Bitte „Speichern unter …“ klicken "
            "oder das Häkchen entfernen.",
 }
+INPUT_FILE_MESSAGE = (
+    "„{name}“ ist deine Eingabedatei. Bitte wähle mit „Speichern unter …“ einen "
+    "anderen Namen, damit die Originaldaten erhalten bleiben."
+)
 FILE_EXISTS_MESSAGE = (
     "Die Datei „{name}“ gibt es schon. Bitte „Speichern unter …“ klicken und dort "
     "bestätigen, dass sie ersetzt wird, oder einen anderen Namen wählen."
@@ -288,7 +292,15 @@ def output_path_text(path):
     return f"{path.name}\nim Ordner {short_folder(path.parent)}"
 
 
-def output_choice_problem(*, geopackage, pdf, paths, data_source, confirmed=()):
+def _same_file(first, second):
+    try:
+        return Path(first).resolve() == Path(second).resolve()
+    except OSError:
+        return False
+
+
+def output_choice_problem(*, geopackage, pdf, paths, data_source, confirmed=(),
+                          input_paths=()):
     """First problem of the step-8 choices as user text, or None if all is set.
 
     The data source is always required: it goes into the field 'Quelle' of
@@ -303,6 +315,9 @@ def output_choice_problem(*, geopackage, pdf, paths, data_source, confirmed=()):
         path = paths.get(kind)
         if not path:
             return MISSING_PATH_MESSAGES[kind]
+        # Raw data are never overwritten (CLAUDE.md), not even after "Ersetzen".
+        if any(_same_file(path, source) for source in input_paths):
+            return INPUT_FILE_MESSAGE.format(name=Path(path).name)
         if kind not in confirmed and Path(path).exists():
             return FILE_EXISTS_MESSAGE.format(name=Path(path).name)
     return None
@@ -722,6 +737,7 @@ def _create_dock(plugin):
             self.output_paths = {}  # save locations chosen in step 8 (W8b)
             self.output_confirmed = set()  # kinds picked in the save dialog
             self.output_draft = {}  # step-8 input not yet confirmed
+            self.input_paths = set()  # loaded input files: never an output
 
             # The whole plugin shares one style (theme.py), with the bundled
             # fonts if present (otherwise the system monospace font).
@@ -1113,6 +1129,7 @@ def _create_dock(plugin):
                 self.output_paths = {}
                 self.output_confirmed = set()
                 self.output_draft = {}
+                self.input_paths = set()
                 self.next_message = None
                 for page in self.pages:
                     if page.rebuild:
@@ -1530,6 +1547,7 @@ def _create_dock(plugin):
     def start_import(path):
         """Run the pipeline (S1) as a QGIS background task with a busy bar."""
         settings = dict(dock.settings)
+        dock.input_paths.add(Path(path))  # protected from being overwritten in step 8
         dock.set_busy(f"Lade „{path.name}“ … Das kann bei großen Dateien etwas dauern.")
 
         def run_import(task):
@@ -1968,7 +1986,8 @@ def _create_dock(plugin):
         pdf = widgets["pdf"].isChecked()
         problem = output_choice_problem(
             geopackage=geopackage, pdf=pdf, paths=dock.output_paths,
-            data_source=widgets["source"].text(), confirmed=dock.output_confirmed)
+            data_source=widgets["source"].text(), confirmed=dock.output_confirmed,
+            input_paths=dock.input_paths)
         if problem:
             return reject(problem)
         try:
@@ -2048,7 +2067,7 @@ def _create_dock(plugin):
         problem = output_choice_problem(
             geopackage=output.save_cleaned_geopackage, pdf=output.create_pdf,
             paths=dock.output_paths, data_source=output.data_source,
-            confirmed=dock.output_confirmed)
+            confirmed=dock.output_confirmed, input_paths=dock.input_paths)
         if problem:
             return reject(problem + " (Schritt 8)")
         try:
