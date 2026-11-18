@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Own pixel check mark (7x7 grid, 2 px per pixel) for ticked check boxes. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14" shape-rendering="crispEdges">
+  <rect x="10" y="2" width="2" height="2" fill="#ffffff"/>
+  <rect x="8" y="4" width="2" height="2" fill="#ffffff"/>
+  <rect x="10" y="4" width="2" height="2" fill="#ffffff"/>
+  <rect x="2" y="6" width="2" height="2" fill="#ffffff"/>
+  <rect x="6" y="6" width="2" height="2" fill="#ffffff"/>
+  <rect x="8" y="6" width="2" height="2" fill="#ffffff"/>
+  <rect x="2" y="8" width="2" height="2" fill="#ffffff"/>
+  <rect x="4" y="8" width="2" height="2" fill="#ffffff"/>
+  <rect x="6" y="8" width="2" height="2" fill="#ffffff"/>
+  <rect x="4" y="10" width="2" height="2" fill="#ffffff"/>
+</svg>

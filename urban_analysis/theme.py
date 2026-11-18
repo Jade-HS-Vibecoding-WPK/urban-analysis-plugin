@@ -82,6 +82,8 @@ DRAW_FILL_RGBA = (47, 111, 176, 60)
 ICON_DIR = Path(__file__).resolve().parent / "icons"
 # Toolbar button: own 16x16 pixel design of an earth block with grass.
 TOOLBAR_ICON_FILE = "erdblock.svg"
+# Ticked check boxes: own white pixel check mark on the blue box.
+CHECK_ICON_FILE = "haken.svg"
 
 
 def icon_path(name=TOOLBAR_ICON_FILE):
@@ -93,6 +95,8 @@ def panel_stylesheet():
     """Stylesheet for a plugin window; set it on the window's top widget."""
     c = COLORS
     r = RADIUS_PX
+    # Qt stylesheets need forward slashes, also on Windows.
+    check_icon = Path(icon_path(CHECK_ICON_FILE)).as_posix()
     padding = "padding: 6px 14px;"
     # Pressed: the label moves 1 px down, so the button feels pushed in.
     pressed_padding = "padding: 7px 14px 5px 14px;"
@@ -261,6 +265,7 @@ QRadioButton::indicator:checked {{
 QCheckBox::indicator:checked {{
     background-color: {c['accent']};
     border-color: {c['accent']};
+    image: url("{check_icon}");
 }}
 QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {{
     background-color: {c['disabled']};

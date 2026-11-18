@@ -4,7 +4,13 @@ import pytest
 
 from urban_analysis.contracts import LayerDescriptor, PipelineResult, ValidationIssue
 from urban_analysis.data_pipeline import HarmonizedRecord
-from urban_analysis.guided_dialog import cross_layer_warning_text, duplicates_applied_text
+from urban_analysis.guided_dialog import (
+    cross_layer_warning_text,
+    duplicate_title_text,
+    duplicates_applied_text,
+    merge_hint_text,
+    more_groups_text,
+)
 from urban_analysis.user_guidance import GuidedWorkflow, describe_group, issue_table_name
 
 
@@ -122,4 +128,25 @@ def test_hint_with_readable_layer_name_is_assigned(monkeypatch):
 
 def test_feedback_after_applying():
     assert duplicates_applied_text(0) == "Entscheidung übernommen: Alle Objekte bleiben erhalten."
-    assert duplicates_applied_text(1030).endswith("1030 Objekte durch Zusammenführen entfernt.")
+    assert duplicates_applied_text(1030).endswith("1 030 Objekte durch Zusammenführen entfernt.")
+    assert duplicates_applied_text(1).endswith(": 1 Objekt durch Zusammenführen entfernt.")
+
+
+def test_group_examples_use_readable_layer_names():
+    flow = make_workflow()
+    layers = {layer.table_name: layer for layer in flow.duplicate_layers()}
+    _group, records = layers["nutzung"].groups[0]
+    names = {"nutzung_fuss_radwege": "Fuß- und Radwege"}.get
+    # unknown names fall back to the technical id
+    assert describe_group(records, names).endswith("in Fuß- und Radwege, nutzung_strassen")
+
+
+def test_step6_texts_use_readable_names_and_correct_singular_plural():
+    assert duplicate_title_text("Gebäude", 645, 1675) == "Gebäude: 645 Gruppen mit 1 675 Objekten"
+    assert duplicate_title_text("Bewertung", 1, 2) == "Bewertung: 1 Gruppe mit 2 Objekten"
+    assert more_groups_text(1) == "… und 1 weitere Gruppe"
+    assert more_groups_text(642) == "… und 642 weitere Gruppen"
+    assert merge_hint_text(1) == "Je Gruppe bleibt das erste Objekt, 1 Objekt wird entfernt."
+    assert merge_hint_text(1030) == "Je Gruppe bleibt das erste Objekt, 1 030 Objekte werden entfernt."
+    assert cross_layer_warning_text(1).startswith("Achtung: 1 Gruppe liegt in")
+    assert cross_layer_warning_text(3).startswith("Achtung: 3 Gruppen liegen in")

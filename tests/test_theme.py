@@ -9,6 +9,7 @@ import pytest
 import random
 
 from urban_analysis.theme import (
+    CHECK_ICON_FILE,
     COLORS,
     LAMP_FILES,
     ROLES,
@@ -101,6 +102,18 @@ def test_sparks_start_at_the_front_rise_and_fade_out():
     for _ in range(20):
         later = step_sparks(later)
     assert later == []  # every spark ends
+
+
+def test_ticked_check_box_shows_an_own_white_pixel_check_mark():
+    path = Path(icon_path(CHECK_ICON_FILE))
+    root = ET.parse(path).getroot()
+    assert root.get("width") == "14" and root.get("shape-rendering") == "crispEdges"
+    rects = root.findall("{http://www.w3.org/2000/svg}rect")
+    assert rects and {rect.get("fill") for rect in rects} == {"#ffffff"}
+    checked = _rule(panel_stylesheet(), "QCheckBox::indicator:checked")
+    assert COLORS["accent"] in checked
+    assert f'image: url("{path.as_posix()}")' in checked
+    assert "\\" not in checked  # Qt needs forward slashes
 
 
 def test_toolbar_icon_is_an_own_16x16_pixel_svg():
