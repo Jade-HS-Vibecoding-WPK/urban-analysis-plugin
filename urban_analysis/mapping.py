@@ -128,6 +128,7 @@ class MappingRules:
     field_labels: Mapping[str, str]
     layer_labels: Mapping[str, str] = field(default_factory=dict)
     target_field_labels: Mapping[str, str] = field(default_factory=dict)
+    target_field_explanations: Mapping[str, str] = field(default_factory=dict)
 
     def profile_for(self, table_name: str, fields: Iterable[str]) -> Optional[LayerProfile]:
         available = set(fields)
@@ -159,6 +160,10 @@ class MappingRules:
     def target_field_name(self, field: str) -> str:
         """German name of a target field, e.g. ``Objektart`` for ``object_type``."""
         return self.target_field_labels.get(field, field)
+
+    def target_field_explanation(self, field: str) -> Optional[str]:
+        """One sentence explaining a target field (for the ⓘ symbol), or ``None``."""
+        return self.target_field_explanations.get(field)
 
 
 def _rule(data: Mapping[str, Any], where: str) -> CategoryRule:
@@ -219,6 +224,7 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         _labels("field_labels"),
         _labels("layer_labels"),
         _labels("target_field_labels"),
+        _labels("target_field_explanations"),
     )
 
 
@@ -250,3 +256,8 @@ def readable_layer(layer_id: str) -> str:
 def readable_target_field(field: str) -> str:
     """For the user guidance: ``object_type`` -> ``Objektart``."""
     return default_mapping_rules().target_field_name(field)
+
+
+def target_field_explanation(field: str) -> Optional[str]:
+    """For the user guidance (ⓘ symbol): one sentence explaining a target field."""
+    return default_mapping_rules().target_field_explanation(field)

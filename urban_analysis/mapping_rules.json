@@ -38,6 +38,21 @@
     "source": "Datenquelle"
   },
 
+  "target_field_explanations": {
+    "_hinweis": "Ein Satz je Zielfeld für das Infosymbol (ⓘ) in Schritt 5 und in der Attributtabelle. Kurz halten; die Beispiele müssen zu dem passen, was die Pipeline wirklich einträgt.",
+    "object_id": "Kennung des Objekts in der Quelle, damit man es dort wiederfindet.",
+    "address": "Straße und Hausnummer, z. B. „Hauptstraße 2“; mehrere Adressen sind mit „; “ getrennt.",
+    "floors": "Anzahl der oberirdischen Geschosse, wenn die Quelle sie angibt; sonst leer.",
+    "source_name": "Datei oder Download, aus dem das Objekt stammt.",
+    "object_type": "Was das Objekt genau ist, z. B. Wohngebäude, Garage oder Wohnbaufläche.",
+    "object_detail": "Genauere Angabe zur Objektart, wenn die Quelle eine hat, z. B. „Park“ bei einer Erholungsfläche.",
+    "category": "Gruppe im Kartenthema, z. B. Gebäude, Straßen oder Grünflächen.",
+    "status": "Zustand des Objekts laut Quelle, z. B. „in Betrieb“ oder „außer Betrieb“; oft leer.",
+    "area_m2": "Fläche in Quadratmetern, wenn die Quelle sie angibt; sonst leer.",
+    "year": "Baujahr oder Jahr der Erfassung, wenn die Quelle es angibt.",
+    "source": "Herkunft der Daten mit Lizenzvermerk, z. B. „© OpenStreetMap-Mitwirkende“; wird in Schritt 8 ergänzt."
+  },
+
   "field_labels": {
     "_hinweis": "Verständliche Namen für Spalten in Prüfhinweisen.",
     "objid": "ALKIS-Objekt-ID",
