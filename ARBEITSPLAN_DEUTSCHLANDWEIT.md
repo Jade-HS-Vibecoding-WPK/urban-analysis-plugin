@@ -3,8 +3,12 @@
 Stand: 18.11.2026 – **E5–E15 von Person Windows bestätigt (G5), ergänzt um
 E16–E19. Person Mac stimmt E16, E17 und E19 zu; E18 auf Wunsch der Person
 Mac geändert (jedes Mal fragen, letzter Ordner als Vorschlag).**
-Neu als Entwurf von Person Mac: soziale Daten und Erreichbarkeit (E22–E27,
-G10, M17–M21, W15–W16), noch nicht mit Person Windows abgestimmt.
+Neu als Entwurf von Person Mac: soziale Daten und Erreichbarkeit (E22–E27),
+Beschluss in Aufgabe 5 (G10).
+
+**Stand Ende 18.11.2026:** Erledigtes steht in §5, alle offenen Aufgaben
+stehen in §6 **in der Reihenfolge, in der sie erledigt werden**. Auf `main`
+sind alle 234 Tests grün.
 
 Der erste Arbeitsplan (`ARBEITSPLAN.md`) ist im Wesentlichen erledigt: Das
 Plugin läuft in QGIS von Schritt 1 bis 9 mit einer lokalen GeoPackage-Datei.
@@ -195,7 +199,7 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 - Stufe 1 (Luftlinie) und Stufe 3 (Güteklassen) in reinem Python in
   `urban_analysis/accessibility.py` (neu). Abstände in Metern; dafür muss das
   Projekt-CRS metrisch sein (z. B. EPSG:25832), sonst sichtbarer Fehler.
-- Stufe 2 (Fußweg): **wo gerechnet wird, ist offen** (→ §9) – entweder mit
+- Stufe 2 (Fußweg): **wo gerechnet wird, ist offen** (→ §7) – entweder mit
   den Netzwerk-Werkzeugen von QGIS (Windows) oder mit einer eigenen
   Wegsuche über die OSM-Linien (Mac).
 - Ausgabe: Zusatzfelder an den Ausgangsobjekten (E23), Stufe 2 außerdem
@@ -203,332 +207,322 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 
 ---
 
-## 5. Gemeinsame Schritte
+## 5. Erledigt
 
-### G5 – Regeln anpassen (zuerst!)
+| Schritt | Wer | Ergebnis | PR |
+| --- | --- | --- | --- |
+| G5 Regeln anpassen | gemeinsam | `CLAUDE.md` und `PLAN.md` erlauben den Download (E5–E19) | #23, #24 |
+| G9 Zielschema und Schritt 5 | gemeinsam | 11 Felder (neu `object_id`, `address`, `floors`), Schritt 5 mit Ausklappmenüs und ⓘ-Symbol (`PLAN.md` §3.4) | #27 |
+| M8 Gebäude mit mehreren Adressen | Mac | Eckhaus = ein Gebäude mit allen Adressen; in QGIS mit dem ALKIS-Export geprüft | #21 |
+| M16 Objekt-ID, Adresse, Geschosszahl | Mac | neue Zielfelder, Adresse je Zeile; in QGIS geprüft | #28 |
+| M15 Teil 1: Zielfeld-Texte | Mac | deutscher Name und ein Erklärungssatz je Zielfeld (`target_field_explanation()`) | #28 |
+| M11 OSM-Profil | Mac | OSM-Flächen und -Linien in Kategorien, lesbare Objektart; mit echten Daten (Donnerschwee) geprüft: „Sonstige“ Flächen 165 → 25, Linien 1 380 → 171 | #29, #31 |
+| W8b Ausgabe GeoPackage/PDF | Windows | Speichern mit Vorschlag, Datenquelle Pflicht, Eingabedatei geschützt, 11 Felder, Geschosszahl als Ganzzahl | #26 |
+| Planentwurf soziale Daten | Mac | E22–E27 als Entwurf im Plan (Beschluss in Aufgabe 5) | #30 |
 
-- **Absicht:** `CLAUDE.md` und `PLAN.md` sagen noch „Download erst nach dem
-  MVP“. Beide Claude-Sessions halten sich daran, solange es dort steht.
-- **Ziel:** Ein PR ändert `CLAUDE.md` (Abschnitt Daten, Getroffene
-  Entscheidungen E5–E19, Dateitabelle um `sources.py`,
-  `sources_catalog.json`, `mapping.py`, `mapping_rules.json`, `geometry.py`)
-  und `PLAN.md` (§2, §3.2, §6). Beide haben zugestimmt.
-- **Warten auf:** nichts.
+**Entfallen:** M22 „Fläche aus der Geometrie in `area_m2`“ (Wunsch Person
+Mac). Die Flächenberechnung selbst braucht nur der Abgleich ALKIS ↔ OSM (E12)
+und steckt deshalb in Aufgabe 15 (M14). `area_m2` bleibt leer, wenn die Quelle
+keine Fläche angibt. Das weicht von G9 (`PLAN.md` §3.4) ab → mit Person
+Windows abstimmen (§7).
 
-### G6 – Vertrag erweitern (S11, S13)
+## 6. Offene Aufgaben in der Reihenfolge, in der sie erledigt werden
 
-- **Absicht:** Neue Felder `source_kind` und `details` gehören in die
-  gemeinsame Datei `contracts.py`.
+Die Nummer ist die Reihenfolge. Aufgaben einer Etappe, die nicht aufeinander
+warten, können Mac und Windows gleichzeitig erledigen. Die Kürzel (M9, W11 …)
+bleiben, damit Verweise in PRs und Commits weiter stimmen.
+
+| Nr. | Aufgabe | Wer | Wartet auf |
+| --- | --- | --- | --- |
+| | **Etappe A – jetzt starten** | | |
+| 1 | G6 Vertrag erweitern | gemeinsam | – |
+| 2 | M9 Recherche ALKIS-Dienste der Länder | Mac | – |
+| 3 | M10a OSM-Abfrage und Größenprüfung | Mac | – |
+| 4 | W14 Schritt 5 umbauen | Windows | Teil 2: 1 |
+| 5 | G10 Soziale Daten beschließen | gemeinsam | – |
+| 6 | M18 Recherche GTFS und Zensus | Mac | – |
+| 7 | M6 Fehlende Werte melden | Mac | – |
+| | **Etappe B – Download und mehrere Quellen** | | |
+| 8 | W10 Schritt 3 „Daten laden“ umbauen | Windows | 3 |
+| 9 | W11 Herunterladen in QGIS | Windows | 3 |
+| 10 | M10b ALKIS-Aufträge und Bundesland | Mac | 2 |
+| 11 | M12 ALKIS-Profile für die Dienst-Daten | Mac | 2 |
+| 12 | M13 Mehrere Quellen in einem Lauf | Mac | 1 |
+| 13 | M15 Teil 2: „Mehr erfahren“-Texte | Mac | 1 |
+| 14 | W13 „Mehr erfahren“ anzeigen | Windows | 1, 13 |
+| | **Etappe C – Abgleich und Abnahme** | | |
+| 15 | M14 Quellen abgleichen (mit Flächenberechnung) | Mac | 12 |
+| 16 | W12 Vorrang je Kategorie | Windows | 15 |
+| 17 | M7 Ende-zu-Ende-Test ohne QGIS | Mac | 15 |
+| 18 | W9 Plugin-ZIP und Test auf Windows | Windows | 9 |
+| 19 | G7 Zwischentest in zwei Bundesländern | gemeinsam | 9, 10, 12 |
+| 20 | G8 Abnahme Phase 2 | gemeinsam | 1–19 |
+| | **Etappe D – soziale Daten und Erreichbarkeit** | | |
+| 21 | M17 Soziale Infrastruktur aus OSM-Punkten | Mac | 3, 5 |
+| 22 | M19 Takt je Haltestelle aus GTFS | Mac | 5, 6 |
+| 23 | W15 GTFS herunterladen, Haltestellen-Layer | Windows | 6, 9 |
+| 24 | M20 Erreichbarkeit Stufe 1: Luftlinie | Mac | 21 |
+| 25 | W16 Erreichbarkeit in der Benutzerführung | Windows | 24 |
+| 26 | M21 Erreichbarkeit Stufe 3: ÖV-Güteklassen | Mac | 22, 24 |
+
+Etappe D braucht den Beschluss aus Aufgabe 5 (G10). Die Recherche (6) und
+der Beschluss (5) laufen schon in Etappe A, damit Etappe D danach ohne
+Wartezeit starten kann.
+
+### Etappe A – jetzt starten
+
+#### 1. G6 – Vertrag erweitern *(gemeinsam)*
+
+- **Absicht:** Neue Felder `source_kind` (S11) und `details` (S13) gehören in
+  die gemeinsame Datei `contracts.py`. Außerdem braucht Schritt 5 nach G9
+  mehr als heute: „Weitere Spalten (12)“ und „als Originalspalte behalten /
+  weglassen“ gehen mit dem heutigen Vertrag nicht (die Pipeline liefert nur
+  Spalten **mit** Vorschlag, `AttributeSuggestion` kennt kein „behalten“).
 - **Ziel:** Eigener PR nur für `contracts.py` und `tests/test_contracts.py`;
-  die andere Person prüft und mergt.
-- **Warten auf:** G5.
+  die andere Person prüft und mergt. Festgelegt wird auch, wie die Pipeline
+  **alle** Spalten eines Layers mit Beispielwerten liefert und wie
+  „behalten“ / „weglassen“ zurückkommt.
+- **Wartet auf:** nichts. Der wichtigste gemeinsame Schritt: 4 (Teil 2),
+  12, 13 und 14 warten darauf.
 
-### G7 – Zwischentest in zwei Bundesländern
-
-- **Absicht:** „Deutschlandweit“ beweisen wir nur, wenn es nicht nur in
-  Oldenburg klappt.
-- **Ziel:** Donnerschwee (Niedersachsen, EPSG:25832) **und** ein Gebiet im
-  Osten (EPSG:25833, z. B. Sachsen oder Brandenburg) laufen von Schritt 1 bis 9
-  durch, einmal auf Mac, einmal auf Windows.
-- **Warten auf:** M11, M13, W11.
-
-### G8 – Abnahme Phase 2
-
-- **Ziel:** Abnahmekriterien aus `PLAN.md` §9 gelten weiter, zusätzlich:
-  OSM und (wo verfügbar) ALKIS werden automatisch geholt; Quellenvermerke
-  stehen in der Ausgabe; Vorrang je Kategorie funktioniert; keine falschen
-  Dubletten-Rückfragen bei nur einer Quelle.
-- **Warten auf:** alles.
-
-### G9 – Zielschema und Schritt 5 gemeinsam neu denken (E20, E21)
-
-- **Absicht:** Im QGIS-Test fehlten in den Ergebnis-Layern die Objekt-IDs,
-  Straßen und Hausnummern, und Schritt 5 (Attributzuordnung) war nicht
-  verständlich. Beides hängt am Zielschema, das in `PLAN.md` gemeinsam
-  festgelegt ist.
-- **Ziel:** Gemeinsam entschieden und in `PLAN.md` §3.4 nachgetragen:
-  1. Welche Felder haben die Ergebnis-Layer? (Vorschlag E20: zusätzlich
-     `object_id` und `address`.)
-  2. Was entscheidet die Nutzerin in Schritt 5? Diskussionsstart: Alle
-     Spalten eines Layers werden mit Beispielwerten gezeigt; je Spalte wählt
-     man „→ Zielfeld“, „als Originalspalte behalten“ oder „weglassen“.
-     Vorschläge der Pipeline sind vorausgewählt.
-  3. Verständliche deutsche Namen und eine Ein-Satz-Erklärung je Zielfeld.
-- **Warten auf:** nichts. Vor M16 und W14.
-
-### G10 – Soziale Daten und Erreichbarkeit beschließen (E22–E27)
-
-- **Absicht:** Die Vorschläge E22–E27 erweitern das Plugin deutlich. Beide
-  müssen zustimmen, bevor dafür Code entsteht.
-- **Ziel:** E22–E27 bestätigt oder geändert; die Zusatzfelder je Kategorie
-  (E23) in `PLAN.md` §3.4 und, falls nötig, in `contracts.py` festgelegt
-  (eigener PR wie G6); Antwort auf die offenen Fragen zu Stufe 2 und den
-  Haltestellen (§9).
-- **Warten auf:** G9 (Zielschema), damit wir das Schema nur einmal ändern.
-
----
-
-## 6. Schritte Person Mac – Datenpipeline
-
-### M8 – Gebäude mit mehreren Adressen *(erledigt, PR #21 gemergt)*
-
-- Siehe E8. **Noch offen:** in QGIS mit echten ALKIS-Daten prüfen.
-- **Bekannte Schwäche:** Straße (`bez`) und Hausnummer (`hnr`) werden
-  getrennt zusammengefasst. Bei einem Eckhaus steht dann „Hauptstraße,
-  Nebenweg“ und „2, 1“ – welche Nummer zu welcher Straße gehört, ist nicht
-  mehr eindeutig. Wird in M16 behoben.
-
-### M16 – Objekt-ID und Adresse in die Ergebnis-Layer (E20)
-
-- **Absicht:** Nutzende müssen jedes Objekt bis zur Quelle zurückverfolgen
-  und Adressen finden können. Die ID braucht außerdem M14 (Abgleich ALKIS ↔
-  OSM).
-- **Ziel:** Neue Zielfelder `object_id` und `address` in `TARGET_FIELDS`,
-  mit deutschen Namen in `mapping_rules.json`. `address` wird **je Zeile**
-  aus Straße und Hausnummer gebildet („Hauptstraße 2“) und erst danach beim
-  Zusammenfassen (M8) mit „; “ verbunden. Welche Spalten ID, Straße und
-  Hausnummer sind, steht im Profil in `mapping_rules.json`. Tests, auch für
-  das Eckhaus.
-- **Dateien:** `data_pipeline.py`, `mapping.py`, `mapping_rules.json`,
-  `tests/test_data_pipeline.py`. Branch z. B. `feature/pipeline-id-adresse`.
-- **Achtung:** `tests/test_result_layers.py` (Windows) prüft fest „genau 8
-  Felder“. Die Ergebnis-Layer übernehmen neue Felder automatisch; nur dieser
-  Test muss im selben Zug von Person Windows angepasst werden → Absprache.
-- **Warten auf:** G9 (Punkt 1).
-
-### M9 – Recherche: ALKIS-Dienste der 16 Bundesländer
+#### 2. M9 – Recherche: ALKIS-Dienste der 16 Bundesländer *(Mac)*
 
 - **Absicht:** Bevor wir Code schreiben, müssen wir wissen, welches Land was
   anbietet. Das entscheidet, wo es ALKIS gibt (E6).
 - **Ziel:** Tabelle je Land: Gibt es einen frei nutzbaren Dienst (WFS,
   INSPIRE „Gebäude“/„Flurstücke“, Download-Paket)? Lizenz und
-  Quellenvermerk? Format und Feldnamen? CRS? Daraus wird
-  `sources_catalog.json` (nur Adressen und Regeln, **keine Daten**).
-  Außerdem: Lizenz und Quelle für vereinfachte Ländergrenzen (E11) und die
-  Nutzungsregeln des öffentlichen Overpass-Servers.
+  Quellenvermerk? Format und Feldnamen (auch: gibt es eine Geschosszahl)?
+  CRS? Daraus wird `sources_catalog.json` (nur Adressen und Regeln, **keine
+  Daten**). Außerdem: Lizenz und Quelle für vereinfachte Ländergrenzen (E11)
+  und die Nutzungsregeln des öffentlichen Overpass-Servers.
 - **Dateien:** `sources_catalog.json`, Abschnitt in `STATUS_DATENPIPELINE.md`.
-- **Warten auf:** G5.
+- **Wartet auf:** nichts. Der größte Blocker für „deutschlandweit“: 10 und
+  11 warten darauf.
 
-### M10 – Quellen für ein Gebiet bestimmen (S9)
+#### 3. M10a – OSM-Abfrage und Größenprüfung (S9, Teil 1) *(Mac)*
 
-- **Absicht:** Aus Gebiet + Bundesland die passenden Download-Aufträge bauen.
-- **Ziel:** `sources.py` mit Tests: OSM-Abfrage (Overpass) für das Rechteck um
-  Gebiet + Puffer, umgerechnet in Längen-/Breitengrade; ALKIS-Auftrag aus dem
-  Katalog; Bundesland-Vorschlag aus den Ländergrenzen (E11); Fehlermeldung
-  über 25 km² (E13); verständlicher Hinweis, wenn ein Land kein ALKIS
-  anbietet.
-- **Warten auf:** M9 (für ALKIS und Ländergrenzen); OSM-Teil und
-  Größenprüfung können sofort starten.
+- **Absicht:** Erster Baustein für den automatischen Download, damit Person
+  Windows mit 8 und 9 beginnen kann.
+- **Ziel:** `sources.py` mit Tests: OSM-Abfrage (Overpass) für das Rechteck
+  um Gebiet + Puffer, umgerechnet in Längen-/Breitengrade; Fehlermeldung über
+  25 km² mit der tatsächlichen Größe (E13); Quellenvermerk
+  „© OpenStreetMap-Mitwirkende, ODbL“ im Auftrag (damit füllt die Ausgabe die
+  Datenquelle vor).
+- **Wartet auf:** nichts.
 
-### M11 – OSM-Profil für die Kategorien
+#### 4. W14 – Schritt 5 „Attributzuordnung“ umbauen (E21) *(Windows)*
 
-- **Absicht:** OSM benennt Dinge anders als ALKIS (`building=*`,
-  `highway=*`, `landuse=*`, `leisure=park` …).
-- **Ziel:** Zweites Profil „OSM“ in `mapping_rules.json` mit Objekt-ID
-  (`osm_id`) und Kategorie-Regeln; Tests mit einem künstlichen GeoPackage, das
-  so aussieht, wie QGIS OSM-Daten speichert.
-- **Warten auf:** nichts.
+- **Absicht:** Schritt 5 war im QGIS-Test nicht verständlich.
+- **Ziel:** Schritt 5 wie in G9 beschlossen: klare Erklärung oben,
+  Ausklappmenü je Layer, verständliche Zielfeld-Namen mit ⓘ-Symbol
+  (`target_field_explanation()`). **Teil 1** sofort mit den vorhandenen
+  Vorschlägen; **Teil 2** („Weitere Spalten“, „behalten / weglassen“) nach 1.
+  Achtung Mausrad: Beim Scrollen über ein Auswahlfeld darf sich das Zielfeld
+  nicht versehentlich ändern.
+- **Wartet auf:** Teil 2: 1.
 
-### M12 – ALKIS-Profil(e) für die Dienst-Daten
+#### 5. G10 – Soziale Daten und Erreichbarkeit beschließen (E22–E27) *(gemeinsam)*
 
-- **Absicht:** Die Felder aus den Diensten der Länder heißen anders als im
-  bisherigen Export (`…_kon.gpkg`).
-- **Ziel:** Je Lieferformat aus M9 ein Profil in `mapping_rules.json`, mit
-  Tests.
-- **Warten auf:** M9.
+- **Absicht:** Die Vorschläge E22–E27 erweitern das Plugin deutlich. Beide
+  müssen zustimmen, bevor dafür Code entsteht.
+- **Ziel:** E22–E27 bestätigt oder geändert; die Zusatzfelder je Kategorie
+  (E23) in `PLAN.md` §3.4 und, falls nötig, in `contracts.py` festgelegt
+  (eigener PR wie 1); Antwort auf die offenen Fragen zu Stufe 2 und den
+  Haltestellen (§7).
+- **Wartet auf:** nichts (G9 ist erledigt).
 
-### M13 – Mehrere Quellen in einem Lauf (S11)
-
-- **Ziel:** `import_sources` mit Tests; Hinweise nennen die Quelle
-  („OSM – Gebäude: …“).
-- **Warten auf:** G6.
-
-### M14 – Quellen abgleichen (S12)
-
-- **Ziel:** Abgleich ALKIS ↔ OSM je Kategorie nach E12 (20 %, Wert in einer
-  Einstellungsdatei), `apply_source_priority`, Tests mit künstlichen, leicht
-  verschobenen Gebäuden (unter und über 20 % Abweichung).
-- **Warten auf:** M13.
-
-### M6 – Fehlende Werte prüfen *(aus Phase 1)*
-
-- **Ziel:** Je Layer und Quelle ein kurzer Hinweis, z. B. „OSM – Gebäude:
-  312 Gebäude ohne Gebäudeart“.
-- **Warten auf:** nichts.
-
-### M15 – Hinweistexte kürzen und „Mehr erfahren“ füllen (S13)
-
-- **Ziel:** Alle Pipeline-Hinweise haben eine kurze `message` und eine
-  ausführliche `details`. Außerdem (E21): verständliche Namen und eine
-  Ein-Satz-Erklärung je Zielfeld in `mapping_rules.json`, damit Schritt 5
-  sie anzeigen kann.
-- **Warten auf:** G6; Zielfeld-Texte: G9.
-
-### M7 – Ende-zu-Ende-Test ohne QGIS *(aus Phase 1, erweitert)*
-
-- **Ziel:** künstliches ALKIS- und OSM-GeoPackage → `import_sources` →
-  Abgleich → Vorrang → `output_plan()`.
-- **Warten auf:** M14, Absprache zur gemeinsamen Testdatei.
-
-### M17 – Soziale Infrastruktur aus OSM-Punkten (E22)
-
-- **Absicht:** Ärzte, Schulen, Supermärkte, Spielplätze und Haltestellen
-  liegen schon in den OSM-Punkten, werden aber noch keiner Kategorie
-  zugeordnet.
-- **Ziel:** Kategorie-Regeln und verständliche Namen für den OSM-Layer
-  `points` (und passende Flächen, z. B. Schulgelände) in `mapping_rules.json`;
-  die OSM-Abfrage aus M10 holt diese Punkte mit. Tests mit künstlichen
-  Punkten.
-- **Dateien:** `mapping_rules.json`, `sources.py`, `tests/test_mapping.py`,
-  `tests/test_data_pipeline.py`.
-- **Warten auf:** G10 (Liste der Kategorien); M10 für die Abfrage.
-
-### M18 – Recherche: GTFS und Zensus
+#### 6. M18 – Recherche: GTFS und Zensus *(Mac)*
 
 - **Absicht:** Vor dem Code wissen, woher Fahrplan- und Einwohnerdaten kommen.
 - **Ziel:** Für GTFS (DELFI) und Zensus 2022: Adresse, Lizenz und
   Quellenvermerk, Größe der Datei, wie oft aktualisiert, gibt es einen Dienst
   nur für ein Gebiet? Ergebnis als Einträge in `sources_catalog.json` und
   Abschnitt in `STATUS_DATENPIPELINE.md`.
-- **Warten auf:** nichts (kann parallel zu M9 laufen).
+- **Wartet auf:** nichts (kann parallel zu 2 laufen).
 
-### M19 – Takt je Haltestelle aus GTFS (S14, E24)
+#### 7. M6 – Fehlende Werte melden *(Mac, aus Phase 1)*
 
-- **Ziel:** `gtfs.py` mit `departures_per_hour`, Tests mit einer kleinen,
-  im Testcode erzeugten GTFS-ZIP-Datei (Werktag/Wochenende, Zeitfenster,
-  Haltestelle ohne Abfahrten). Ergebnis als Zusatzfeld an den Haltestellen.
-- **Warten auf:** M18, G10.
+- **Ziel:** Je Layer und Quelle ein kurzer Hinweis, z. B. „OSM – Gebäude:
+  312 Gebäude ohne Gebäudeart“.
+- **Wartet auf:** nichts. Gut für zwischendurch.
 
-### M20 – Erreichbarkeit Stufe 1: Luftlinie (S15, E26)
+### Etappe B – Download und mehrere Quellen
 
-- **Ziel:** `accessibility.py`: je Gebäude Abstand zum nächsten Ziel und
-  „im 300-m- / 500-m-Radius ja/nein“, für jede Ziel-Kategorie aus M17
-  nutzbar. Fehler, wenn das Projekt-CRS nicht metrisch ist. Tests.
-- **Warten auf:** M17, G10.
-
-### M21 – Erreichbarkeit Stufe 3: ÖV-Güteklassen (S15, E26)
-
-- **Ziel:** Güteklasse A–F je Gebäude aus Abstand (Stufe 1 oder 2) und Takt
-  (M19); Klassengrenzen in einer Einstellungsdatei. Tests. Später, nach M18:
-  Einwohner im Einzugsbereich aus dem Zensus (E27).
-- **Warten auf:** M19, M20 (bzw. Stufe 2).
-
----
-
-## 7. Schritte Person Windows – Benutzerführung und Integration
-
-### W8b – Ausgabe GeoPackage/PDF *(aus Phase 1)*
-
-- **Ziel:** Bereinigtes GeoPackage und PDF werden erzeugt;
-  `apply_data_source` wird aufgerufen. Neu: Der Quellenvermerk wird aus S9
-  vorausgefüllt (z. B. „© OpenStreetMap-Mitwirkende“).
-- **Warten auf:** nichts (Vorausfüllen: M10).
-
-### W10 – Schritt 3 „Daten laden“ umbauen
+#### 8. W10 – Schritt 3 „Daten laden“ umbauen *(Windows)*
 
 - **Absicht:** Statt einer Datei wählt man Quellen.
 - **Ziel:** Kästchen „OSM“, „ALKIS“ und „Eigene Datei“ (E10, mit dem
   bisherigen Dateiauswahl-Feld); Bundesland wird vorgeschlagen und ist
   änderbar (E11); ALKIS ist ausgegraut mit Erklärung, wenn das Land keinen
-  Dienst hat; Meldung, wenn das Gebiet größer als 25 km² ist (E13);
-  ein eigener ALKIS-Export
-  wird als ALKIS erkannt (E16). Außerdem in Schritt 2: Anzeige der
-  Gebietsgröße (E17).
-- **Warten auf:** M10 (kann mit Platzhalter-Daten beginnen).
+  Dienst hat; Meldung, wenn das Gebiet größer als 25 km² ist (E13); ein
+  eigener ALKIS-Export wird als ALKIS erkannt (E16). Außerdem in Schritt 2:
+  Anzeige der Gebietsgröße (E17).
+- **Wartet auf:** 3 (kann mit Platzhalter-Daten beginnen).
 
-### W11 – Herunterladen in QGIS (S10)
+#### 9. W11 – Herunterladen in QGIS (S10) *(Windows)*
 
 - **Ziel:** Vor jedem Download den Ordner abfragen, zuletzt gewählter Ordner
-  als Vorschlag vorausgewählt (E14, E18), Download als `QgsTask`
-  mit Fortschritt (Schrittleiste/Ladebalken im klassischen Stil, Angel-Szene
-  im Pixel-Stil) und dem vorhandenen „Laden abbrechen“, Speichern als GeoPackage mit Quelle und Datum im Namen,
-  Umprojektion ins Projekt-CRS, verständliche Fehler und Abbruch ohne
-  Internet (E15).
-- **Warten auf:** M10.
+  als Vorschlag vorausgewählt (E14, E18), Download als `QgsTask` mit
+  Fortschritt (Schrittleiste/Ladebalken im klassischen Stil, Angel-Szene im
+  Pixel-Stil) und dem vorhandenen „Laden abbrechen“, Speichern als
+  GeoPackage mit Quelle und Datum im Namen, Umprojektion ins Projekt-CRS,
+  verständliche Fehler und Abbruch ohne Internet (E15).
+- **OSM-Format:** Das OSM-Profil (M11) erwartet das GDAL-Standardformat:
+  Layer genau `multipolygons`, `lines`, `points`, Spalten `osm_id`,
+  `osm_way_id`, `other_tags`, alles im Projekt-CRS. Bitte in S10 bestätigen.
+- **Wartet auf:** 3.
 
-### W12 – Vorrang je Kategorie (S12)
+#### 10. M10b – ALKIS-Aufträge und Bundesland (S9, Teil 2) *(Mac)*
+
+- **Ziel:** ALKIS-Auftrag aus dem Katalog; Bundesland-Vorschlag aus den
+  Ländergrenzen (E11); verständlicher Hinweis, wenn ein Land kein ALKIS
+  anbietet. Tests.
+- **Wartet auf:** 2.
+
+#### 11. M12 – ALKIS-Profil(e) für die Dienst-Daten *(Mac)*
+
+- **Absicht:** Die Felder aus den Diensten der Länder heißen anders als im
+  bisherigen Export (`…_kon.gpkg`).
+- **Ziel:** Je Lieferformat aus 2 ein Profil in `mapping_rules.json` (mit
+  Objekt-ID, Adresse und – wenn vorhanden – Geschosszahl), mit Tests.
+- **Wartet auf:** 2.
+
+#### 12. M13 – Mehrere Quellen in einem Lauf (S11) *(Mac)*
+
+- **Ziel:** `import_sources` mit Tests; jeder Datensatz kennt seine Quelle
+  (`source_kind`); Hinweise nennen die Quelle („OSM – Gebäude: …“).
+- **Wartet auf:** 1.
+
+#### 13. M15 Teil 2 – „Mehr erfahren“-Texte (S13) *(Mac)*
+
+- **Ziel:** Alle Pipeline-Hinweise haben eine kurze `message` (ein bis zwei
+  Sätze) und eine ausführliche `details`.
+- **Wartet auf:** 1.
+
+#### 14. W13 – „Mehr erfahren“ anzeigen (S13) *(Windows)*
+
+- **Ziel:** Hinweise zeigen nur den kurzen Text; „Mehr erfahren“ klappt
+  `details` auf.
+- **Wartet auf:** 1; Texte aus 13.
+
+### Etappe C – Abgleich und Abnahme
+
+#### 15. M14 – Quellen abgleichen (S12) *(Mac)*
+
+- **Ziel:** Abgleich ALKIS ↔ OSM je Kategorie nach E12 (Mittelpunkt liegt im
+  anderen Objekt und Flächen weichen höchstens 20 % ab; Wert in einer
+  Einstellungsdatei), `apply_source_priority`. Dafür eine **Flächenberechnung
+  für Polygone** in reinem Python (Löcher abgezogen, Projekt-CRS in Metern).
+  Tests mit künstlichen, leicht verschobenen Gebäuden (unter und über 20 %
+  Abweichung).
+- **Wartet auf:** 12.
+
+#### 16. W12 – Vorrang je Kategorie (S12) *(Windows)*
 
 - **Ziel:** In Schritt 6 je Kategorie eine Auswahl „ALKIS / OSM“ mit Anzahl
   der betroffenen Objekte, vorausgewählt nach E19; Ergebnis erst nach
   Bestätigung an `apply_source_priority`.
-- **Warten auf:** M14.
+- **Wartet auf:** 15.
 
-### W13 – „Mehr erfahren“ anzeigen (S13)
+#### 17. M7 – Ende-zu-Ende-Test ohne QGIS *(Mac, aus Phase 1, erweitert)*
 
-- **Ziel:** Hinweise zeigen nur den kurzen Text; „Mehr erfahren“ klappt
-  `details` auf.
-- **Warten auf:** G6.
+- **Ziel:** künstliches ALKIS- und OSM-GeoPackage → `import_sources` →
+  Abgleich → Vorrang → `output_plan()`.
+- **Wartet auf:** 15, Absprache zur gemeinsamen Testdatei.
 
-### W14 – Schritt 5 „Attributzuordnung“ umbauen (E21)
+#### 18. W9 – Plugin-ZIP und Test auf Windows *(Windows, aus Phase 1)*
 
-- **Absicht:** Schritt 5 war im QGIS-Test nicht verständlich.
-- **Ziel:** Schritt 5 so umgebaut, wie in G9 (Punkt 2) beschlossen: klare
-  Erklärung oben, alle Spalten mit Beispielwerten, verständliche Zielfeld-
-  Namen mit Erklärung (aus M15). Dazu `tests/test_result_layers.py` an die
-  neuen Zielfelder aus M16 anpassen.
-- **Warten auf:** G9; Zielfeld-Texte: M15.
+- **Wartet auf:** 9.
 
-### W9 – Plugin-ZIP und Test auf Windows *(aus Phase 1)*
+#### 19. G7 – Zwischentest in zwei Bundesländern *(gemeinsam)*
 
-- **Warten auf:** W11.
+- **Absicht:** „Deutschlandweit“ beweisen wir nur, wenn es nicht nur in
+  Oldenburg klappt.
+- **Ziel:** Donnerschwee (Niedersachsen, EPSG:25832) **und** ein Gebiet im
+  Osten (EPSG:25833, z. B. Sachsen oder Brandenburg) laufen von Schritt 1 bis 9
+  durch, einmal auf Mac, einmal auf Windows.
+- **Wartet auf:** 9, 10, 12.
 
-### W15 – GTFS herunterladen und Haltestellen-Layer (S14, E25)
+#### 20. G8 – Abnahme Phase 2 *(gemeinsam)*
 
-- **Ziel:** GTFS-ZIP laden wie in W11 (Ordner fragen, Fortschritt,
+- **Ziel:** Abnahmekriterien aus `PLAN.md` §9 gelten weiter, zusätzlich:
+  OSM und (wo verfügbar) ALKIS werden automatisch geholt; Quellenvermerke
+  stehen in der Ausgabe; Vorrang je Kategorie funktioniert; keine falschen
+  Dubletten-Rückfragen bei nur einer Quelle.
+- **Wartet auf:** 1–19.
+
+### Etappe D – soziale Daten und Erreichbarkeit (nach dem Beschluss in 5)
+
+#### 21. M17 – Soziale Infrastruktur aus OSM-Punkten (E22) *(Mac)*
+
+- **Absicht:** Ärzte, Schulen, Supermärkte, Spielplätze und Haltestellen
+  liegen schon in den OSM-Punkten, werden aber noch keiner Kategorie
+  zugeordnet.
+- **Ziel:** Kategorie-Regeln und verständliche Namen für den OSM-Layer
+  `points` (und passende Flächen, z. B. Schulgelände) in `mapping_rules.json`;
+  die OSM-Abfrage aus 3 holt diese Punkte mit. Tests mit künstlichen Punkten.
+- **Dateien:** `mapping_rules.json`, `sources.py`, `tests/test_mapping.py`,
+  `tests/test_data_pipeline.py`.
+- **Wartet auf:** 3, 5.
+
+#### 22. M19 – Takt je Haltestelle aus GTFS (S14, E24) *(Mac)*
+
+- **Ziel:** `gtfs.py` mit `departures_per_hour`, Tests mit einer kleinen,
+  im Testcode erzeugten GTFS-ZIP-Datei (Werktag/Wochenende, Zeitfenster,
+  Haltestelle ohne Abfahrten). Ergebnis als Zusatzfeld an den Haltestellen.
+- **Wartet auf:** 5, 6.
+
+#### 23. W15 – GTFS herunterladen und Haltestellen-Layer (S14, E25) *(Windows)*
+
+- **Ziel:** GTFS-ZIP laden wie in 9 (Ordner fragen, Fortschritt,
   Abbrechen); ist schon eine Datei im Ordner, Datum zeigen und „verwenden
   oder neu laden?“ fragen (E25). Haltestellen im Gebiet als GeoPackage im
   Projekt-CRS schreiben.
-- **Warten auf:** W11, M18.
+- **Wartet auf:** 6, 9.
 
-### W16 – Erreichbarkeit in der Benutzerführung (S15, E26)
+#### 24. M20 – Erreichbarkeit Stufe 1: Luftlinie (S15, E26) *(Mac)*
+
+- **Ziel:** `accessibility.py`: je Gebäude Abstand zum nächsten Ziel und
+  „im 300-m- / 500-m-Radius ja/nein“, für jede Ziel-Kategorie aus 21
+  nutzbar. Fehler, wenn das Projekt-CRS nicht metrisch ist. Tests.
+- **Wartet auf:** 21.
+
+#### 25. W16 – Erreichbarkeit in der Benutzerführung (S15, E26) *(Windows)*
 
 - **Ziel:** Auswahl, welche Ziele ausgewertet werden (Haltestellen, Ärzte,
   Schulen …); Zusatzfelder in Ergebnis-Layern, GeoPackage und PDF;
-  Einzugsbereiche als eigene Layer mit gut lesbarer Darstellung. Falls in
-  G10 so entschieden: Stufe 2 (Fußweg) mit den Netzwerk-Werkzeugen von QGIS.
-- **Warten auf:** M20; Stufe 2: G10.
+  Einzugsbereiche als eigene Layer mit gut lesbarer Darstellung. Falls in 5
+  so entschieden: Stufe 2 (Fußweg) mit den Netzwerk-Werkzeugen von QGIS.
+- **Wartet auf:** 24.
+
+#### 26. M21 – Erreichbarkeit Stufe 3: ÖV-Güteklassen (S15, E26) *(Mac)*
+
+- **Ziel:** Güteklasse A–F je Gebäude aus Abstand (Stufe 1 oder 2) und Takt
+  (22); Klassengrenzen in einer Einstellungsdatei. Tests. Später, nach 6:
+  Einwohner im Einzugsbereich aus dem Zensus (E27).
+- **Wartet auf:** 22, 24 (bzw. Stufe 2).
 
 ---
 
-## 8. Reihenfolge auf einen Blick
-
-```text
-Etappe   Person Mac                     Gemeinsam              Person Windows
-──────   ───────────────────────────    ───────────────────    ──────────────────────────
-1        M8 in QGIS prüfen + PR         G5 Regeln anpassen     W8b Ausgabe GPKG/PDF
-         M9 Recherche Länder            G6 Vertrag (S11/S13)   Review M8
-         M11 OSM-Profil                 G9 Zielschema+Schritt 5
-         M16 Objekt-ID + Adresse                               W14 Schritt 5 umbauen
-2        M10 Quellen bestimmen (S9)                            W10 Schritt 3 umbauen
-         M12 ALKIS-Profile                                     W13 „Mehr erfahren“
-         M13 Mehrere Quellen (S11)                             W11 Download in QGIS (S10)
-3        M14 Quellen abgleichen (S12)   G7 Test 2 Länder       W12 Vorrang je Kategorie
-         M6, M15 Hinweise                                      W9 ZIP-Test
-         M7 Ende-zu-Ende-Test           G8 Abnahme
-4        M18 Recherche GTFS/Zensus      G10 Soziale Daten      W15 GTFS-Download
-         M17 OSM-Punkte einordnen                              W16 Erreichbarkeit (UI)
-         M19 Takt aus GTFS
-         M20 Erreichbarkeit Luftlinie
-         M21 ÖV-Güteklassen
-```
-
-Etappe 4 baut auf Etappe 2 und 3 auf. M18 (Recherche) und G10 (Beschluss)
-können schon früher laufen.
-
-**Wer auf wen wartet:** G5 vor allem anderen · G6 vor M13, M15, W13 · M9 vor
-M12 und dem ALKIS-Teil von M10 · M10 vor W10/W11 · M14 vor W12 · G9 vor M16
-und W14 · M16 vor M14 (Abgleich braucht die Objekt-ID) · G9 vor G10 · G10 vor
-M17, M19, M20 · M10 vor M17 (Abfrage) · M18 vor M19 und W15 · W11 vor W15 ·
-M17 vor M20 · M19 und M20 vor M21 · M20 vor W16.
-
----
-
-## 9. Offene Fragen
+## 7. Offene Fragen
 
 Die Fragen F1–F6 sind am 18.11.2026 von Person Mac entschieden worden
 (→ E10–E15). Person Windows hat sie in G5 bestätigt und um E16–E19 ergänzt.
 
-Noch offen und erst nach M9 entscheidbar:
+Jetzt mit Person Windows zu klären:
+
+- **Fläche (`area_m2`):** G9 hat beschlossen, die Fläche aus der Geometrie zu
+  berechnen, wenn die Quelle keine angibt. Person Mac möchte das nicht als
+  eigenen Schritt umsetzen; die Berechnung entsteht ohnehin in 15 (M14) für
+  den Abgleich. Vorschlag: `area_m2` vorerst nur aus der Quelle, `PLAN.md`
+  §3.4 entsprechend anpassen. Später kann die Berechnung aus 15 das Feld mit
+  wenig Aufwand füllen, falls es doch gebraucht wird.
+- **Gleiche Layernamen** bei Linien und Flächen (z. B. „Straßen“): Vorschlag,
+  dass die Oberfläche „– Linien“ / „– Flächen“ anhängt (siehe PR #29).
+- **Übereinanderliegende Objekte aus einer Quelle** mit verschiedener ID
+  (z. B. Straße und Radweg in OSM): überhaupt nachfragen? (siehe PR #29)
+
+Erst nach 2 (M9) entscheidbar:
 
 - In welchen Bundesländern gibt es frei nutzbares ALKIS (und damit überhaupt
   ALKIS im Plugin)?
@@ -536,7 +530,7 @@ Noch offen und erst nach M9 entscheidbar:
   Flurstücke) für die Kategorien Nutzungsflächen, Straßen und Grünflächen,
   oder kommen diese dann nur aus OSM?
 
-Neu offen zu sozialen Daten und Erreichbarkeit (in G10 klären):
+Zu sozialen Daten und Erreichbarkeit (in 5 klären):
 
 - **Stufe 2 (Fußweg):** Rechnen wir mit den Netzwerk-Werkzeugen von QGIS
   (Windows, schneller fertig, braucht QGIS) oder mit einer eigenen Wegsuche
@@ -546,4 +540,4 @@ Neu offen zu sozialen Daten und Erreichbarkeit (in G10 klären):
   Abstand ab?
 - **Welche Zusatzfelder genau** (E23), und wie heißen sie für die Nutzenden?
 - **Größe von GTFS:** Reicht die Rechenzeit, wenn die deutschlandweite
-  Abfahrten-Tabelle Zeile für Zeile gelesen wird? Wird in M18/M19 gemessen.
+  Abfahrten-Tabelle Zeile für Zeile gelesen wird? Wird in 6 und 22 gemessen.
