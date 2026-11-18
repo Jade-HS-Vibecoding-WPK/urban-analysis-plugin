@@ -488,6 +488,20 @@ def _create_dock(plugin):
 
     from .ui.widgets.pixel_button import PixelButton
     from .ui.widgets.pixel_scene import PixelScene
+    from .ui.widgets.classic_header import ClassicHeader
+
+    class _BothHeaders:
+        """Sends every header message (step, loading, done …) to both looks,
+        so switching the style never loses the current state."""
+
+        def __init__(self, *views):
+            self._views = views
+
+        def __getattr__(self, name):
+            def call(*args, **kwargs):
+                for view in self._views:
+                    getattr(view, name)(*args, **kwargs)
+            return call
     from .ui.widgets.icons import gear_icon, icon_size, layer_icon, with_icon
     from .ui import style as ui_style
     from qgis.PyQt.QtWidgets import QMenu
@@ -595,10 +609,13 @@ def _create_dock(plugin):
             header.addLayout(counter_row)
             header.addWidget(self.step_label)
 
-            # Fishing scene: the step fish shows the overall progress, the
-            # rabbit's float follows the real progress while data loads.
-            self.scene = PixelScene(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
-            self.scene.set_title_font(fonts["heading"])
+            # Header with the overall and the loading progress, in two looks:
+            # pixel style = fishing scene, classic style = step points and a
+            # smooth bar.  Both get every message; only one is visible.
+            self.pixel_scene = PixelScene(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
+            self.pixel_scene.set_title_font(fonts["heading"])
+            self.classic_header = ClassicHeader(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
+            self.scene = _BothHeaders(self.pixel_scene, self.classic_header)
 
             # Text line for long steps ("Lade … 40 %") below the scene.
             self.busy_label = QLabel()
@@ -649,7 +666,9 @@ def _create_dock(plugin):
             buttons.addStretch()
             buttons.addWidget(self.primary_button)
 
-            outer.addWidget(self.scene)
+            outer.addWidget(self.pixel_scene)
+            outer.addWidget(self.classic_header)
+            self._show_header(ui_style.current())
             outer.addWidget(content, 1)
             layout.addLayout(header)
             layout.addWidget(self.busy_label)
@@ -714,11 +733,30 @@ def _create_dock(plugin):
                 for key, action in getattr(self, "style_actions", {}).items():
                     action.setChecked(key == style)
                 self.setStyleSheet(panel_stylesheet(self.fonts, style))
+                self._show_header(style)
                 for button in self.findChildren(PixelButton):
                     button.style_changed()
+                plugin.update_toolbar_icon()
+                page = self.pages[self.current] if self.pages else None
+                if page is not None and page.rebuild and plugin.workflow is not None:
+                    # pages with layer icons are drawn again in the new look
+                    self._rebuild_current_page()
                 QTimer.singleShot(0, self.fit_wrapped_labels)
             except Exception as error:  # show every program error visibly
                 self.show_unexpected_error("Darstellung wechseln", error)
+
+        def _show_header(self, style):
+            self.pixel_scene.setVisible(style == "pixel")
+            self.classic_header.setVisible(style == "classic")
+
+        def _rebuild_current_page(self):
+            """Build the current page again (keeps the step, messages and the
+            'Fertig' view of step 9)."""
+            page = self.pages[self.current]
+            page.build()
+            make_texts_selectable(page.widget)
+            page.layout.activate()
+            self.stack.updateGeometry()
 
         def add_page(self, builder=None, validator=None, rebuild=False, on_show=None):
             page = Page(builder, validator, rebuild, on_show)

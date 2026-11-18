@@ -183,6 +183,12 @@ ICON_DIR = Path(__file__).resolve().parent / "icons"
 # Toolbar button: own 24x24 pixel rabbit looking at us, holding an open map
 # (the plugin's sign in both styles).
 TOOLBAR_ICON_FILE = "hase_karte.svg"
+TOOLBAR_ICON_FILES = {"pixel": TOOLBAR_ICON_FILE, "classic": "hase_karte_klassisch.svg"}
+
+
+def toolbar_icon_path(style):
+    """Toolbar icon matching the style (pixel rabbit / smooth rabbit)."""
+    return icon_path(TOOLBAR_ICON_FILES.get(style, TOOLBAR_ICON_FILES["classic"]))
 # Ticked check boxes: own white pixel check mark on the blue box.
 CHECK_ICON_FILE = "haken.svg"
 # Radio buttons: own pixel circles (7x7 blocks of 2 px).
