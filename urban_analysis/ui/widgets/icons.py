@@ -1,7 +1,9 @@
 """Qt side of the layer icons: sharp pixmaps (doubled, no smoothing), cached."""
 
-from qgis.PyQt.QtCore import QSize, Qt
-from qgis.PyQt.QtGui import QColor, QIcon, QImage, QPixmap
+import math
+
+from qgis.PyQt.QtCore import QPointF, QSize, Qt
+from qgis.PyQt.QtGui import QColor, QIcon, QImage, QPainter, QPainterPath, QPixmap, QPolygonF
 from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from .. import layer_icons
@@ -32,6 +34,30 @@ def layer_icon(key):
 
 def icon_size():
     return QSize(ICON_PX, ICON_PX)
+
+
+def gear_icon(color="#5b6470", size=32, teeth=8):
+    """Own simple gear (drawn, smooth edges) for the 'Darstellung' button."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    centre = size / 2
+    outer, inner, hole = size * 0.46, size * 0.33, size * 0.15
+    points = []
+    steps = teeth * 4
+    for i in range(steps):
+        angle = 2 * math.pi * (i + 0.5) / steps
+        radius = outer if i % 4 in (1, 2) else inner
+        points.append(QPointF(centre + radius * math.cos(angle), centre + radius * math.sin(angle)))
+    gear = QPainterPath()
+    gear.addPolygon(QPolygonF(points))
+    gear.closeSubpath()
+    middle = QPainterPath()
+    middle.addEllipse(QPointF(centre, centre), hole, hole)
+    painter.fillPath(gear.subtracted(middle), QColor(color))
+    painter.end()
+    return QIcon(pixmap)
 
 
 def with_icon(key, widget, spacing=8):

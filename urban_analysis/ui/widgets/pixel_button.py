@@ -1,6 +1,10 @@
-"""PixelButton: a button drawn in the pixel style with a hard shadow.
+"""PixelButton: the plugin's own button, drawn in the chosen style.
 
-States (see ``pixel_motion.BUTTON_STATES``):
+Style 'classic' (like QGIS, default): soft corners, blue main action; hover
+lighter, pressed darker and 1 px lower, release of the main button = a soft
+ring that grows and fades.
+
+Style 'pixel' (see ``pixel_motion.BUTTON_STATES``):
 - normal: the face sits 3 px above its hard shadow,
 - hover: 1 px higher, shadow 4 px,
 - pressed: the face sinks onto the shadow position, the shadow disappears
@@ -15,12 +19,13 @@ runs with Qt5 (QGIS 3) and Qt6 (QGIS 4).
 
 import random
 
-from qgis.PyQt.QtCore import QRect, QSize, Qt, QTimer, pyqtSignal
+from qgis.PyQt.QtCore import QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from qgis.PyQt.QtWidgets import QAbstractButton, QSizePolicy
 
-from ...theme import COLORS, PIXEL_PX
+from ...theme import CLASSIC_COLORS, CLASSIC_RADIUS_PX, COLORS, PIXEL_PX
 from .. import pixel_motion as pm
+from .. import style as ui_style
 
 VARIANTS = ("primary", "secondary")
 
@@ -46,6 +51,7 @@ class PixelButton(QAbstractButton):
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._hover = False
         self._flash = 0
+        self._ring = 0          # classic: frames left of the release ring
         self._particles = []
         self._preview_state = None
         self._rng = random.Random()
@@ -63,8 +69,16 @@ class PixelButton(QAbstractButton):
         font.setBold(self.variant == "primary")
         return font
 
+    def _classic(self):
+        return ui_style.current() == "classic"
+
     def sizeHint(self):
         metrics = QFontMetrics(self._text_font())
+        if self._classic():
+            pad_x, pad_y = pm.CLASSIC_PADDING
+            margin = pm.CLASSIC_MARGIN_PX
+            return QSize(metrics.horizontalAdvance(self.text()) + 2 * pad_x + 2 * margin,
+                         metrics.height() + 2 * pad_y + 1 + 2 * margin)
         pad_x, pad_y = pm.BUTTON_PADDING
         margin = pm.BURST_MARGIN_PX
         width = metrics.horizontalAdvance(self.text()) + 2 * pad_x + 2 * margin
@@ -91,6 +105,10 @@ class PixelButton(QAbstractButton):
 
     def face_rect(self):
         """Rectangle of the button face in the current state."""
+        if self._classic():
+            margin = pm.CLASSIC_MARGIN_PX
+            face = self.rect().adjusted(margin, margin, -margin, -margin - 1)
+            return face.translated(0, 1) if self.state() == "pressed" else face
         margin = pm.BURST_MARGIN_PX
         area = self.rect().adjusted(margin, margin, -margin, -margin)
         top, face_height, _shadow = pm.face_geometry(self.state(), area.height())
@@ -129,6 +147,10 @@ class PixelButton(QAbstractButton):
     def _on_clicked(self):
         self.confirmed.emit()  # first the action, then the cosmetics
         if self.variant == "primary" and self.animations_enabled and self.isVisible():
+            if self._classic():
+                self._ring = pm.RING_FRAMES
+                self._start()
+                return
             face = self.face_rect()
             self._particles += pm.spawn_burst(
                 face.center().x(), face.center().y(), self._rng,
@@ -143,9 +165,18 @@ class PixelButton(QAbstractButton):
     def _tick(self):
         if self._flash > 0:
             self._flash -= 1
+        if self._ring > 0:
+            self._ring -= 1
         self._particles = pm.step_burst(self._particles)
-        if not self._particles and self._flash == 0:
+        if not self._particles and self._flash == 0 and self._ring == 0:
             self._timer.stop()
+        self.update()
+
+    def style_changed(self):
+        """Called after the user switched the style: new size, new look."""
+        self._particles = []
+        self._ring = 0
+        self.updateGeometry()
         self.update()
 
     # --- painting ---------------------------------------------------------
@@ -170,8 +201,53 @@ class PixelButton(QAbstractButton):
         for x, y, w, h in pm.stair_rects(rect.x(), rect.y(), rect.width(), rect.height(), PIXEL_PX):
             painter.fillRect(x, y, w, h, QColor(color))
 
+    def _classic_colors(self, state):
+        c = CLASSIC_COLORS
+        if state == "disabled":
+            return c["disabled"], c["border"], c["disabled_text"]
+        if self.variant == "primary":
+            face = {"hover": c["accent_hover"], "pressed": c["accent_pressed"]}.get(state, c["accent"])
+            return face, c["accent_dark"], c["text_on_accent"]
+        face = {"hover": c["button_hover"], "pressed": c["button_pressed"]}.get(state, c["button"])
+        border = c["accent"] if state == "hover" else c["border_strong"]
+        return face, border, c["text"]
+
+    def _paint_classic(self, painter):
+        """Like QGIS: soft corners, blue main action, 1 px lower when pressed."""
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        state = self.state()
+        face_color, border, text_color = self._classic_colors(state)
+        face = QRectF(self.face_rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = CLASSIC_RADIUS_PX
+        ring = pm.ring_state(self._ring)
+        if ring is not None:  # soft ring after releasing the main button
+            grow, opacity = ring
+            color = QColor(CLASSIC_COLORS["accent"])
+            color.setAlphaF(opacity)
+            pen = QPen(color)
+            pen.setWidthF(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(face.adjusted(-grow, -grow, grow, grow), radius + grow, radius + grow)
+        painter.setPen(QPen(QColor(border), 1))
+        painter.setBrush(QColor(face_color))
+        painter.drawRoundedRect(face, radius, radius)
+        painter.setFont(self._text_font())
+        painter.setPen(QColor(text_color))
+        painter.drawText(face, Qt.AlignmentFlag.AlignCenter, self.text())
+        if self.hasFocus() and state != "disabled":
+            pen = QPen(QColor(CLASSIC_COLORS["accent"]))
+            pen.setStyle(Qt.PenStyle.DotLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(face.adjusted(-3, -3, 3, 3), radius + 2, radius + 2)
+
     def paintEvent(self, _event):
         painter = QPainter(self)
+        if self._classic():
+            self._paint_classic(painter)
+            painter.end()
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         state = self.state()
         face_color, shadow_color, text_color, outline = self._colors(state)

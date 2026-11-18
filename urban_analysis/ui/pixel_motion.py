@@ -90,6 +90,22 @@ def step_burst(particles):
     return alive
 
 
+# --- Classic style (like QGIS) ------------------------------------------------
+# Same feel without pixels: pressed = 1 px lower and darker; release of the
+# main button = a soft ring that grows and fades out.
+CLASSIC_MARGIN_PX = 5
+CLASSIC_PADDING = (14, 6)
+RING_FRAMES = 5
+
+
+def ring_state(frames_left):
+    """(grow in px, opacity 0..1) of the release ring; None when it is over."""
+    if frames_left <= 0:
+        return None
+    step = RING_FRAMES - frames_left  # 0 .. RING_FRAMES-1
+    return step + 1, round(0.6 * frames_left / RING_FRAMES, 3)
+
+
 # --- Colours ---------------------------------------------------------------
 
 def _rgb(color):

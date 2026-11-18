@@ -105,16 +105,17 @@ def test_ticked_check_box_shows_an_own_white_pixel_check_mark():
     assert "\\" not in checked  # Qt needs forward slashes
 
 
-def test_toolbar_icon_is_an_own_16x16_pixel_rabbit_head():
+def test_toolbar_icon_is_an_own_pixel_rabbit_holding_a_map():
     path = Path(icon_path())
-    assert path.name == "hase.svg"
+    assert path.name == "hase_karte.svg"
     root = ET.parse(path).getroot()
     assert root.tag == "{http://www.w3.org/2000/svg}svg"
-    assert root.get("width") == "16" and root.get("height") == "16"
+    assert root.get("width") == "24" and root.get("height") == "24"
     assert root.get("shape-rendering") == "crispEdges"
     rects = root.findall("{http://www.w3.org/2000/svg}rect")
     cells = {(int(r.get("x")), int(r.get("y"))) for r in rects}
-    assert len(cells) == len(rects) and all(0 <= x < 16 and 0 <= y < 16 for x, y in cells)
-    fills = {r.get("fill") for r in rects}
-    assert COLORS["accent"] in fills  # red-orange scarf
-    assert COLORS["outline"] in fills and COLORS["cloud"] in fills  # outline, white fur
+    assert len(cells) == len(rects) and all(0 <= x < 24 and 0 <= y < 24 for x, y in cells)
+    fills = {r.get("fill").upper() for r in rects}
+    assert COLORS["accent"].upper() in fills  # scarf / map marker
+    assert COLORS["outline"].upper() in fills and COLORS["cloud"].upper() in fills
+    assert "#EEF4F1" in fills  # the map

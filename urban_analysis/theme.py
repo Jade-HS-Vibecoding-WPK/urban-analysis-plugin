@@ -72,6 +72,47 @@ COLORS = {
     "info_bg": SURFACE,
 }
 
+# Second style "Klassisch": light and neutral like QGIS itself, blue accent,
+# QGIS font, native check boxes; no pixel art.
+CLASSIC_COLORS = {
+    "background": "#f6f7f9",
+    "surface": "#ffffff",
+    "border": "#c9ced6",
+    "border_strong": "#9aa3ae",
+    "outline": "#9aa3ae",
+    "text": "#1f2328",
+    "text_muted": "#5b6470",
+    "text_on_accent": "#ffffff",
+    "accent": "#2f6fb0",
+    "accent_hover": "#3b7fc4",
+    "accent_pressed": "#1b4672",
+    "accent_dark": "#245a91",
+    "accent_light": "#e6f0fa",
+    "selected": "#2f6fb0",
+    "selected_light": "#e6f0fa",
+    "button": "#eef1f4",
+    "button_hover": "#e1e6eb",
+    "button_pressed": "#d0d7df",
+    "disabled": "#e9ecef",
+    "disabled_text": "#9aa3ae",
+    "success": "#2e7d32",
+    "error": "#b42318",
+    "error_bg": "#fdecea",
+    "warning": "#8a5a00",
+    "warning_bg": "#fff4e0",
+    "info": "#1f5f99",
+    "info_bg": "#e8f1fb",
+}
+CLASSIC_RADIUS_PX = 4
+STYLES = ("classic", "pixel")
+DEFAULT_STYLE = "classic"
+
+
+def style_colors(style):
+    """Colour table of a style ('classic' or 'pixel')."""
+    return CLASSIC_COLORS if style == "classic" else COLORS
+
+
 # Spacing in a 4 px grid; one "pixel block" of the pixel details is 2 px.
 GRID_PX = 4
 PIXEL_PX = 2
@@ -139,8 +180,9 @@ DRAW_STROKE_RGBA = (47, 111, 176, 230)
 DRAW_FILL_RGBA = (47, 111, 176, 60)
 
 ICON_DIR = Path(__file__).resolve().parent / "icons"
-# Toolbar button: own 16x16 pixel rabbit head looking at us, with scarf.
-TOOLBAR_ICON_FILE = "hase.svg"
+# Toolbar button: own 24x24 pixel rabbit looking at us, holding an open map
+# (the plugin's sign in both styles).
+TOOLBAR_ICON_FILE = "hase_karte.svg"
 # Ticked check boxes: own white pixel check mark on the blue box.
 CHECK_ICON_FILE = "haken.svg"
 # Radio buttons: own pixel circles (7x7 blocks of 2 px).
@@ -158,12 +200,15 @@ def icon_path(name=TOOLBAR_ICON_FILE):
     return str(ICON_DIR / name)
 
 
-def panel_stylesheet(fonts=None):
+def panel_stylesheet(fonts=None, style="pixel"):
     """Stylesheet for a plugin window; set it on the window's top widget.
 
-    ``fonts`` comes from ``load_fonts()``; without it the first body font
-    candidate is named and Qt falls back to its default font if missing.
+    ``style``: 'pixel' (Cozy Pixel) or 'classic' (like QGIS, blue accent).
+    ``fonts`` comes from ``load_fonts()`` (pixel style only); without it the
+    first body font candidate is named and Qt falls back to its default font.
     """
+    if style == "classic":
+        return classic_stylesheet()
     c = COLORS
     r = RADIUS_PX
     fonts = fonts or {"heading": BODY_FONTS[0], "body": BODY_FONTS[0]}
@@ -425,6 +470,160 @@ QScrollBar::handle {{
 QScrollBar::add-line, QScrollBar::sub-line {{
     width: 0px;
     height: 0px;
+}}
+"""
+
+
+def classic_stylesheet():
+    """Style 'Klassisch': light and neutral like QGIS, blue main action,
+    soft corners, QGIS font and native check boxes / radio buttons."""
+    c = CLASSIC_COLORS
+    r = CLASSIC_RADIUS_PX
+    padding = "padding: 6px 14px;"
+    pressed_padding = "padding: 7px 14px 5px 14px;"  # label moves 1 px down
+    return f"""
+QWidget {{
+    background-color: {c['background']};
+    color: {c['text']};
+}}
+QScrollArea {{
+    border: none;
+}}
+QToolButton {{
+    background: transparent;
+    border: none;
+    border-radius: {r}px;
+    padding: 2px;
+}}
+QToolButton:hover {{
+    background-color: {c['button_hover']};
+}}
+QLabel {{
+    background: transparent;
+}}
+QLabel[uaRole="heading"] {{
+    font-weight: bold;
+    font-size: 11pt;
+}}
+QLabel[uaRole="hint"] {{
+    color: {c['text_muted']};
+}}
+QLabel[uaRole="status"] {{
+    color: {c['success']};
+    font-weight: bold;
+}}
+QLabel[uaRole="error"] {{
+    background-color: {c['error_bg']};
+    color: {c['error']};
+    border: 1px solid {c['error']};
+    border-radius: {r}px;
+    padding: 6px;
+}}
+QLabel[uaRole="info"] {{
+    background-color: {c['info_bg']};
+    color: {c['info']};
+    border: 1px solid {c['info']};
+    border-radius: {r}px;
+    padding: 6px;
+}}
+QPushButton {{
+    background-color: {c['button']};
+    color: {c['text']};
+    border: 1px solid {c['border_strong']};
+    border-radius: {r}px;
+    {padding}
+}}
+QPushButton:hover {{
+    background-color: {c['button_hover']};
+    border-color: {c['accent']};
+}}
+QPushButton:pressed {{
+    background-color: {c['button_pressed']};
+    {pressed_padding}
+}}
+QPushButton[uaRole="choice"] {{
+    background-color: {c['surface']};
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: bold;
+}}
+QPushButton[uaRole="choice"]:hover {{
+    background-color: {c['accent_light']};
+}}
+QPushButton[uaRole="choice"]:checked {{
+    background-color: {c['accent_light']};
+    border: 2px solid {c['accent']};
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
+    color: {c['accent_pressed']};
+}}
+QFrame[uaRole="panel"] {{
+    background-color: {c['surface']};
+    border: 2px solid {c['accent']};
+    border-top: none;
+    border-bottom-left-radius: {r}px;
+    border-bottom-right-radius: {r}px;
+}}
+QFrame[uaRole="panel"] QLabel, QFrame[uaRole="panel"] QWidget {{
+    background-color: {c['surface']};
+}}
+QPushButton:disabled {{
+    background-color: {c['disabled']};
+    color: {c['disabled_text']};
+    border-color: {c['border']};
+}}
+QLineEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox, QListWidget {{
+    background-color: {c['surface']};
+    color: {c['text']};
+    border: 1px solid {c['border']};
+    border-radius: {r}px;
+    padding: 3px;
+    selection-background-color: {c['accent']};
+    selection-color: {c['text_on_accent']};
+}}
+QLineEdit:focus, QPlainTextEdit:focus, QAbstractSpinBox:focus, QComboBox:focus,
+QListWidget:focus {{
+    border-color: {c['accent']};
+}}
+QListView::item:selected {{
+    background-color: {c['accent_light']};
+    color: {c['text']};
+}}
+QRadioButton, QCheckBox {{
+    background: transparent;
+    spacing: 6px;
+}}
+QRadioButton:disabled, QCheckBox:disabled {{
+    color: {c['disabled_text']};
+}}
+QFrame[uaRole="issue-error"], QFrame[uaRole="issue-warning"], QFrame[uaRole="issue-info"] {{
+    background-color: {c['surface']};
+    border: 1px solid {c['border']};
+    border-left-width: 4px;
+    border-radius: {r}px;
+}}
+QFrame[uaRole="issue-error"] {{ border-left-color: {c['error']}; }}
+QFrame[uaRole="issue-warning"] {{ border-left-color: #d99a00; }}
+QFrame[uaRole="issue-info"] {{ border-left-color: {c['accent']}; }}
+QFrame[uaRole="issue-error"] QWidget, QFrame[uaRole="issue-warning"] QWidget,
+QFrame[uaRole="issue-info"] QWidget {{
+    background-color: {c['surface']};
+    border: none;
+}}
+QProgressBar {{
+    background-color: {c['surface']};
+    border: 1px solid {c['border']};
+    border-radius: {r}px;
+    text-align: center;
+}}
+QProgressBar::chunk {{
+    background-color: {c['accent']};
+    border-radius: {r - 1}px;
+}}
+QToolTip {{
+    background-color: {c['surface']};
+    color: {c['text']};
+    border: 1px solid {c['border_strong']};
 }}
 """
 

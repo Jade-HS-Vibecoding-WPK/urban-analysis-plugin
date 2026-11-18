@@ -488,7 +488,14 @@ def _create_dock(plugin):
 
     from .ui.widgets.pixel_button import PixelButton
     from .ui.widgets.pixel_scene import PixelScene
-    from .ui.widgets.icons import icon_size, layer_icon, with_icon
+    from .ui.widgets.icons import gear_icon, icon_size, layer_icon, with_icon
+    from .ui import style as ui_style
+    from qgis.PyQt.QtWidgets import QMenu
+
+    try:  # Qt6: actions live in QtGui
+        from qgis.PyQt.QtGui import QAction, QActionGroup
+    except ImportError:  # Qt5
+        from qgis.PyQt.QtWidgets import QAction, QActionGroup
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
         QApplication,
@@ -552,8 +559,11 @@ def _create_dock(plugin):
 
             # The whole plugin shares one style (theme.py), with the bundled
             # fonts if present (otherwise the system monospace font).
+            # Look chosen with the gear button (saved in the QGIS settings;
+            # 'classic' = like QGIS is the default).
             fonts = load_fonts()
-            self.setStyleSheet(panel_stylesheet(fonts))
+            self.fonts = fonts
+            self.setStyleSheet(panel_stylesheet(fonts, ui_style.load()))
             # Slim title bar in sky colour: the title itself stands in the
             # scene's sky; only "Lösen" and "Schließen" remain here.
             self.setTitleBarWidget(self._title_bar())
@@ -659,6 +669,7 @@ def _create_dock(plugin):
             row = QHBoxLayout(bar)
             row.setContentsMargins(6, 2, 4, 0)
             row.addStretch()
+            row.addWidget(self._style_button())
             for icon, tip, action in (
                 (QStyle.StandardPixmap.SP_TitleBarNormalButton, "Lösen / andocken",
                  lambda: self.setFloating(not self.isFloating())),
@@ -672,6 +683,42 @@ def _create_dock(plugin):
                 button.clicked.connect(action)
                 row.addWidget(button)
             return bar
+
+        def _style_button(self):
+            """Gear button: choose 'Klassisch (QGIS-Stil)' or 'Pixel-Stil'."""
+            button = QToolButton()
+            button.setIcon(gear_icon())
+            button.setToolTip("Darstellung wählen")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(button)
+            group = QActionGroup(menu)
+            group.setExclusive(True)
+            self.style_actions = {}
+            for key, label in ui_style.STYLE_LABELS.items():
+                action = QAction(label, menu)
+                action.setCheckable(True)
+                action.setChecked(key == ui_style.current())
+                action.triggered.connect(lambda _checked=False, key=key: self.apply_style(key))
+                group.addAction(action)
+                menu.addAction(action)
+                self.style_actions[key] = action
+            button.setMenu(menu)
+            self.style_menu = menu
+            return button
+
+        def apply_style(self, style):
+            """Switch the look at once and remember it for the next start."""
+            try:
+                style = ui_style.save(style)
+                for key, action in getattr(self, "style_actions", {}).items():
+                    action.setChecked(key == style)
+                self.setStyleSheet(panel_stylesheet(self.fonts, style))
+                for button in self.findChildren(PixelButton):
+                    button.style_changed()
+                QTimer.singleShot(0, self.fit_wrapped_labels)
+            except Exception as error:  # show every program error visibly
+                self.show_unexpected_error("Darstellung wechseln", error)
 
         def add_page(self, builder=None, validator=None, rebuild=False, on_show=None):
             page = Page(builder, validator, rebuild, on_show)
