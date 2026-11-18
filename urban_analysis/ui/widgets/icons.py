@@ -34,9 +34,15 @@ def _classic_pixmap(key, size):
         kind = shape[0]
         p.setPen(Qt.PenStyle.NoPen)
         if kind == "badge":
+            badge = QRectF(0.5, 0.5, size - 1, size - 1)
             p.setBrush(QColor(shape[1]))
             p.setPen(QPen(QColor("#d3d8de"), 1))
-            p.drawRoundedRect(QRectF(0.5, 0.5, size - 1, size - 1), 4 * k / 2, 4 * k / 2)
+            p.drawRoundedRect(badge, 2 * k, 2 * k)
+            # everything after the badge is cut off at its rounded edge, so
+            # e.g. a path can run out of the icon cleanly
+            clip = QPainterPath()
+            clip.addRoundedRect(badge.adjusted(0.5, 0.5, -0.5, -0.5), 2 * k, 2 * k)
+            p.setClipPath(clip)
         elif kind == "rect":
             _, x, y, w, h, fill, *radius = shape
             p.setBrush(QColor(fill))

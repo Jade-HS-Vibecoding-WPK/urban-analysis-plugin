@@ -14,10 +14,18 @@ Shapes:
     ("text", text, colour)                   centred character
 """
 
+import math
+
 from .layer_icons import ICON_KEYS
 
 INK = "#3d4650"
-_SIGN_BLUE = "#1f5aa6"   # blue of German road signs
+
+# Gentle curve from below the lower edge to above the upper edge, so the
+# path runs out of the icon on both sides (many points = smooth, no kinks).
+_PATH = tuple(
+    (round(6.0 + 4.0 * t + 1.8 * math.sin(2 * math.pi * t), 2), round(17.5 - 19.0 * t, 2))
+    for t in (i / 24 for i in range(25))
+)
 
 CLASSIC_ICONS = {
     "gebaeude": [
@@ -50,33 +58,15 @@ CLASSIC_ICONS = {
         ("rect", 10.6, 7.6, 2.4, 0.9, "#ffffff"),
     ],
     "wege": [
-        # own simplified drawing of the German road sign 240 (StVO,
-        # "gemeinsamer Geh- und Radweg"): blue round sign, walker with child
-        # above, bicycle below
-        ("badge", "#eef3fa"),
-        ("ellipse", 8, 8, 7.3, 7.3, "#ffffff"),
-        ("ellipse", 8, 8, 6.7, 6.7, _SIGN_BLUE),
-        ("line", ((2.2, 8.2), (13.8, 8.2)), "#ffffff", 0.55),
-        # adult and child
-        ("ellipse", 6.7, 2.9, 0.8, 0.8, "#ffffff"),
-        ("line", ((6.6, 3.9), (6.4, 6.0)), "#ffffff", 1.0),
-        ("line", ((6.4, 6.0), (5.7, 7.5)), "#ffffff", 0.75),
-        ("line", ((6.4, 6.0), (7.1, 7.5)), "#ffffff", 0.75),
-        ("line", ((6.6, 4.5), (8.4, 5.4)), "#ffffff", 0.6),
-        ("ellipse", 9.2, 4.5, 0.62, 0.62, "#ffffff"),
-        ("line", ((9.1, 5.2), (9.0, 6.5)), "#ffffff", 0.8),
-        ("line", ((9.0, 6.5), (8.5, 7.5)), "#ffffff", 0.6),
-        ("line", ((9.0, 6.5), (9.5, 7.5)), "#ffffff", 0.6),
-        # bicycle: two wheels (rings) and the frame
-        ("ellipse", 5.4, 11.6, 1.75, 1.75, "#ffffff"),
-        ("ellipse", 5.4, 11.6, 1.15, 1.15, _SIGN_BLUE),
-        ("ellipse", 10.6, 11.6, 1.75, 1.75, "#ffffff"),
-        ("ellipse", 10.6, 11.6, 1.15, 1.15, _SIGN_BLUE),
-        ("line", ((5.4, 11.6), (7.7, 11.6), (9.9, 9.8), (7.1, 9.8), (5.4, 11.6)), "#ffffff", 0.55),
-        ("line", ((7.7, 11.6), (7.0, 9.5)), "#ffffff", 0.55),
-        ("line", ((9.6, 9.2), (10.6, 11.6)), "#ffffff", 0.55),
-        ("line", ((6.5, 9.4), (7.6, 9.4)), "#ffffff", 0.6),
-        ("line", ((9.2, 9.1), (10.2, 9.1)), "#ffffff", 0.6),
+        # brown footpath gently winding through green; it runs out at the
+        # lower and upper edge of the icon (cut off by the badge)
+        ("badge", "#e2f1df"),
+        ("line", _PATH, "#a8834f", 3.8),
+        ("line", _PATH, "#c9a46a", 2.8),
+        ("line", ((2.6, 5.2), (2.6, 4.2)), "#7cbf6f", 0.8),
+        ("line", ((3.4, 5.2), (3.6, 4.4)), "#7cbf6f", 0.8),
+        ("line", ((12.4, 11.8), (12.4, 10.8)), "#7cbf6f", 0.8),
+        ("line", ((13.2, 11.8), (13.4, 11.0)), "#7cbf6f", 0.8),
     ],
     "plaetze": [
         ("badge", "#f2ede3"),
