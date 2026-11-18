@@ -784,6 +784,7 @@ def _create_dock(plugin):
             self.pixel_scene.set_title_font(fonts["heading"])
             self.classic_header = ClassicHeader(total_steps=len(MVP_UI_STEPS), title="Urban Analysis")
             self.scene = _BothHeaders(self.pixel_scene, self.classic_header)
+            self.set_animations(ui_style.animations_enabled())
 
             # Text line for long steps ("Lade … 40 %") below the scene.
             self.busy_label = QLabel()
@@ -906,9 +907,24 @@ def _create_dock(plugin):
                 group.addAction(action)
                 menu.addAction(action)
                 self.style_actions[key] = action
+            menu.addSeparator()
+            calm = QAction(ui_style.REDUCE_ANIMATIONS_LABEL, menu)
+            calm.setCheckable(True)
+            calm.setChecked(not ui_style.animations_enabled())
+            calm.toggled.connect(lambda on: self.set_animations(not on, remember=True))
+            menu.addAction(calm)
+            self.calm_action = calm
             button.setMenu(menu)
             self.style_menu = menu
             return button
+
+        def set_animations(self, enabled, remember=False):
+            """'Animationen reduzieren': no ambient motion, no particles, no
+            sliding panels.  Progress and press feedback stay visible."""
+            if remember:
+                ui_style.save_animations(enabled)
+            PixelButton.animations_enabled = bool(enabled)
+            self.scene.set_animations(enabled)
 
         def apply_style(self, style):
             """Switch the look at once and remember it for the next start."""
@@ -1459,7 +1475,7 @@ def _create_dock(plugin):
         else:
             start, end = panel.height(), 0
         animation = QPropertyAnimation(panel, b"maximumHeight", panel)
-        animation.setDuration(PANEL_ANIMATION_MS)
+        animation.setDuration(PANEL_ANIMATION_MS if PixelButton.animations_enabled else 0)
         animation.setEasingCurve(QEasingCurve.OutCubic)
         animation.setStartValue(start)
         animation.setEndValue(end)
