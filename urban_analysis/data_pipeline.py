@@ -786,14 +786,22 @@ class GeoPackageImporter:
         compared_fields = tuple(field for field in layer.fields if field != layer.primary_key)
         seen: set = set()
         duplicate_count = 0
-        records: List[HarmonizedRecord] = []
-        kept_rows: List[Mapping[str, Any]] = []
+        unique_rows: List[Tuple[int, Mapping[str, Any]]] = []
         for index, row in enumerate(layer.rows, start=1):
             duplicate_key = tuple(row.get(field) for field in compared_fields)
             if duplicate_key in seen:
                 duplicate_count += 1
                 continue
             seen.add(duplicate_key)
+            unique_rows.append((index, row))
+        if profile is not None and geometry_column:
+            unique_rows = GeoPackageImporter._combine_object_rows(
+                unique_rows, layer, profile, geometry_column, issues, display_name,
+            )
+
+        records: List[HarmonizedRecord] = []
+        kept_rows: List[Mapping[str, Any]] = []
+        for index, row in unique_rows:
             layer_id = layer.table_name
             attributes: Dict[str, Any] = {
                 "source_name": file_path.name,
@@ -848,6 +856,89 @@ class GeoPackageImporter:
                 mapping_rules.field_name, display_name,
             )
         return records
+
+    @staticmethod
+    def _combine_object_rows(
+        rows: List[Tuple[int, Mapping[str, Any]]],
+        layer: GeoPackageLayer,
+        profile: LayerProfile,
+        geometry_column: str,
+        issues: List[ValidationIssue],
+        display_name: Optional[str] = None,
+    ) -> List[Tuple[int, Mapping[str, Any]]]:
+        """Combine rows that are one object with several addresses.
+
+        Exports such as ALKIS store a building with two house numbers (e.g. a
+        corner house) as two rows with the same object ID and the same
+        geometry.  They are combined into one row only if they differ in
+        nothing but the profile's ``address_fields``; the addresses are kept
+        side by side (``"39, 41"``).  Rows that differ in any other column are
+        left alone and stay visible as uncertain duplicates for the user to
+        decide, so no other information is ever merged automatically.
+        """
+        id_field = profile.object_id_field
+        address_fields = set(profile.address_fields)
+        if not id_field or id_field not in layer.fields or not address_fields:
+            return rows
+        groups: Dict[Any, List[int]] = {}
+        for position, (_index, row) in enumerate(rows):
+            object_id = row.get(id_field)
+            if object_id in (None, ""):
+                continue
+            groups.setdefault((object_id, row.get(geometry_column)), []).append(position)
+
+        compared_fields = [
+            field for field in layer.fields if field not in (layer.primary_key, geometry_column)
+        ]
+        combined: Dict[int, Mapping[str, Any]] = {}
+        dropped: set = set()
+        object_count = 0
+        for positions in groups.values():
+            if len(positions) < 2:
+                continue
+            group_rows = [rows[position][1] for position in positions]
+            values_by_field: Dict[str, List[Any]] = {}
+            for field in compared_fields:
+                values: List[Any] = []
+                for row in group_rows:
+                    value = row.get(field)
+                    if value not in (None, "") and value not in values:
+                        values.append(value)
+                values_by_field[field] = values
+            if any(len(values) > 1 for field, values in values_by_field.items() if field not in address_fields):
+                continue
+            merged: Dict[str, Any] = dict(group_rows[0])
+            for field, values in values_by_field.items():
+                if len(values) > 1:
+                    merged[field] = ", ".join(str(value) for value in values)
+                elif values:
+                    merged[field] = values[0]
+            combined[positions[0]] = merged
+            dropped.update(positions[1:])
+            object_count += 1
+
+        if not object_count:
+            return rows
+        if profile.category == "Gebäude":
+            subject = "1 Gebäude hat" if object_count == 1 else f"{_count(object_count)} Gebäude haben"
+        else:
+            subject = "1 Objekt hat" if object_count == 1 else f"{_count(object_count)} Objekte haben"
+        issues.append(
+            ValidationIssue(
+                code="several-addresses",
+                message=(
+                    f"{display_name or layer.table_name}: {subject} mehrere Adressen "
+                    "(z. B. Eckhaus). Alle Adressen bleiben erhalten."
+                ),
+                severity="info",
+                rule="Gleiche Objekt-ID und Geometrie, nur Adresse verschieden",
+            )
+        )
+        return [
+            (index, combined.get(position, row))
+            for position, (index, row) in enumerate(rows)
+            if position not in dropped
+        ]
 
     @staticmethod
     def _mark_uncertain_duplicates(

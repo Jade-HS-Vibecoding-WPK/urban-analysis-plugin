@@ -1,8 +1,10 @@
 import sqlite3
 import struct
+from dataclasses import replace
 
 import pytest
 
+from urban_analysis.mapping import default_mapping_rules
 from urban_analysis.data_pipeline import (
     GeoPackageImportError,
     GeoPackageImporter,
@@ -322,8 +324,13 @@ def test_same_attributes_with_different_geometry_are_not_duplicates(tmp_path):
     assert duplicate.message == "buildings: 1 Eintrag war doppelt (komplett gleich) und wurde automatisch entfernt."
 
 
-def make_house_number_geopackage(path):
-    """One building stored once per house number, as in ALKIS exports."""
+def make_house_number_geopackage(path, *, same_object=True):
+    """One building stored once per house number, as in ALKIS exports.
+
+    With ``same_object=False`` the rows at the same place carry different
+    object IDs, i.e. they really are different objects lying on top of each
+    other.
+    """
     with sqlite3.connect(path) as connection:
         connection.executescript(
             """
@@ -350,8 +357,8 @@ def make_house_number_geopackage(path):
             "INSERT INTO gebaeude VALUES (?, ?, ?, 'Wohngebäude', ?)",
             [
                 (1, house, "DENIAL1", "39"),
-                (2, house, "DENIAL1", "41"),
-                (3, house, "DENIAL1", "41"),
+                (2, house, "DENIAL1" if same_object else "DENIAL3", "41"),
+                (3, house, "DENIAL1" if same_object else "DENIAL3", "41"),
                 (4, other, "DENIAL2", "1"),
             ],
         )
@@ -365,9 +372,80 @@ def import_houses(path):
     )
 
 
-def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
+def test_building_with_several_addresses_is_one_building(tmp_path):
     path = tmp_path / "houses.gpkg"
     make_house_number_geopackage(path)
+
+    result = import_houses(path)
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 4]
+    assert all(record.duplicate_group is None for record in result.harmonized_records)
+    house = result.harmonized_records[0]
+    assert house.source_attributes["hnr"] == "39, 41"
+    assert house.source_attributes["objid"] == "DENIAL1"
+    assert house.attributes["object_type"] == "Wohngebäude"
+    codes = {issue.code for issue in result.issues}
+    assert "uncertain-duplicate" not in codes
+    exact = next(issue for issue in result.issues if issue.code == "duplicate-row")
+    assert exact.message == "Gebäude: 1 Eintrag war doppelt (komplett gleich) und wurde automatisch entfernt."
+    combined = next(issue for issue in result.issues if issue.code == "several-addresses")
+    assert combined.severity == "info"
+    assert not combined.requires_confirmation
+    assert combined.message == "Gebäude: 1 Gebäude hat mehrere Adressen (z. B. Eckhaus). Alle Adressen bleiben erhalten."
+
+
+def test_same_id_with_other_differences_is_not_combined(tmp_path):
+    """Only addresses are combined; any other difference is left to the user."""
+    path = tmp_path / "alkis.gpkg"
+    make_alkis_geopackage(path)
+    area = gpkg_polygon([(20, 1), (21, 1), (21, 2), (20, 2), (20, 1)])
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE nutzung ADD COLUMN flaeche TEXT")
+        connection.executemany(
+            "INSERT INTO nutzung (fid, geom, objid, tn__bez, flaeche) VALUES (?, ?, 'P1', 'Weg', ?)",
+            [(201, area, "100"), (202, area, "120")],
+        )
+
+    result = import_alkis(path)
+
+    kept = [record for record in result.harmonized_records if record.source_row_id in (201, 202)]
+    assert [record.source_attributes["flaeche"] for record in kept] == ["100", "120"]
+    assert kept[0].duplicate_group is not None and kept[0].duplicate_group == kept[1].duplicate_group
+    assert "several-addresses" not in {issue.code for issue in result.issues}
+
+
+def test_same_id_but_different_object_type_is_not_combined(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE gebaeude SET gfk__bez = 'Garage' WHERE fid = 1")
+
+    result = import_houses(path)
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 4]
+    assert "several-addresses" not in {issue.code for issue in result.issues}
+    assert any(issue.code == "uncertain-duplicate" for issue in result.issues)
+
+
+def test_rows_are_not_combined_without_object_id_rule(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path)
+    rules = default_mapping_rules()
+    rules = replace(rules, profiles=tuple(replace(profile, object_id_field=None) for profile in rules.profiles))
+
+    result = GeoPackageImporter(mapping_rules=rules).import_file(
+        path,
+        project_crs="EPSG:25832",
+        study_area_wkt="POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",
+    )
+
+    assert [record.source_row_id for record in result.harmonized_records] == [1, 2, 4]
+    assert "several-addresses" not in {issue.code for issue in result.issues}
+
+
+def test_different_objects_at_the_same_place_need_confirmation(tmp_path):
+    path = tmp_path / "houses.gpkg"
+    make_house_number_geopackage(path, same_object=False)
 
     result = import_houses(path)
 
@@ -384,7 +462,7 @@ def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
     assert uncertain.severity == "warning"
     assert uncertain.message.startswith(
         "Gebäude: An einer Stelle liegen mehrere Objekte genau übereinander (2 Objekte). "
-        "Sie unterscheiden sich nur in Hausnummer – z. B. ein Haus mit mehreren Hausnummern."
+        "Sie unterscheiden sich nur in Hausnummer und ALKIS-Objekt-ID – z. B. ein Haus mit mehreren Hausnummern."
     )
     assert uncertain.message.endswith("Sollen sie je Stelle zu einem Objekt zusammengefasst werden?")
     assert "Alle wurden behalten" in uncertain.message
@@ -392,7 +470,7 @@ def test_same_geometry_with_different_attributes_needs_confirmation(tmp_path):
 
 def test_merge_confirmed_duplicates_keeps_first_record_per_group(tmp_path):
     path = tmp_path / "houses.gpkg"
-    make_house_number_geopackage(path)
+    make_house_number_geopackage(path, same_object=False)
     records = import_houses(path).harmonized_records
 
     assert merge_confirmed_duplicates(records, []) == records
@@ -505,7 +583,6 @@ def test_apply_data_source_fills_only_empty_sources(tmp_path):
 
     assert [record.attributes["source"] for record in filled] == [
         "aus den Daten",
-        "ALKIS, LGLN 2025",
         "ALKIS, LGLN 2025",
     ]
     assert records[1].attributes["source"] is None

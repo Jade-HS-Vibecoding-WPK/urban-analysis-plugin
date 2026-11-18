@@ -69,6 +69,8 @@ class LayerProfile:
     main_types: Tuple[str, ...] = ()
     category_rules: Tuple[CategoryRule, ...] = ()
     default_rule: Optional[CategoryRule] = None
+    object_id_field: Optional[str] = None
+    address_fields: Tuple[str, ...] = ()
 
     @property
     def splits_layer(self) -> bool:
@@ -162,6 +164,8 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         profile = _without_comments(profile)
         name = str(profile.get("name", "Profil"))
         requires = tuple(str(field) for field in profile.get("requires_fields", ()))
+        object_id_field = profile.get("object_id_field")
+        address_fields = tuple(str(field) for field in profile.get("address_fields", ()))
         for table_name, layer in _without_comments(profile.get("layers", {})).items():
             layer = _without_comments(layer)
             where = f"{name}/{table_name}"
@@ -178,6 +182,8 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
                         _rule(rule, where) for rule in layer.get("category_rules", ())
                     ),
                     default_rule=_rule(default, where) if default else None,
+                    object_id_field=str(object_id_field) if object_id_field else None,
+                    address_fields=address_fields,
                 )
             )
     name_categories = tuple(
