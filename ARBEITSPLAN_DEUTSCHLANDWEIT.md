@@ -89,6 +89,13 @@ Haltestellen sind, wie oft der Bus fährt und wie gut man sie erreicht.
 | E26 | **Erreichbarkeit in drei Stufen**, in dieser Reihenfolge: **1. Luftlinie** – Abstand jedes Gebäudes zum nächsten Ziel (z. B. Haltestelle) und ob es im 300-m- oder 500-m-Radius liegt. **2. Fußweg** – echter Weg über das OSM-Wegenetz, dazu Einzugsbereiche als Flächen („in 5 Minuten zu Fuß“). **3. ÖV-Güteklassen** – Abstand und Takt zusammen, Klassen A (sehr gut) bis F (schlecht), nach der bekannten Methode aus der Raumplanung. Die Rechnung ist für andere Ziele übertragbar (nächster Arzt, nächste Schule, nächster Supermarkt). Radien, Gehgeschwindigkeit und Klassengrenzen stehen in einer Einstellungsdatei. |
 | E27 | **Einwohnerdaten aus dem Zensus 2022** (100-m-Raster) als spätere Quelle, z. B. für „Wie viele Menschen wohnen im Einzugsbereich einer Haltestelle?“. Erst nach der Recherche in M18 entscheiden, ob und wie. |
 
+Vorschlag von Person Mac nach der Recherche M9 (18.11.2026, gemeinsam zu
+bestätigen):
+
+| Nr. | Vorschlag |
+| --- | --- |
+| E28 | **Lizenzen und Quellenvermerke korrekt angeben.** Alle Quellen sind frei nutzbar, verlangen aber (bis auf dl-de/zero) eine Namensnennung: **dl-de/by-2.0** (BW, BB, HH, RP, SL, SN, ST, BKG-Ländergrenzen) und **CC BY 4.0** (NI, SH, MV, TH, HB, BY) verlangen Quellenvermerk, Lizenzname mit Link und einen **Hinweis, dass die Daten verändert wurden** (Zuschnitt, Zusammenführung); **dl-de/zero-2.0** (NW, HE, BE) verlangt nichts, wir nennen die Quelle trotzdem. **OSM (ODbL):** „© OpenStreetMap-Mitwirkende“; Karten und PDFs brauchen nur diesen Vermerk, ein **öffentlich weitergegebenes GeoPackage** mit OSM-Objekten steht für den OSM-Teil unter ODbL (Share-Alike). Umsetzung: (1) Lizenz und Quellenvermerk je Quelle stehen in `sources_catalog.json`; (2) das Feld „Datenquelle“ jedes Objekts wird daraus vorausgefüllt; (3) beim Download werden Quelle, Datum, Lizenz und Adresse als Metadaten gespeichert, Rohdaten bleiben unverändert; (4) GeoPackage und PDF enthalten einen Block **„Datenquellen und Lizenzen“** mit allen tatsächlich genutzten Quellen, Jahr, Lizenz mit Link, dem Satz „Daten zugeschnitten und zusammengeführt (verändert)“ und – wenn OSM dabei ist – dem ODbL-Hinweis; (5) nie abgefragt werden Eigentümerdaten, Flurstücke in Bayern (nicht frei) und Sachsen-Anhalt, solange die Lizenz nicht bestätigt ist; (6) bei eigenen Dateien bleibt die Nutzerin verantwortlich, das Plugin fragt die Datenquelle ab (Schritt 8); (7) heruntergeladene Daten werden nie committed. |
+
 Weiter gilt unverändert:
 
 - `data_pipeline.py` bleibt QGIS-frei und ohne Zusatzpakete (kein shapely,
@@ -218,6 +225,7 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 | M15 Teil 1: Zielfeld-Texte | Mac | deutscher Name und ein Erklärungssatz je Zielfeld (`target_field_explanation()`) | #28 |
 | M11 OSM-Profil | Mac | OSM-Flächen und -Linien in Kategorien, lesbare Objektart; mit echten Daten (Donnerschwee) geprüft: „Sonstige“ Flächen 165 → 25, Linien 1 380 → 171 | #29, #31 |
 | W8b Ausgabe GeoPackage/PDF | Windows | Speichern mit Vorschlag, Datenquelle Pflicht, Eingabedatei geschützt, 11 Felder, Geschosszahl als Ganzzahl | #26 |
+| M9 Recherche ALKIS-Dienste | Mac | alle 16 Länder offen; 11 im einheitlichen Format „ALKIS vereinfacht“; Katalog `sources_catalog.json`, Details in `STATUS_DATENPIPELINE.md`; daraus E28 (Lizenzen) | dieser PR |
 | Planentwurf soziale Daten | Mac | E22–E27 als Entwurf im Plan (Beschluss in Aufgabe 5) | #30 |
 
 **Entfallen:** M22 „Fläche aus der Geometrie in `area_m2`“ (Wunsch Person
@@ -236,7 +244,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | --- | --- | --- | --- |
 | | **Etappe A – jetzt starten** | | |
 | 1 | G6 Vertrag erweitern | gemeinsam | – |
-| 2 | M9 Recherche ALKIS-Dienste der Länder | Mac | – |
+| 2 | M9 Recherche ALKIS-Dienste der Länder ✓ | Mac | – |
 | 3 | M10a OSM-Abfrage und Größenprüfung | Mac | – |
 | 4 | W14 Schritt 5 umbauen | Windows | Teil 2: 1 |
 | 5 | G10 Soziale Daten beschließen | gemeinsam | – |
@@ -250,6 +258,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | 12 | M13 Mehrere Quellen in einem Lauf | Mac | 1 |
 | 13 | M15 Teil 2: „Mehr erfahren“-Texte | Mac | 1 |
 | 14 | W13 „Mehr erfahren“ anzeigen | Windows | 1, 13 |
+| 14a | W8c Block „Datenquellen und Lizenzen“ in der Ausgabe | Windows | 12 |
 | | **Etappe C – Abgleich und Abnahme** | | |
 | 15 | M14 Quellen abgleichen (mit Flächenberechnung) | Mac | 12 |
 | 16 | W12 Vorrang je Kategorie | Windows | 15 |
@@ -370,6 +379,8 @@ Wartezeit starten kann.
 - **OSM-Format:** Das OSM-Profil (M11) erwartet das GDAL-Standardformat:
   Layer genau `multipolygons`, `lines`, `points`, Spalten `osm_id`,
   `osm_way_id`, `other_tags`, alles im Projekt-CRS. Bitte in S10 bestätigen.
+- **Lizenz (E28):** Quelle, Abrufdatum, Lizenz, Quellenvermerk und Adresse
+  aus dem Download-Auftrag als Metadaten ins GeoPackage schreiben.
 - **Wartet auf:** 3.
 
 #### 10. M10b – ALKIS-Aufträge und Bundesland (S9, Teil 2) *(Mac)*
@@ -390,7 +401,9 @@ Wartezeit starten kann.
 #### 12. M13 – Mehrere Quellen in einem Lauf (S11) *(Mac)*
 
 - **Ziel:** `import_sources` mit Tests; jeder Datensatz kennt seine Quelle
-  (`source_kind`); Hinweise nennen die Quelle („OSM – Gebäude: …“).
+  (`source_kind`); Hinweise nennen die Quelle („OSM – Gebäude: …“). Für E28:
+  eine Liste der **tatsächlich genutzten** Quellen mit Lizenz, Link und
+  Quellenvermerk für den Lizenz-Block der Ausgabe (14a).
 - **Wartet auf:** 1.
 
 #### 13. M15 Teil 2 – „Mehr erfahren“-Texte (S13) *(Mac)*
@@ -404,6 +417,18 @@ Wartezeit starten kann.
 - **Ziel:** Hinweise zeigen nur den kurzen Text; „Mehr erfahren“ klappt
   `details` auf.
 - **Wartet auf:** 1; Texte aus 13.
+
+#### 14a. W8c – Block „Datenquellen und Lizenzen“ in der Ausgabe (E28) *(Windows)*
+
+- **Absicht:** Die Lizenzen verlangen Quellenvermerk, Lizenz und einen
+  Hinweis auf Veränderungen – sichtbar dort, wo die Daten weitergegeben
+  werden.
+- **Ziel:** GeoPackage (als Metadaten) und PDF enthalten einen Block mit
+  allen tatsächlich genutzten Quellen (Quellenvermerk mit Jahr, Lizenz mit
+  Link), dem Satz „Daten zugeschnitten und zusammengeführt (verändert)“ und,
+  wenn OSM dabei ist, „Abgeleitete Daten aus OpenStreetMap unterliegen der
+  ODbL“. Test in `test_output_step.py`.
+- **Wartet auf:** 12 (Liste der genutzten Quellen).
 
 ### Etappe C – Abgleich und Abnahme
 
@@ -446,9 +471,10 @@ Wartezeit starten kann.
 #### 20. G8 – Abnahme Phase 2 *(gemeinsam)*
 
 - **Ziel:** Abnahmekriterien aus `PLAN.md` §9 gelten weiter, zusätzlich:
-  OSM und (wo verfügbar) ALKIS werden automatisch geholt; Quellenvermerke
-  stehen in der Ausgabe; Vorrang je Kategorie funktioniert; keine falschen
-  Dubletten-Rückfragen bei nur einer Quelle.
+  OSM und (wo verfügbar) ALKIS werden automatisch geholt; **alle genutzten
+  Quellen stehen mit Quellenvermerk, Lizenz und Veränderungshinweis in
+  GeoPackage und PDF (E28)**; Vorrang je Kategorie funktioniert; keine
+  falschen Dubletten-Rückfragen bei nur einer Quelle.
 - **Wartet auf:** 1–19.
 
 ### Etappe D – soziale Daten und Erreichbarkeit (nach dem Beschluss in 5)
@@ -522,13 +548,23 @@ Jetzt mit Person Windows zu klären:
 - **Übereinanderliegende Objekte aus einer Quelle** mit verschiedener ID
   (z. B. Straße und Radweg in OSM): überhaupt nachfragen? (siehe PR #29)
 
-Erst nach 2 (M9) entscheidbar:
+Durch 2 (M9) beantwortet:
 
-- In welchen Bundesländern gibt es frei nutzbares ALKIS (und damit überhaupt
-  ALKIS im Plugin)?
-- Reichen die Inhalte der frei nutzbaren Dienste (oft nur Gebäude und
-  Flurstücke) für die Kategorien Nutzungsflächen, Straßen und Grünflächen,
-  oder kommen diese dann nur aus OSM?
+- *In welchen Bundesländern gibt es frei nutzbares ALKIS?* In **allen 16**
+  (ohne Eigentümer). Bayern nur als Download und ohne Flurstücke.
+- *Reichen die Inhalte für Nutzungsflächen, Straßen und Grünflächen?* In 14
+  Ländern ja (Tatsächliche Nutzung ist dabei). **Berlin und Saarland** bieten
+  keine Nutzung als Dienst an – dort kommen diese Kategorien aus OSM.
+
+Neu aus M9, mit Person Windows zu klären:
+
+- **Rechteck für die OSM-Abfrage in Längen-/Breitengraden:** Overpass braucht
+  EPSG:4326, die Pipeline rechnet bisher nicht um. Vorschlag: nur die vier
+  Ecken mit einer kleinen, getesteten UTM-Formel umrechnen (keine
+  Geometrien) – oder QGIS liefert das Rechteck in 4326 mit (S9/S10).
+- **Lizenz Sachsen-Anhalt** am Landesportal bestätigen, bis dahin kein
+  ALKIS-Abruf für ST (E28).
+- **E28 Lizenzen und Quellenvermerke** bestätigen.
 
 Zu sozialen Daten und Erreichbarkeit (in 5 klären):
 
