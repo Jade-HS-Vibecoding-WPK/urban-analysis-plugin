@@ -69,13 +69,13 @@ OUTPUT_DIALOG_FILTERS = {
 }
 LAST_OUTPUT_FOLDER_SETTING = "urban_analysis/last_output_folder"
 SAVE_AS_LABEL = "Speichern unter …"
-DATA_SOURCE_PLACEHOLDER = "z. B. ALKIS Stadt Oldenburg, Stand 2026"
+DATA_SOURCE_PLACEHOLDER = "z. B. ALKIS, Stand 2026"
 DATA_SOURCE_HINT = (
     "Pflichtfeld. Steht bei jedem Ergebnis-Objekt im Feld „Quelle“, wenn die "
     "Daten selbst keine Quelle mitbringen."
 )
 DATA_SOURCE_REQUIRED_MESSAGE = (
-    "Bitte eine Datenquelle eintragen (z. B. „ALKIS Stadt Oldenburg, Stand 2026“). "
+    "Bitte eine Datenquelle eintragen (z. B. „ALKIS, Stand 2026“). "
     "Sie wird bei jedem Ergebnis-Objekt im Feld „Quelle“ gespeichert."
 )
 MISSING_PATH_MESSAGES = {
