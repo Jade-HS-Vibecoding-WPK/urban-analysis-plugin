@@ -370,6 +370,31 @@ def pipeline_reports_progress(importer):
         return False
 
 
+class ImportCanceled(Exception):
+    """The user stopped loading with 'Laden abbrechen'."""
+
+
+CANCELED_MESSAGE = (
+    "Das Laden wurde abgebrochen. Du kannst eine andere Datei wählen oder es "
+    "erneut versuchen."
+)
+CANCELING_TEXT = "Wird abgebrochen …"
+
+
+def cancel_aware_progress(is_canceled, report):
+    """Progress callback for the pipeline that also stops it when canceled.
+
+    The pipeline calls it regularly; if the user pressed 'Laden abbrechen',
+    it raises ``ImportCanceled`` there, so loading stops at once without any
+    change in the pipeline.
+    """
+    def progress(fraction):
+        if is_canceled():
+            raise ImportCanceled()
+        report(fraction * 100)
+    return progress
+
+
 def busy_label_text(text, percent):
     """Text above the busy bar, with the real progress when it is known."""
     if percent is None:
@@ -503,7 +528,10 @@ def _create_dock(plugin):
                 for view in self._views:
                     getattr(view, name)(*args, **kwargs)
             return call
-    from .ui.widgets.icons import icon_size, layer_icon, palette_icon, with_icon
+    from .ui.widgets.icons import (
+        TITLE_ICON_PX, icon_size, layer_icon, palette_icon, title_icon, with_icon,
+    )
+    from qgis.PyQt.QtCore import QSize
     from .ui import style as ui_style
     from qgis.PyQt.QtWidgets import QMenu
 
@@ -530,7 +558,6 @@ def _create_dock(plugin):
         QRadioButton,
         QScrollArea,
         QSizePolicy,
-        QStyle,
         QToolButton,
         QVBoxLayout,
         QWidget,
@@ -624,6 +651,20 @@ def _create_dock(plugin):
             set_role(self.busy_label, "status")
             self.busy_text = ""
             self.busy_label.hide()
+            # 'Laden abbrechen': only visible while data is loading.
+            self.cancel_requested = False
+            self.cancel_button = PixelButton("Laden abbrechen", "secondary")
+            self.cancel_button.setToolTip("Das Laden der Datei stoppen. Es wird nichts übernommen.")
+            self.cancel_button.clicked.connect(self.cancel_import)
+            self.cancel_button.hide()
+            # text over the full width (long file names), the button below it
+            busy_row = QVBoxLayout()
+            busy_row.setSpacing(2)
+            busy_row.addWidget(self.busy_label)
+            cancel_row = QHBoxLayout()
+            cancel_row.addStretch()
+            cancel_row.addWidget(self.cancel_button)
+            busy_row.addLayout(cancel_row)
 
             # Only the current page is visible. A plain box layout (instead of
             # QStackedWidget) gives wrapped texts their full height.
@@ -672,7 +713,7 @@ def _create_dock(plugin):
             self._show_header(ui_style.current())
             outer.addWidget(content, 1)
             layout.addLayout(header)
-            layout.addWidget(self.busy_label)
+            layout.addLayout(busy_row)
             layout.addWidget(scroll, 1)
             layout.addWidget(self.message_scroll)
             layout.addLayout(buttons)
@@ -690,13 +731,14 @@ def _create_dock(plugin):
             row.setContentsMargins(6, 2, 4, 0)
             row.addStretch()
             row.addWidget(self._style_button())
-            for icon, tip, action in (
-                (QStyle.StandardPixmap.SP_TitleBarNormalButton, "Lösen / andocken",
-                 lambda: self.setFloating(not self.isFloating())),
-                (QStyle.StandardPixmap.SP_TitleBarCloseButton, "Schließen", self.close),
+            for kind, tip, action in (
+                ("float", "Lösen / andocken", lambda: self.setFloating(not self.isFloating())),
+                ("close", "Schließen", self.close),
             ):
                 button = QToolButton()
-                button.setIcon(self.style().standardIcon(icon))
+                # own icons: same line weight as the palette next to them
+                button.setIcon(title_icon(kind))
+                button.setIconSize(QSize(TITLE_ICON_PX, TITLE_ICON_PX))
                 button.setToolTip(tip)
                 button.setAutoRaise(True)
                 button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -708,6 +750,7 @@ def _create_dock(plugin):
             """Palette button: choose 'Klassisch (QGIS-Stil)' or 'Pixel-Stil'."""
             button = QToolButton()
             button.setIcon(palette_icon())
+            button.setIconSize(QSize(TITLE_ICON_PX, TITLE_ICON_PX))
             button.setToolTip(STYLE_BUTTON_TOOLTIP)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -884,6 +927,9 @@ def _create_dock(plugin):
             self.busy_text = text
             self.busy_label.setText(busy_label_text(text, None))
             self.busy_label.show()
+            self.cancel_requested = False
+            self.cancel_button.setEnabled(True)
+            self.cancel_button.show()
             self.scene.start_loading()
             self.primary_button.setEnabled(False)
             self.back_button.setEnabled(False)
@@ -892,14 +938,27 @@ def _create_dock(plugin):
 
         def set_busy_progress(self, percent):
             """Real progress from the background task (0-100): the float moves."""
+            if self.cancel_requested:
+                return  # keep showing 'Wird abgebrochen …'
             self.scene.set_progress(percent)
             self.busy_label.setText(busy_label_text(self.busy_text, percent))
+
+        def cancel_import(self):
+            """'Laden abbrechen': ask the background task to stop."""
+            if self.import_task is None:
+                return
+            self.cancel_requested = True
+            self.cancel_button.setEnabled(False)
+            self.busy_label.setText(CANCELING_TEXT)
+            self.import_task.cancel()
 
         def clear_busy(self, outcome="cancel"):
             """Unlock the panel.  ``outcome``: 'done' (line breaks, rabbit
             casts again), 'error' (float twitches, '…' bubble) or 'cancel'."""
             {"done": self.scene.finish, "error": self.scene.fail}.get(outcome, self.scene.cancel)()
             self.busy_label.hide()
+            self.cancel_button.hide()
+            self.cancel_requested = False
             self.stack.setEnabled(True)
             self.primary_button.setEnabled(True)
             self.back_button.setEnabled(self.current > 0)
@@ -1342,8 +1401,11 @@ def _create_dock(plugin):
             importer = GeoPackageImporter()
             options = {}
             if pipeline_reports_progress(importer):
-                # fraction 0..1 from the pipeline -> task progress 0..100
-                options["progress"] = lambda fraction: task.setProgress(fraction * 100)
+                # fraction 0..1 from the pipeline -> task progress 0..100;
+                # stops the pipeline when 'Laden abbrechen' was pressed
+                options["progress"] = cancel_aware_progress(task.isCanceled, task.setProgress)
+            if task.isCanceled():
+                raise ImportCanceled()
             return importer.import_file(
                 path,
                 project_crs=settings["project_crs"],
@@ -1357,6 +1419,11 @@ def _create_dock(plugin):
             if dock.closing:
                 return
             try:
+                if isinstance(exception, ImportCanceled) or dock.cancel_requested:
+                    # stopped by the user (also if the pipeline finished anyway)
+                    dock.clear_busy("cancel")
+                    dock.show_message(CANCELED_MESSAGE, kind="info")
+                    return
                 if exception is not None:
                     dock.clear_busy("error")
                     if isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
@@ -1366,7 +1433,7 @@ def _create_dock(plugin):
                     return
                 if result is None:
                     dock.clear_busy("cancel")
-                    dock.show_message("Das Laden wurde abgebrochen.", kind="info")
+                    dock.show_message(CANCELED_MESSAGE, kind="info")
                     return
                 dock.clear_busy("done")
                 plugin.start_workflow(result)

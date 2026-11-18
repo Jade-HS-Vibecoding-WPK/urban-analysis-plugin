@@ -99,32 +99,71 @@ def icon_size():
 
 
 PALETTE_DOTS = ("#2f6fb0", "#e8655a", "#4f9a4a")  # blue, red-orange, green
+TITLE_ICON_PX = 16              # shown size of the title bar icons (logical px)
+TITLE_STROKE = 1.5              # the same line weight for all three
+TITLE_INK = "#3d4650"
+SCREEN_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)   # Windows display scaling
 
 
-def palette_icon(size=32, outline="#5b6470", body="#f1ece2"):
-    """Own painter's palette with three colour dots (drawn, smooth edges):
-    the button that switches the look of the side panel."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    k = size / 32
+def _draw_palette(p):
     shape = QPainterPath()
-    shape.addEllipse(QPointF(16 * k, 16.5 * k), 13.5 * k, 11.5 * k)
+    shape.addEllipse(QPointF(8, 8.3), 6.6, 5.6)
     thumb = QPainterPath()
-    thumb.addEllipse(QPointF(21.5 * k, 21 * k), 3.2 * k, 3 * k)
+    thumb.addEllipse(QPointF(10.6, 10.4), 1.5, 1.4)
     notch = QPainterPath()
-    notch.addEllipse(QPointF(29.5 * k, 21 * k), 4 * k, 3.4 * k)
-    shape = shape.subtracted(thumb).subtracted(notch)
-    painter.setPen(QPen(QColor(outline), 1.6 * k))
-    painter.setBrush(QColor(body))
-    painter.drawPath(shape)
-    painter.setPen(Qt.PenStyle.NoPen)
-    for colour, (x, y) in zip(PALETTE_DOTS, ((9.5, 13), (16, 9.5), (22.5, 12))):
-        painter.setBrush(QColor(colour))
-        painter.drawEllipse(QPointF(x * k, y * k), 2.9 * k, 2.9 * k)
-    painter.end()
-    return QIcon(pixmap)
+    notch.addEllipse(QPointF(14.6, 10.6), 2.0, 1.7)
+    p.setPen(QPen(QColor(TITLE_INK), TITLE_STROKE))
+    p.setBrush(QColor("#f1ece2"))
+    p.drawPath(shape.subtracted(thumb).subtracted(notch))
+    p.setPen(Qt.PenStyle.NoPen)
+    for colour, (x, y) in zip(PALETTE_DOTS, ((4.9, 6.9), (8.0, 5.0), (11.1, 6.2))):
+        p.setBrush(QColor(colour))
+        p.drawEllipse(QPointF(x, y), 1.45, 1.45)
+
+
+def _draw_float(p):
+    """'Lösen / andocken': two overlapping windows."""
+    pen = QPen(QColor(TITLE_INK), TITLE_STROKE)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawRoundedRect(QRectF(5.25, 2.75, 8, 7), 1, 1)
+    p.setBrush(QColor("#ffffff"))
+    p.drawRoundedRect(QRectF(2.75, 6.25, 8, 7), 1, 1)
+
+
+def _draw_close(p):
+    pen = QPen(QColor(TITLE_INK), TITLE_STROKE)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.drawLine(QPointF(3.5, 3.5), QPointF(12.5, 12.5))
+    p.drawLine(QPointF(12.5, 3.5), QPointF(3.5, 12.5))
+
+
+_TITLE_DRAWERS = {"palette": _draw_palette, "float": _draw_float, "close": _draw_close}
+
+
+def title_icon(kind):
+    """Own title bar icon ('palette', 'float', 'close'): drawn at the shown
+    size for every screen scaling, so lines stay equally strong and sharp."""
+    icon = QIcon()
+    for scale in SCREEN_SCALES:
+        side = round(TITLE_ICON_PX * scale)
+        pixmap = QPixmap(side, side)
+        pixmap.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.scale(side / TITLE_ICON_PX, side / TITLE_ICON_PX)
+        _TITLE_DRAWERS[kind](p)
+        p.end()
+        pixmap.setDevicePixelRatio(scale)
+        icon.addPixmap(pixmap)
+    return icon
+
+
+def palette_icon():
+    """The button that switches the look of the side panel."""
+    return title_icon("palette")
 
 
 def with_icon(key, widget, spacing=8):

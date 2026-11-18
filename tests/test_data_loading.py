@@ -1,15 +1,54 @@
 """Texts of step 3 'Daten laden' (ARBEITSPLAN W4); the QGIS part is tested live."""
 
-from urban_analysis.data_pipeline import GeoPackageImportError
+import pytest
+
+from urban_analysis.data_pipeline import GeoPackageImporter, GeoPackageImportError
 from urban_analysis.guided_dialog import (
     ARROW_CLOSED,
     ARROW_OPEN,
+    CANCELED_MESSAGE,
     FILE_DIALOG_FILTER,
+    ImportCanceled,
+    cancel_aware_progress,
     choice_label,
     file_summary_text,
     format_megabytes,
     import_error_text,
 )
+
+
+def test_progress_is_passed_on_while_not_canceled():
+    shown = []
+    progress = cancel_aware_progress(lambda: False, shown.append)
+    progress(0.0)
+    progress(0.5)
+    assert shown == [0.0, 50.0]
+
+
+def test_cancel_stops_the_pipeline_at_its_next_progress_report(tmp_path):
+    from test_data_pipeline import make_many_points_geopackage
+
+    path = tmp_path / "points.gpkg"
+    make_many_points_geopackage(path, 5000)
+    calls = []
+
+    def canceled():
+        calls.append(1)
+        return len(calls) > 3  # the user presses 'Laden abbrechen' meanwhile
+
+    with pytest.raises(ImportCanceled):
+        GeoPackageImporter().import_file(
+            path,
+            project_crs="EPSG:25832",
+            study_area_wkt="POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0))",
+            buffer_meters=0,
+            progress=cancel_aware_progress(canceled, lambda percent: None),
+        )
+    assert len(calls) == 4  # stopped right away, not at the end
+
+
+def test_cancel_message_says_what_to_do_next():
+    assert "abgebrochen" in CANCELED_MESSAGE and "andere Datei" in CANCELED_MESSAGE
 
 
 def test_file_size_is_shown_in_megabytes_with_german_comma():

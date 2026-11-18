@@ -250,6 +250,10 @@ QToolButton {{
 QToolButton:hover {{
     background-color: {c['button_hover']};
 }}
+QToolButton::menu-indicator {{
+    image: none;
+    width: 0px;
+}}
 QLabel {{
     background: transparent;
 }}
@@ -503,6 +507,10 @@ QToolButton {{
 }}
 QToolButton:hover {{
     background-color: {c['button_hover']};
+}}
+QToolButton::menu-indicator {{
+    image: none;
+    width: 0px;
 }}
 QLabel {{
     background: transparent;
