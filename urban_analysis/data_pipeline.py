@@ -25,6 +25,7 @@ from .contracts import (
     ColumnInfo,
     DuplicateGroupInfo,
     LayerDescriptor,
+    SOURCE_KINDS,
     ValueDifference,
     MVP_DEFAULT_BUFFER_METERS,
     PipelineResult,
@@ -117,6 +118,43 @@ class HarmonizedRecord:
     # Source columns taken over with their readable name (E29, E30), in the
     # order of the source, e.g. {"Hausnummer": "4a"}; see apply_column_decisions.
     extra_attributes: Mapping[str, Any] = field(default_factory=dict)
+    # S11: "OSM", "ALKIS" or "Eigene Datei" and the file the record came
+    # from; both stay empty for a single import_file run.
+    source_kind: str = ""
+    source_file: str = ""
+
+
+@dataclass(frozen=True)
+class SourceFile:
+    """One input GeoPackage for ``import_sources`` (S11).
+
+    ``name`` labels the hints (default: ``source_kind``); licence, link and
+    attribution come from the download request (``DownloadRequest``) and end
+    up in the list of used sources (E28).
+    """
+
+    path: str | Path
+    source_kind: str
+    name: str = ""
+    licence: str = ""
+    licence_url: str = ""
+    attribution: str = ""
+
+    @property
+    def label(self) -> str:
+        return self.name.strip() or self.source_kind
+
+
+@dataclass(frozen=True)
+class UsedSource:
+    """A source that delivered at least one object, for the licence block (E28)."""
+
+    source_kind: str
+    name: str
+    attribution: str
+    licence: str
+    licence_url: str
+    record_count: int
 
 
 @dataclass(frozen=True)
@@ -469,6 +507,76 @@ class GeoPackageImporter:
             columns=columns,
             duplicate_groups=duplicate_groups,
         )
+
+    def import_sources(
+        self,
+        sources: Sequence[SourceFile],
+        *,
+        project_crs: str,
+        study_area_wkt: str,
+        buffer_meters: float = MVP_DEFAULT_BUFFER_METERS,
+        progress: Optional[Callable[[float], None]] = None,
+    ) -> PipelineResult:
+        """Import several GeoPackages into one contract result (S11).
+
+        Every layer and record knows its ``source_kind``; every hint starts
+        with the source, e.g. „OSM – Gebäude: …“.  Layer IDs that an earlier
+        source already uses get the suffix ``_q<n>`` (n = position of the
+        source).  A file that cannot be read becomes an error hint, the other
+        sources are still imported.  Sources are not compared with each other
+        here (that is S12).
+        """
+        if not sources:
+            raise ValueError("At least one source is required")
+        for source in sources:
+            if source.source_kind not in SOURCE_KINDS:
+                raise ValueError(f"Unknown source kind: {source.source_kind!r}")
+        tracker = _Progress(progress)
+        tracker.report(0.0)
+        result = PipelineResult(
+            contract_version=self.contract_version,
+            project_crs=project_crs.strip(),
+            study_area_wkt=study_area_wkt.strip(),
+            buffer_meters=buffer_meters,
+        )
+        used_ids: set = set()
+        seen_area_error = False
+        for index, source in enumerate(sources, start=1):
+            share = 1 / len(sources)
+
+            def on_progress(fraction: float, start: float = (index - 1) * share) -> None:
+                tracker.report(start + fraction * share)
+
+            try:
+                part = self.import_file(
+                    source.path,
+                    project_crs=project_crs,
+                    study_area_wkt=study_area_wkt,
+                    buffer_meters=buffer_meters,
+                    progress=on_progress,
+                )
+            except GeoPackageImportError:
+                result.issues.append(
+                    ValidationIssue(
+                        code="source-not-readable",
+                        message=(
+                            f"{source.label}: Die Datei {Path(source.path).name} konnte nicht "
+                            "gelesen werden. Daten aus dieser Quelle fehlen im Ergebnis."
+                        ),
+                        action="Die Quelle in Schritt 3 erneut laden oder eine andere Datei wählen.",
+                        severity="error",
+                        rule="Mehrere Quellen",
+                    )
+                )
+                continue
+            if seen_area_error:
+                # The same study-area error would repeat for every source.
+                part.issues = [issue for issue in part.issues if issue.code != "invalid-study-area"]
+            else:
+                seen_area_error = any(issue.code == "invalid-study-area" for issue in part.issues)
+            _add_source(result, part, source, index, used_ids)
+        tracker.report(1.0)
+        return result
 
     def _column_infos(
         self,
@@ -1308,6 +1416,86 @@ def _example_text(records: Sequence[HarmonizedRecord], differences: Sequence[Val
     ]
     more = " und weitere Angaben" if len(differences) > 3 else ""
     return f"{sentence} Unterschied: {'; '.join(parts)}{more}."
+
+
+def _add_source(
+    result: PipelineResult, part: PipelineResult, source: SourceFile, index: int, used_ids: set
+) -> None:
+    """Append one source's import to ``result`` (S11), see ``import_sources``."""
+    ids = {layer.layer_id for layer in part.layers}
+    ids.update(column.layer_id for column in part.columns)
+    ids.update(group.layer_id for group in part.duplicate_groups)
+    ids.update(suggestion.layer_id for suggestion in part.attribute_suggestions if suggestion.layer_id)
+    for record in part.harmonized_records:
+        ids.add(record.layer_id)
+        if record.source_layer:
+            ids.add(record.source_layer)
+    renamed = {layer_id: f"{layer_id}_q{index}" for layer_id in ids} if ids & used_ids else {}
+    used_ids.update(renamed.get(layer_id, layer_id) for layer_id in ids)
+
+    def new_id(layer_id: Optional[str]) -> Optional[str]:
+        return renamed.get(layer_id, layer_id) if layer_id else layer_id
+
+    def new_group(group_id: Optional[str]) -> Optional[str]:
+        if not group_id or not renamed:
+            return group_id
+        table, _, number = group_id.rpartition(":")
+        return f"{new_id(table)}:{number}" if table else group_id
+
+    for layer in part.layers:
+        result.layers.append(replace(layer, layer_id=new_id(layer.layer_id), source_kind=source.source_kind))
+    result.attribute_suggestions.extend(
+        replace(suggestion, layer_id=new_id(suggestion.layer_id)) for suggestion in part.attribute_suggestions
+    )
+    result.columns.extend(replace(column, layer_id=new_id(column.layer_id)) for column in part.columns)
+    result.duplicate_groups.extend(
+        replace(group, group_id=new_group(group.group_id), layer_id=new_id(group.layer_id))
+        for group in part.duplicate_groups
+    )
+    result.harmonized_records.extend(
+        replace(
+            record,
+            layer_id=new_id(record.layer_id),
+            source_layer=new_id(record.source_layer),
+            duplicate_group=new_group(record.duplicate_group),
+            source_kind=source.source_kind,
+            source_file=str(source.path),
+        )
+        for record in part.harmonized_records
+    )
+    for issue in part.issues:
+        message = issue.message if issue.code == "invalid-study-area" else f"{source.label} – {issue.message}"
+        result.issues.append(replace(issue, message=message, layer_id=new_id(issue.layer_id)))
+
+
+def used_sources(sources: Sequence[SourceFile], records: Sequence[HarmonizedRecord]) -> List[UsedSource]:
+    """The sources that really delivered objects, in input order (E28, 14a).
+
+    ``records`` are the final records (e.g. after merging duplicates or
+    choosing a source per category), so a source whose objects were all
+    removed is not listed.
+    """
+    counts: Dict[str, int] = {}
+    for record in records:
+        if record.source_file:
+            counts[record.source_file] = counts.get(record.source_file, 0) + 1
+    listed: List[UsedSource] = []
+    seen: set = set()
+    for source in sources:
+        key = str(source.path)
+        if counts.get(key) and key not in seen:
+            seen.add(key)
+            listed.append(
+                UsedSource(
+                    source_kind=source.source_kind,
+                    name=source.label,
+                    attribution=source.attribution,
+                    licence=source.licence,
+                    licence_url=source.licence_url,
+                    record_count=counts[key],
+                )
+            )
+    return listed
 
 
 def describe_duplicate_groups(
