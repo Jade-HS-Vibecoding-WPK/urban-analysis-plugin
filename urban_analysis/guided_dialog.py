@@ -2051,8 +2051,9 @@ def _create_dock(plugin):
         draw_button = QPushButton("Polygon zeichnen")
         draw_button.setToolTip("Polygon Punkt für Punkt in der Karte zeichnen")
         rectangle_button = QPushButton("Rechteck zeichnen")
-        rectangle_button.setToolTip("Rechteck in der Karte aufziehen – schneller, wenn die "
-                                    "genaue Form egal ist")
+        rectangle_button.setToolTip("Rechteck in der Karte: erster Klick eine Ecke, zweiter "
+                                    "Klick die gegenüberliegende – schneller, wenn die genaue "
+                                    "Form egal ist")
         for button in (draw_button, rectangle_button):
             set_role(button, "secondary")
             button.setCursor(Qt.PointingHandCursor)
@@ -2104,7 +2105,15 @@ def _create_dock(plugin):
             watched_layer=None,
         )
 
+        def name_draw_buttons():
+            """'… neu zeichnen' once a drawn area exists (it gets replaced)."""
+            layer_id = page.widgets["drawn_layer_id"]
+            drawn = bool(layer_id) and QgsProject.instance().mapLayer(layer_id) is not None
+            draw_button.setText("Polygon neu zeichnen" if drawn else "Polygon zeichnen")
+            rectangle_button.setText("Rechteck neu zeichnen" if drawn else "Rechteck zeichnen")
+
         def refresh(*_args):
+            name_draw_buttons()
             drawing = use_drawing.isChecked()
             has_layers = layer_box.count() > 0
             layer_box.setEnabled(not drawing)
@@ -2144,6 +2153,7 @@ def _create_dock(plugin):
             if old_id and QgsProject.instance().mapLayer(old_id) is not None:
                 QgsProject.instance().removeMapLayer(old_id)  # only the newest drawing counts
             page.widgets["drawn_layer_id"] = layer.id()
+            name_draw_buttons()
             dock.show_message(
                 f"Gebiet gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt. "
                 "Grau gestrichelt: das Rechteck, für das OSM und ALKIS geladen werden.",

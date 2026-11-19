@@ -13,11 +13,12 @@ DRAW_INSTRUCTIONS = (
     "Rechtsklick schließt das Polygon ab, Esc bricht ab."
 )
 RECTANGLE_INSTRUCTIONS = (
-    "Mit gedrückter linker Maustaste ein Rechteck aufziehen und loslassen. Esc bricht ab."
+    "Erster Klick setzt eine Ecke, zweiter Klick die gegenüberliegende Ecke. "
+    "Rechtsklick oder Esc bricht ab."
 )
 DRAW_BOTH_INSTRUCTIONS = (
-    "Polygon: Linksklick setzt Punkte, Rechtsklick schließt ab. Rechteck: mit "
-    "gedrückter Maustaste aufziehen. Esc bricht ab."
+    "Polygon: Linksklick setzt Punkte, Rechtsklick schließt ab. Rechteck: erster Klick "
+    "eine Ecke, zweiter Klick die gegenüberliegende Ecke. Esc bricht ab."
 )
 # Download rectangle (E17) in the map: grey dashed, only while steps 2/3 are open
 DOWNLOAD_BOX_COLOR = (90, 90, 90, 220)
@@ -336,10 +337,8 @@ def create_rectangle_draw_tool(canvas, on_finished, on_canceled):
             ring = rectangle_ring((self.start.x(), self.start.y()), (end.x(), end.y()))
             return [QgsPointXY(x, y) for x, y in ring] if ring else None
 
-        def canvasPressEvent(self, event):
-            if event.button() == Qt.LeftButton:
-                self.start = event.mapPoint()
-
+        # Two clicks: the first sets one corner, the rectangle follows the
+        # mouse, the second click sets the opposite (diagonal) corner.
         def canvasMoveEvent(self, event):
             if self.start is None:
                 return
@@ -352,14 +351,19 @@ def create_rectangle_draw_tool(canvas, on_finished, on_canceled):
             self.band.update()
 
         def canvasReleaseEvent(self, event):
-            if event.button() != Qt.LeftButton or self.start is None:
+            if event.button() == Qt.RightButton:
+                self.clear()
+                on_canceled("Zeichnen abgebrochen. Es wurde kein Rechteck gespeichert.")
                 return
-            ring = self._ring(event.mapPoint())
-            self.clear()
+            if event.button() != Qt.LeftButton:
+                return
+            if self.start is None:  # first click: one corner
+                self.start = event.mapPoint()
+                return
+            ring = self._ring(event.mapPoint())  # second click: the diagonal corner
             if ring is None:
-                on_canceled("Das Rechteck hat keine Fläche. Bitte mit gedrückter Maustaste "
-                            "aufziehen.")
-                return
+                return  # same point clicked twice: keep waiting for the second corner
+            self.clear()
             on_finished(QgsGeometry.fromPolygonXY([ring]))
 
         def keyPressEvent(self, event):
