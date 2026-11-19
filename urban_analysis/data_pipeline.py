@@ -23,7 +23,9 @@ from .contracts import (
     AttributeSuggestion,
     ColumnDecision,
     ColumnInfo,
+    DuplicateGroupInfo,
     LayerDescriptor,
+    ValueDifference,
     MVP_DEFAULT_BUFFER_METERS,
     PipelineResult,
     ValidationIssue,
@@ -406,6 +408,8 @@ class GeoPackageImporter:
             records.extend(layer_records)
             descriptors.extend(self._layer_descriptors(layer, file_path, category, profile, layer_records))
         records = apply_column_decisions(records, columns)
+        duplicate_groups = describe_duplicate_groups(records, self.mapping_rules)
+        _add_duplicate_examples(issues, duplicate_groups)
 
         if layers_without_category:
             issues.append(
@@ -463,6 +467,7 @@ class GeoPackageImporter:
             issues=issues,
             harmonized_records=records,
             columns=columns,
+            duplicate_groups=duplicate_groups,
         )
 
     def _column_infos(
@@ -1216,19 +1221,128 @@ class GeoPackageImporter:
                     + f" mehrere Objekte genau übereinander ({_count(row_count)} Objekte). "
                     + "Sie unterscheiden sich nur in "
                     + (_names([label(field) for field in top_fields]) or "einzelnen Angaben")
-                    + (
-                        " – z. B. ein Haus mit mehreren Hausnummern."
-                        if "hnr" in shown_fields
-                        else " – z. B. dasselbe Objekt mit zwei Einträgen."
-                    )
-                    + " Alle wurden behalten. Sollen sie je Stelle zu einem Objekt zusammengefasst werden?"
+                    + "."
                 ),
                 severity="warning",
                 requires_confirmation=True,
                 rule="Gleiche Geometrie, abweichende Attribute",
+                action="In Schritt 6 entscheiden, ob sie je Stelle zu einem Objekt zusammengefasst werden.",
+                # The import adds a real example (describe_duplicate_groups).
+                details="Bis zu deiner Entscheidung bleiben alle Objekte erhalten.",
+                layer_id=table_name,
             )
         )
         return marked
+
+
+_TECHNICAL_FIELDS = {"fid", "geom", "geometry", "thegeom", "wktgeom"}
+
+
+def _shown_value(value: Any) -> str:
+    if value in (None, ""):
+        return "(leer)"
+    text = str(value).strip()
+    return text if len(text) <= 40 else text[:39] + "…"
+
+
+def _group_differences(
+    records: Sequence[HarmonizedRecord], mapping_rules: MappingRules
+) -> Tuple[ValueDifference, ...]:
+    """Source columns in which the records of one group differ, readable."""
+    fields: List[str] = []
+    for record in records:
+        for name in record.source_attributes:
+            if name not in fields:
+                fields.append(name)
+    # OSM's raw tag text is not readable; its known tags are columns anyway.
+    tag_fields = {profile.tags_field for profile in mapping_rules.profiles if profile.tags_field}
+    differing: List[Tuple[str, Tuple[str, ...]]] = []
+    for name in fields:
+        if _normalized(name) in _TECHNICAL_FIELDS or name in tag_fields:
+            continue
+        raw = [record.source_attributes.get(name) for record in records]
+        if any(isinstance(value, (bytes, bytearray, memoryview)) for value in raw):
+            continue
+        values: List[str] = []
+        for value in raw:
+            text = _shown_value(value)
+            if text not in values:
+                values.append(text)
+        if len(values) > 1:
+            differing.append((name, tuple(values)))
+    names = {name for name, _values in differing}
+    # A key column ("gfk") and its readable twin ("gfk__bez") say the same.
+    return tuple(
+        ValueDifference(name, mapping_rules.field_name(name), values)
+        for name, values in differing
+        if name + "__bez" not in names
+    )
+
+
+def _example_text(records: Sequence[HarmonizedRecord], differences: Sequence[ValueDifference]) -> str:
+    """One sentence in everyday language, e.g. for step 6 (E31)."""
+    first = records[0].attributes
+    what = first.get("object_type") or first.get("category") or "Objekt"
+    # The address helps to find the place, but only if it is the same for all.
+    addresses = {record.attributes.get("address") for record in records}
+    address = addresses.pop() if len(addresses) == 1 else None
+    where = f" ({address})" if address else ""
+    sentence = (
+        f"Hier liegen {_count(len(records))} Einträge „{what}“{where} mit genau gleicher Form "
+        "übereinander."
+    )
+    if not differences:
+        return sentence + " Sie unterscheiden sich nur in technischen Angaben."
+    parts = [
+        f"{difference.readable_name} " + " / ".join(f"„{value}“" for value in difference.values[:3])
+        for difference in differences[:3]
+    ]
+    more = " und weitere Angaben" if len(differences) > 3 else ""
+    return f"{sentence} Unterschied: {'; '.join(parts)}{more}."
+
+
+def describe_duplicate_groups(
+    records: Sequence[HarmonizedRecord], mapping_rules: Optional[MappingRules] = None
+) -> List[DuplicateGroupInfo]:
+    """A readable explanation for every uncertain-duplicate group (E31, G11).
+
+    ``differences`` lists the source columns whose values differ, with their
+    readable name; ``example_text`` says the same in one sentence;
+    ``reason`` is "gleiche Form und gleiche Objekt-ID" or "gleiche Form".
+    Groups keep the order in which they appear in ``records``.
+    """
+    rules = mapping_rules or default_mapping_rules()
+    groups: Dict[str, List[HarmonizedRecord]] = {}
+    for record in records:
+        if record.duplicate_group:
+            groups.setdefault(record.duplicate_group, []).append(record)
+    infos: List[DuplicateGroupInfo] = []
+    for group_id, members in groups.items():
+        differences = _group_differences(members, rules)
+        ids = {record.attributes.get("object_id") for record in members}
+        same_id = len(ids) == 1 and None not in ids and "" not in ids
+        infos.append(
+            DuplicateGroupInfo(
+                group_id=group_id,
+                layer_id=members[0].source_layer or members[0].layer_id,
+                record_count=len(members),
+                reason="gleiche Form und gleiche Objekt-ID" if same_id else "gleiche Form",
+                example_text=_example_text(members, differences),
+                differences=differences,
+            )
+        )
+    return infos
+
+
+def _add_duplicate_examples(issues: List[ValidationIssue], groups: Sequence[DuplicateGroupInfo]) -> None:
+    """Put the first real example of a layer into its duplicate hint."""
+    first_by_layer: Dict[str, DuplicateGroupInfo] = {}
+    for group in groups:
+        first_by_layer.setdefault(group.layer_id, group)
+    for issue in issues:
+        group = first_by_layer.get(issue.layer_id or "") if issue.code == "uncertain-duplicate" else None
+        if group is not None:
+            issue.details = f"Beispiel: {group.example_text} {issue.details}".strip()
 
 
 def merge_confirmed_duplicates(
