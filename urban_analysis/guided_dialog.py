@@ -52,11 +52,18 @@ from .accessibility_view import (
 )
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import (
+    CACHE_BUTTON_TEXT,
+    CacheOffer,
     DownloadCanceled,
     DownloadError,
+    OsmServerError,
+    cache_offer_or_error,
+    cache_plan,
+    cache_question_text,
     ensure_project_crs,
     lonlat_box,
     run_alkis_download,
+    run_cache_download,
     run_download,
     unique_path,
 )
@@ -1324,6 +1331,8 @@ def _create_dock(plugin):
             self.download_marker = None  # grey dashed download rectangle (E17)
             self.own_markers = None  # own accessibility targets in the map
             self.download_feedback = None  # QgsFeedback of a running OSM download
+            self.osm_feedback = None       # only the Overpass request (cache button)
+            self.use_cache_requested = False
 
             # The whole plugin shares one style (theme.py), with the bundled
             # fonts if present (otherwise the system monospace font).
@@ -1384,10 +1393,21 @@ def _create_dock(plugin):
             self.cancel_button.setToolTip("Das Laden der Datei stoppen. Es wird nichts übernommen.")
             self.cancel_button.clicked.connect(self.cancel_import)
             self.cancel_button.hide()
-            # text over the full width (long file names), the button below it
+            # W11b: while Overpass loads and the area is in the cache
+            self.cache_button = PixelButton(CACHE_BUTTON_TEXT, "secondary")
+            self.cache_button.setToolTip(
+                "Nicht länger auf den OSM-Server warten: OSM-Daten aus dem Niedersachsen-Cache "
+                "des Teams nehmen (wöchentlich neu, einige Merkmale fehlen).")
+            self.cache_button.clicked.connect(self.use_cache)
+            self.cache_button.hide()
+            # text over the full width (long file names), the buttons below it
             busy_row = QVBoxLayout()
             busy_row.setSpacing(2)
             busy_row.addWidget(self.busy_label)
+            cache_row = QHBoxLayout()
+            cache_row.addStretch()
+            cache_row.addWidget(self.cache_button)
+            busy_row.addLayout(cache_row)
             cancel_row = QHBoxLayout()
             cancel_row.addStretch()
             cancel_row.addWidget(self.cancel_button)
@@ -1712,9 +1732,24 @@ def _create_dock(plugin):
             self.cancel_requested = True
             self.cancel_button.setEnabled(False)
             self.busy_label.setText(CANCELING_TEXT)
-            if self.download_feedback is not None:
-                self.download_feedback.cancel()  # stops a running OSM request at once
+            for running in (self.download_feedback, self.osm_feedback):
+                if running is not None:
+                    running.cancel()  # stops a running request at once
             self.import_task.cancel()
+
+        def show_cache_button(self, visible):
+            if self.cache_button.isVisible() != bool(visible):
+                self.cache_button.setVisible(bool(visible))
+
+        def use_cache(self):
+            """'Stattdessen Niedersachsen-Cache verwenden': stop waiting for
+            Overpass; the task loads OSM from the cache instead."""
+            if self.import_task is None or self.osm_feedback is None:
+                return
+            self.use_cache_requested = True
+            self.cache_button.hide()
+            self.busy_label.setText("Wechsel zum Niedersachsen-Cache …")
+            self.osm_feedback.cancel()
 
         def clear_busy(self, outcome="cancel"):
             """Unlock the panel.  ``outcome``: 'done' (line breaks, rabbit
@@ -1722,6 +1757,7 @@ def _create_dock(plugin):
             {"done": self.scene.finish, "error": self.scene.fail}.get(outcome, self.scene.cancel)()
             self.busy_label.hide()
             self.cancel_button.hide()
+            self.cache_button.hide()
             self.cancel_requested = False
             self.stack.setEnabled(True)
             self.primary_button.setEnabled(True)
@@ -2363,7 +2399,7 @@ def _create_dock(plugin):
 
     def plan_downloads(osm, state, parcels):
         """OSM and ALKIS jobs from sources.py.  Returns (osm_request,
-        alkis_requests, notes) or raises ValueError with the reason."""
+        alkis_requests, notes, lonlat box) or raises ValueError with the reason."""
         import copy
 
         from .sources import load_catalog, plan_alkis_download
@@ -2392,30 +2428,45 @@ def _create_dock(plugin):
                 raise ValueError("\n".join(errors) or "Für dieses Gebiet gibt es keinen ALKIS-Auftrag.")
             notes.extend(issue.message for issue in plan.issues)
             alkis_jobs = plan.requests
-        return osm_request, alkis_jobs, notes
+        return osm_request, alkis_jobs, notes, box
 
-    def start_load(*, osm, state, parcels, own_path, folder):
+    def start_load(*, osm, state, parcels, own_path, folder, osm_cache=False):
         """M13: download OSM and/or ALKIS, add the own file, import everything
         in one run (import_sources) and compare the sources (match_sources).
-        Runs as one QGIS background task with a busy bar."""
+        Runs as one QGIS background task with a busy bar.
+
+        W11b (E35): if Overpass fails, the Niedersachsen-Cache is offered
+        (question after the task); while Overpass is loading, the button
+        'Stattdessen Niedersachsen-Cache verwenden' switches at once.
+        ``osm_cache=True`` takes OSM from the cache right away."""
         from .data_pipeline import SourceFile
         from .source_matching import match_sources
+        from .sources import load_catalog
 
         settings = dict(dock.settings)
         try:
-            osm_request, alkis_jobs, notes = plan_downloads(osm, state, parcels)
+            osm_request, alkis_jobs, notes, box = plan_downloads(osm, state, parcels)
         except Exception as error:  # catalog broken, CRS cannot be converted …
             dock.show_message(f"Der Download konnte nicht vorbereitet werden: {error_text(error)}")
             return
         project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
         context = QgsProject.instance().transformContext()
         feedback = QgsFeedback()
+        osm_feedback = QgsFeedback()  # the cache button stops only the Overpass request
         dock.download_feedback = feedback
-        status = {"text": None}  # hint from the worker thread
-        info = {"converted": None, "notes": list(notes)}
-        phases = [kind for kind, wanted in (("osm", osm_request), ("alkis", alkis_jobs),
+        dock.osm_feedback = osm_feedback
+        dock.use_cache_requested = False
+        # hints from the worker thread; 'cache_button' = show the cache button
+        status = {"text": None, "cache_button": False}
+        info = {"converted": None, "notes": list(notes), "cache_issue": None}
+        osm_phase = "cache" if osm_cache else "osm"
+        phases = [kind for kind, wanted in ((osm_phase, osm_request), ("alkis", alkis_jobs),
                                             ("own", own_path)) if wanted] + ["import"]
         dock.set_busy("Daten werden geladen …")
+
+        def restart_with_cache():
+            start_load(osm=osm, state=state, parcels=parcels, own_path=own_path,
+                       folder=folder, osm_cache=True)
 
         def run(task):
             def report(text):
@@ -2427,13 +2478,43 @@ def _create_dock(plugin):
                 share = 100 / len(phases)
                 return lambda percent: task.setProgress(index * share + percent * share / 100)
 
+            def cache_source(index, plan=None):
+                path, issue = run_cache_download(box, folder, project_crs, context, feedback,
+                                                 task.isCanceled, report, part(index), plan)
+                info["cache_issue"] = issue
+                catalog = load_catalog()["osm_cache"]
+                return SourceFile(path, "OSM", "OpenStreetMap (Niedersachsen-Cache)",
+                                  catalog["lizenz"], catalog["lizenz_url"], catalog["quellenvermerk"])
+
             sources = []
             for index, phase in enumerate(phases):
                 if task.isCanceled():
                     raise ImportCanceled()
-                if phase == "osm":
-                    path = run_download(osm_request, folder, project_crs, context, feedback,
-                                        task.isCanceled, report, part(index))
+                if phase == "cache":
+                    sources.append(cache_source(index))
+                elif phase == "osm":
+                    # does the cache cover the area?  Only then the button shows.
+                    try:
+                        plan = cache_plan(box, feedback, task.isCanceled)
+                    except DownloadError:
+                        plan = None  # cache not reachable: no button, Overpass as usual
+                    status["cache_button"] = bool(plan and plan.usable)
+                    stop = lambda: task.isCanceled() or dock.use_cache_requested  # noqa: E731
+                    try:
+                        path = run_download(osm_request, folder, project_crs, context,
+                                            osm_feedback, stop, report, part(index))
+                    except (OsmServerError, DownloadCanceled) as error:
+                        status["cache_button"] = False
+                        if task.isCanceled():
+                            raise DownloadCanceled() from error
+                        if dock.use_cache_requested:
+                            sources.append(cache_source(index, plan))
+                            continue
+                        if isinstance(error, DownloadCanceled):
+                            raise
+                        raise cache_offer_or_error(box, str(error), feedback,
+                                                   task.isCanceled, plan) from error
+                    status["cache_button"] = False
                     sources.append(SourceFile(path, "OSM", "OpenStreetMap", osm_request.licence,
                                               osm_request.licence_url, osm_request.attribution))
                 elif phase == "alkis":
@@ -2470,6 +2551,8 @@ def _create_dock(plugin):
                         result.issues.extend(issues)
                     else:
                         matches = []
+                    if info["cache_issue"] is not None:
+                        result.issues.append(info["cache_issue"])  # visible in step 4 (E35)
                     return result, sources, matches
             return None
 
@@ -2479,16 +2562,33 @@ def _create_dock(plugin):
             if status["text"]:
                 dock.busy_text = status["text"]
             dock.set_busy_progress(percent)
+            dock.show_cache_button(status["cache_button"] and not dock.use_cache_requested)
 
         def finished(exception, outcome=None):
             dock.import_task = None
             dock.download_feedback = None
+            dock.osm_feedback = None
+            dock.show_cache_button(False)
             if dock.closing:
                 return
             try:
                 if isinstance(exception, (DownloadCanceled, ImportCanceled)) or dock.cancel_requested:
                     dock.clear_busy("cancel")
                     dock.show_message(CANCELED_MESSAGE, kind="info")
+                    return
+                if isinstance(exception, CacheOffer):
+                    dock.clear_busy("error")
+                    box = QMessageBox(dock)
+                    box.setWindowTitle("OSM-Server antwortet nicht")
+                    box.setIcon(QMessageBox.Question)
+                    box.setText(cache_question_text(exception.error_text, exception.data_date))
+                    use = box.addButton("Cache verwenden", QMessageBox.AcceptRole)
+                    box.addButton("Abbrechen", QMessageBox.RejectRole)
+                    box.exec()
+                    if box.clickedButton() is use:
+                        restart_with_cache()
+                    else:
+                        dock.show_message(exception.error_text)
                     return
                 if exception is not None:
                     dock.clear_busy("error")
@@ -2520,6 +2620,8 @@ def _create_dock(plugin):
                 names = ", ".join(source.label for source in sources)
                 text = (f"Geladen: {names} – {len(result.layers)} Layer. "
                         "Bitte die Prüfhinweise ansehen.")
+                if info["cache_issue"] is not None:
+                    text += "\n" + info["cache_issue"].message
                 if matches:
                     text += (f"\n{len(matches)} Objekte kommen in mehreren Quellen vor – "
                              "in Schritt 6 wählst du je Kategorie die Quelle.")

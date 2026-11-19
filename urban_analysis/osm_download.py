@@ -9,6 +9,8 @@ The helpers at the top are QGIS-free and tested with plain pytest; QGIS is only
 imported inside the functions that need it.
 """
 
+import gzip
+import json
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -26,6 +28,21 @@ class DownloadError(RuntimeError):
 
 class DownloadCanceled(Exception):
     """'Laden abbrechen' was pressed during the download."""
+
+
+class OsmServerError(DownloadError):
+    """The OSM server did not deliver (busy, no answer, timeout, refused).
+    Only then the Niedersachsen-Cache may stand in (W11b, E35)."""
+
+
+class CacheOffer(Exception):
+    """Overpass failed and the Niedersachsen-Cache covers the area: the user
+    decides whether to use it (never silently, E35)."""
+
+    def __init__(self, error_text, data_date):
+        super().__init__(error_text)
+        self.error_text = error_text
+        self.data_date = data_date
 
 
 def unique_path(folder, name):
@@ -76,6 +93,162 @@ def download_error_text(status, reason, attempts):
 def post_body(query):
     """Overpass expects the query as form field 'data'."""
     return urlencode({"data": query}).encode("utf-8")
+
+
+# --- Niedersachsen-Cache (W11b, E35) -----------------------------------------
+
+CACHE_BUTTON_TEXT = "Stattdessen Niedersachsen-Cache verwenden"
+
+
+def readable_date(iso):
+    """'2026-11-17T21:24:30Z' -> '17.11.2026' (unchanged if not a date)."""
+    text = str(iso or "")
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return f"{text[8:10]}.{text[5:7]}.{text[0:4]}"
+    return text or "unbekannt"
+
+
+def cache_question_text(error_text, data_date):
+    """Question after Overpass failed and the cache covers the area."""
+    return (
+        f"{error_text}\n\n"
+        "Das Gebiet liegt im Niedersachsen-Cache des Teams: OSM-Daten der Großstädte "
+        "Niedersachsens und der Gemeinden rund um Oldenburg, jede Woche neu gebaut "
+        f"(Stand {readable_date(data_date)}). Einige Merkmale fehlen dort, z. B. Zäune "
+        "und Hecken; Schritt 4 zeigt, welche.\n\n"
+        "Stattdessen den Niedersachsen-Cache verwenden?"
+    )
+
+
+def cache_unusable_text(error_text, reason):
+    """Error after Overpass failed and the cache cannot stand in."""
+    return f"{error_text}\n\nDer Niedersachsen-Cache kann nicht einspringen: {reason}"
+
+
+def unpack(data):
+    """Cache tiles are gzip files; plain JSON is taken as it is."""
+    return gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
+
+
+def fetch_url(url, feedback, is_canceled, what):
+    """GET one file of the cache (GitHub Pages, no retries needed)."""
+    from qgis.core import QgsBlockingNetworkRequest
+    from qgis.PyQt.QtCore import QUrl
+    from qgis.PyQt.QtNetwork import QNetworkRequest
+
+    if is_canceled():
+        raise DownloadCanceled()
+    blocking = QgsBlockingNetworkRequest()
+    error = blocking.get(QNetworkRequest(QUrl(url)), True, feedback)
+    if is_canceled():
+        raise DownloadCanceled()
+    reply = blocking.reply()
+    status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+    status = int(status) if status else 0
+    if error != QgsBlockingNetworkRequest.NoError or status not in (0, 200):
+        reason = blocking.errorMessage() or reply.errorString() or f"Fehler {status}"
+        raise DownloadError(
+            f"Der Niedersachsen-Cache ist nicht erreichbar ({what}: {reason}).\n"
+            "Was tun: Internetverbindung prüfen und später erneut „Daten laden“ klicken."
+        )
+    return bytes(reply.content())
+
+
+def cache_plan(box, feedback, is_canceled, catalog=None):
+    """Plan of the cache for the 4326 rectangle (manifest fetched first)."""
+    from .osm_cache import manifest_url, plan_cache_download
+    from .sources import load_catalog
+
+    catalog = catalog if catalog is not None else load_catalog()
+    data = fetch_url(manifest_url(catalog), feedback, is_canceled, "Übersicht")
+    try:
+        manifest = json.loads(unpack(data).decode("utf-8"))
+    except (ValueError, OSError) as error:
+        raise DownloadError(
+            f"Die Übersicht des Niedersachsen-Caches ist nicht lesbar ({error}).\n"
+            "Was tun: später erneut versuchen und die Meldung an das Team weitergeben."
+        ) from error
+    return plan_cache_download(tuple(box), manifest, catalog)
+
+
+def cache_offer_or_error(box, error_text, feedback, is_canceled, plan=None):
+    """After Overpass failed: ``CacheOffer`` if the cache covers the area,
+    else a ``DownloadError`` that names why it cannot stand in."""
+    if plan is None:
+        try:
+            plan = cache_plan(box, feedback, is_canceled)
+        except DownloadError as error:
+            return DownloadError(cache_unusable_text(error_text, str(error).split("\n")[0]))
+    if not plan.usable:
+        return DownloadError(cache_unusable_text(error_text, plan.reason))
+    return CacheOffer(error_text, plan.data_date)
+
+
+def run_cache_download(box, folder, project_crs, transform_context, feedback,
+                       is_canceled, report, progress, plan=None):
+    """OSM from the Niedersachsen-Cache instead of Overpass (runs inside a
+    QgsTask).  Raw tiles are kept as one unchanged JSON file; the layers
+    points/lines/multipolygons go into one GeoPackage in the project CRS, so
+    the OSM profile of the pipeline works as after an Overpass download.
+
+    Returns ``(gpkg_path, issue)``; ``issue`` is the visible info hint (E35)."""
+    from .osm_cache import cache_issue, elements_to_layers, merge_tiles
+    from .sources import load_catalog
+
+    catalog = load_catalog()
+    progress(2)
+    report("Niedersachsen-Cache wird geprüft …")
+    if plan is None:
+        plan = cache_plan(box, feedback, is_canceled, catalog)
+    if not plan.usable:
+        raise DownloadError(
+            f"Der Niedersachsen-Cache kann nicht einspringen: {plan.reason}\n"
+            "Was tun: später erneut „Daten laden“ klicken, wenn der OSM-Server wieder antwortet."
+        )
+    tiles = []
+    total = len(plan.tile_urls)
+    for number, url in enumerate(plan.tile_urls, start=1):
+        report(f"OSM-Daten werden aus dem Niedersachsen-Cache geladen (Teil {number} von {total}) …")
+        data = fetch_url(url, feedback, is_canceled, f"Teil {number}")
+        try:
+            tiles.append(json.loads(unpack(data).decode("utf-8")))
+        except (ValueError, OSError) as error:
+            raise DownloadError(
+                f"Ein Teil des Niedersachsen-Caches ist nicht lesbar (Teil {number}: {error}).\n"
+                "Was tun: später erneut versuchen und die Meldung an das Team weitergeben."
+            ) from error
+        progress(2 + 60 * number / total)
+    elements = merge_tiles(tiles)
+    raw_path = unique_path(folder, plan.raw_file_name)
+    try:
+        raw_path.write_text(json.dumps({"datenstand": plan.data_date, "elements": elements}),
+                            encoding="utf-8")
+    except OSError as error:
+        raise DownloadError(
+            f"Die Rohdatei aus dem Cache konnte nicht gespeichert werden: {error}\n"
+            "Was tun: einen anderen Ordner wählen (Schreibrechte, freier Speicherplatz)."
+        ) from error
+    if is_canceled():
+        raise DownloadCanceled()
+    report("OSM-Daten aus dem Cache werden ins Projekt-KBS umgerechnet und gespeichert …")
+    layers, skipped = elements_to_layers(elements, catalog["osm"]["abfrage"]["schluessel"])
+    parts = []
+    for name in OSM_LAYERS:
+        if not layers[name]["features"]:
+            continue
+        path = unique_path(folder, plan.geojson_name.replace("{layer}", name))
+        try:
+            path.write_text(json.dumps(layers[name]), encoding="utf-8")
+        except OSError as error:
+            raise DownloadError(
+                f"Die Cache-Daten konnten nicht gespeichert werden: {error}\n"
+                "Was tun: einen anderen Ordner wählen (Schreibrechte, freier Speicherplatz)."
+            ) from error
+        parts.append((name, str(path)))
+    gpkg_path = unique_path(folder, plan.geopackage_name)
+    write_layers(parts, gpkg_path, project_crs, transform_context)
+    progress(100)
+    return gpkg_path, cache_issue(plan, catalog, skipped)
 
 
 # --- ALKIS (W10 part 2, M10b): WFS in tiles ------------------------------------
@@ -181,7 +354,7 @@ def fetch(request, feedback, is_canceled, report, sleep=time.sleep):
             return bytes(reply.content())
         reason = blocking.errorMessage() or reply.errorString()
         if status not in RETRY_STATUS or attempt == total:
-            raise DownloadError(download_error_text(status, reason, attempt))
+            raise OsmServerError(download_error_text(status, reason, attempt))
         pause = RETRY_PAUSES_S[attempt - 1]
         for left in range(pause, 0, -1):  # visible countdown, cancel stays possible
             if is_canceled():
@@ -189,13 +362,20 @@ def fetch(request, feedback, is_canceled, report, sleep=time.sleep):
             report(retry_text(left, attempt + 1, total))
             sleep(1)
         report("Neuer Versuch, OSM-Daten werden geladen …")
-    raise DownloadError(download_error_text(0, "", total))  # not reached
+    raise OsmServerError(download_error_text(0, "", total))  # not reached
 
 
 def convert_to_geopackage(raw_path, gpkg_path, project_crs, transform_context):
     """Read the .osm file with GDAL (points, lines, multipolygons) and write
     them into one new GeoPackage in the project CRS.  Returns the written
     layer names; empty layers are left out."""
+    parts = [(name, f"{raw_path}|layername={name}") for name in OSM_LAYERS]
+    return write_layers(parts, gpkg_path, project_crs, transform_context)
+
+
+def write_layers(parts, gpkg_path, project_crs, transform_context):
+    """Write ``(layer name, OGR source)`` pairs into one new GeoPackage in the
+    project CRS.  Returns the written names; empty layers are left out."""
     from qgis.core import (
         QgsCoordinateTransform,
         QgsVectorFileWriter,
@@ -203,8 +383,8 @@ def convert_to_geopackage(raw_path, gpkg_path, project_crs, transform_context):
     )
 
     written = []
-    for name in OSM_LAYERS:
-        layer = QgsVectorLayer(f"{raw_path}|layername={name}", name, "ogr")
+    for name, uri in parts:
+        layer = QgsVectorLayer(uri, name, "ogr")
         if not layer.isValid() or layer.featureCount() == 0:
             continue
         options = QgsVectorFileWriter.SaveVectorOptions()

@@ -71,3 +71,51 @@ def test_osm_categories_have_own_icons():
 
 def test_area_limits_come_from_the_catalog():
     assert (LARGE_AREA_KM2, MAX_DOWNLOAD_KM2) == (25.0, 50.0)
+
+
+# --- W11b: Niedersachsen-Cache ------------------------------------------------
+
+import gzip
+
+from urban_analysis.osm_cache import CachePlan
+from urban_analysis.osm_download import (
+    CacheOffer,
+    DownloadError,
+    OsmServerError,
+    cache_offer_or_error,
+    cache_question_text,
+    readable_date,
+    unpack,
+)
+
+
+def test_cache_date_is_shown_the_german_way():
+    assert readable_date("2026-11-17T21:24:30Z") == "17.11.2026"
+    assert readable_date("") == "unbekannt"
+
+
+def test_cache_question_names_the_error_the_date_and_the_missing_features():
+    text = cache_question_text("Der OSM-Server ist überlastet.", "2026-11-17T21:24:30Z")
+    assert text.startswith("Der OSM-Server ist überlastet.")
+    assert "Stand 17.11.2026" in text
+    assert "fehlen" in text
+    assert text.endswith("Niedersachsen-Cache verwenden?")
+
+
+def test_cache_tiles_are_unpacked_only_when_gzipped():
+    assert unpack(gzip.compress(b'{"elements": []}')) == b'{"elements": []}'
+    assert unpack(b'{"elements": []}') == b'{"elements": []}'
+
+
+def test_cache_is_offered_only_if_it_covers_the_area():
+    usable = CachePlan(True, "", ("u",), data_date="2026-11-17")
+    offer = cache_offer_or_error((8.2, 53.1, 8.3, 53.2), "Fehler.", None, lambda: False, usable)
+    assert isinstance(offer, CacheOffer) and offer.data_date == "2026-11-17"
+    outside = CachePlan(False, "Das Gebiet liegt nicht vollständig im Niedersachsen-Cache.")
+    error = cache_offer_or_error((11.5, 48.1, 11.6, 48.2), "Fehler.", None, lambda: False, outside)
+    assert isinstance(error, DownloadError)
+    assert "Fehler." in str(error) and "nicht vollständig" in str(error)
+
+
+def test_only_server_problems_can_lead_to_the_cache():
+    assert issubclass(OsmServerError, DownloadError)
