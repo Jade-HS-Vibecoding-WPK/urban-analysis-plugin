@@ -202,9 +202,16 @@ ONE_SOURCE_MESSAGE = (
 )
 LAST_DOWNLOAD_FOLDER_SETTING = "urban_analysis/last_download_folder"
 DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die OSM-Daten wählen"
+CHOOSE_FOLDER_ACTION = "Speicherort wählen"
+
+
+def folder_chosen_text(folder):
+    """Info after choosing the download folder (button now 'Daten laden')."""
+    return (f"Speicherort gewählt: {short_folder(folder)}. "
+            "Jetzt auf „Daten laden“ klicken, um die OSM-Daten herunterzuladen.")
 DOWNLOAD_FOLDER_HINT = (
-    "Bei „Daten laden“ fragt das Plugin, in welchem Ordner die OSM-Daten "
-    "gespeichert werden sollen (z. B. dein Projektordner)."
+    "Zuerst unten „Speicherort wählen“: In diesem Ordner werden die OSM-Daten "
+    "gespeichert (z. B. dein Projektordner). Danach „Daten laden“."
 )
 DOWNLOAD_NO_FOLDER_MESSAGE = "Kein Ordner gewählt – es wurde nichts heruntergeladen."
 DOWNLOAD_TOO_LARGE_MESSAGE = (
@@ -1311,7 +1318,9 @@ def _create_dock(plugin):
             self.step_label.setToolTip(progress_text(index))
             self.scene.setToolTip(progress_text(index))
             self.update_progress()
-            self.primary_button.setText(PAGE_ACTIONS[index])
+            # a page may name its main action itself (step 3: folder first)
+            action_text = page.widgets.get("action_text")
+            self.primary_button.setText(action_text() if action_text else PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
             if self.next_message:
@@ -1897,9 +1906,23 @@ def _create_dock(plugin):
                       choose_button, file_info)
 
         page.widgets.update(
-            state=state, choose_button=choose_button, file_info=file_info, path=None
+            state=state, choose_button=choose_button, file_info=file_info, path=None,
+            download_folder=None,
         )
         choose_button.clicked.connect(lambda: choose_file(page))
+
+        def action_text():
+            """'Speicherort wählen' first for downloads, then 'Daten laden'."""
+            if page.widgets["osm"].isChecked() and page.widgets.get("download_folder") is None:
+                return CHOOSE_FOLDER_ACTION
+            return UI_LABELS["load_data"]
+
+        def refresh_action(*_args):
+            if dock.pages and dock.pages[dock.current] is page:
+                dock.primary_button.setText(action_text())
+
+        page.widgets["action_text"] = action_text
+        page.widgets["osm"].toggled.connect(refresh_action)
 
     def choose_file(page):
         """Open the system file dialog and remember the chosen GeoPackage."""
@@ -1939,7 +1962,19 @@ def _create_dock(plugin):
             if widgets["osm"].isChecked() or widgets["own"].isChecked():
                 return reject(MISSING_AREA_MESSAGE)
         if widgets["osm"].isChecked():
-            start_osm_download()
+            if widgets.get("download_folder") is None:
+                # first click: only choose the folder, the button then says "Daten laden"
+                folder = QFileDialog.getExistingDirectory(
+                    dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
+                if not folder:
+                    dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
+                    return False
+                QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
+                widgets["download_folder"] = folder
+                dock.primary_button.setText(UI_LABELS["load_data"])
+                dock.show_message(folder_chosen_text(folder), kind="info")
+                return False
+            start_osm_download(widgets["download_folder"])
             return False  # the page changes when download and import are done
         if not widgets["own"].isChecked() or widgets["path"] is None:
             return True  # data already loaded (earlier run or Python console)
@@ -1955,8 +1990,8 @@ def _create_dock(plugin):
         home = QgsProject.instance().homePath()
         return Path(home) if home and Path(home).is_dir() else Path.home()
 
-    def start_osm_download():
-        """W11: plan with sources.py, ask for the folder, download in the
+    def start_osm_download(folder):
+        """W11: plan with sources.py, download into ``folder`` in the
         background, then load the GeoPackage like an own file."""
         settings = dict(dock.settings)
         project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
@@ -1973,12 +2008,6 @@ def _create_dock(plugin):
             dock.show_message("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
             return
         request = plan.requests[0]
-        folder = QFileDialog.getExistingDirectory(
-            dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
-        if not folder:
-            dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
-            return
-        QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
         feedback = QgsFeedback()
         dock.download_feedback = feedback
         status = {"text": None}  # hint from the worker thread (retry countdown)
@@ -2696,7 +2725,7 @@ def _create_dock(plugin):
         page.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
-        grey = QCheckBox("Umgebung außerhalb des Untersuchungsgebiets in Graustufen")
+        grey = QCheckBox("Im PDF: Umgebung außerhalb des Gebiets in Graustufen")
         grey.setChecked(draft.setdefault("grey_outside", True))
         grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
         page.layout.addWidget(grey)
@@ -2859,10 +2888,9 @@ def _create_dock(plugin):
             # E33: map colours per category; buildings and lines on top of areas
             categories = {d.layer_id: d.category for d in selected}
             style = dock.output_draft.get("map_style", DEFAULT_MAP_STYLE)
-            grey_wkt = (flow.result.study_area_wkt
-                        if dock.output_draft.get("grey_outside", True) else None)
+            # QGIS layers stay fully coloured; the grey border is for the PDF only
             for layer_id, layer in layer_objects.items():
-                apply_style(layer, categories.get(layer_id), style, grey_wkt)
+                apply_style(layer, categories.get(layer_id), style)
             layer_objects = dict(sorted(
                 layer_objects.items(),
                 key=lambda item: -draw_rank(categories.get(item[0]))))
@@ -2895,6 +2923,7 @@ def _create_dock(plugin):
         draft = dock.output_draft
         return export_map_pdf(
             path, layers=layers,
+            grey_outside=draft.get("grey_outside", True),
             study_area_wkt=flow.result.study_area_wkt,
             buffer_meters=flow.result.buffer_meters,
             crs_authid=flow.result.project_crs,

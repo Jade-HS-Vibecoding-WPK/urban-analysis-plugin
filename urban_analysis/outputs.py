@@ -419,7 +419,7 @@ def sources_text(data_source, day):
 
 def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
                    title, subtitle="", data_source="", page="A4", orientation="quer",
-                   scale=None, north_arrow=True, project=None, day=None):
+                   scale=None, north_arrow=True, project=None, day=None, grey_outside=False):
     """Write the analysis map as PDF (QGIS print layout).
 
     ``layers`` are the result layers, top-most first (as in the layer list).
@@ -455,8 +455,9 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
         layer.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple(style)))
         return layer
 
-    area_layer = outline_layer(area, "Untersuchungsgebiet", {
-        "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.6"})
+    from .study_area import AREA_OUTLINE_STYLE
+
+    area_layer = outline_layer(area, "Untersuchungsgebiet", dict(AREA_OUTLINE_STYLE))
     buffer_geometry = area.buffer(float(buffer_meters or 0), 16)
     buffer_layer = outline_layer(buffer_geometry, f"Puffer {format_count(int(buffer_meters or 0))} m", {
         "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.3",
@@ -547,7 +548,26 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    result = QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
+    # Grey border only in the PDF: cut style for the export, then back
+    restore = []
+    if grey_outside:
+        from .map_styles import CATEGORY_PROPERTY, STYLE_PROPERTY, apply_style, fix_legend
+
+        for layer in layers:
+            restore.append((layer, layer.renderer().clone()))
+            apply_style(layer, layer.customProperty(CATEGORY_PROPERTY) or None,
+                        layer.customProperty(STYLE_PROPERTY) or "nutzung", study_area_wkt)
+        for node in root.findLayers():
+            fix_legend(node)
+    try:
+        result = QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
+    finally:
+        from .map_styles import CUT_PROPERTY
+
+        for layer, renderer in restore:
+            layer.setRenderer(renderer)
+            layer.setCustomProperty(CUT_PROPERTY, False)
+            layer.triggerRepaint()
     if result != QgsLayoutExporter.Success:
         raise RuntimeError(
             "Das PDF konnte nicht geschrieben werden. Ist die Datei noch in einem "
