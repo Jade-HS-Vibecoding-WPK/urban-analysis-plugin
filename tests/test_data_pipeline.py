@@ -1386,7 +1386,14 @@ def test_import_sources_fills_source_from_attribution(tmp_path):
     by_kind = {record.source_kind: record for record in result.harmonized_records}
     assert by_kind["OSM"].attributes["source"] == "© OpenStreetMap-Mitwirkende"
     assert by_kind["OSM"].pipeline_attributes["source"] == "© OpenStreetMap-Mitwirkende"
-    assert by_kind["Eigene Datei"].attributes["source"] is None
+    # QGIS-Test 19.11.: an own file names itself, so it never inherits the
+    # OSM notice pre-filled as Datenquelle in step 8
+    assert by_kind["Eigene Datei"].attributes["source"] == "Eigene Datei: eigene.gpkg"
+    filled = apply_data_source(result.harmonized_records, "© OpenStreetMap-Mitwirkende")
+    assert {record.source_kind: record.attributes["source"] for record in filled} == {
+        "OSM": "© OpenStreetMap-Mitwirkende",
+        "Eigene Datei": "Eigene Datei: eigene.gpkg",
+    }
     # "Datenquelle fehlt" only for the source without attribution
     missing = [issue.message for issue in result.issues if issue.code == "missing-data-source"]
     assert len(missing) == 1 and missing[0].startswith("Kartierung – ")
