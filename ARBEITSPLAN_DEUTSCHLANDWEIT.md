@@ -15,6 +15,14 @@ E29–E34 vorgeschlagen (Attributtabelle, Dubletten, PDF, Kartenstile,
 Erreichbarkeit). Die Aufgaben bis zum Feature Freeze stehen in §6 als
 **Etappe F – heute, vor allem anderen**. Auf `main` sind 278 Tests grün.
 
+**Stand 19.11.2026 nachmittags (G12):** Person Mac hat ihren Teil der Etappe F
+fertig (F0, F1, F3 gemergt; F6, F7 sowie E35 Niedersachsen-Cache und M10b
+ALKIS-Aufträge im PR „Pipeline: Ziel-Punkte, Niedersachsen-Cache,
+Erreichbarkeit, ALKIS-Aufträge“). Person Windows: F5 gemergt (#45), F2 (W14)
+auf dem Branch `feature/ui-schritt5-spalten`; offen F4, F8 und die neuen
+Aufgaben W11b (Cache in QGIS) und W10 Teil 2 (ALKIS-Download in QGIS).
+Neue Entscheidungen: E35 (Cache), E11 geändert (Bundesland von Hand).
+
 Der erste Arbeitsplan (`ARBEITSPLAN.md`) ist im Wesentlichen erledigt: Das
 Plugin läuft in QGIS von Schritt 1 bis 9 mit einer lokalen GeoPackage-Datei.
 Dieser Plan beschreibt den nächsten Ausbau. Die Regeln aus `CLAUDE.md` und
@@ -57,7 +65,7 @@ gilt.
 | E8 | Zeilen mit gleicher Objekt-ID und gleicher Form, die sich **nur in der Adresse** unterscheiden (z. B. Eckhaus mit zwei Hausnummern), sind ein Objekt und werden automatisch zusammengefasst; alle Adressen bleiben erhalten. Alles andere bleibt eine Entscheidung der Nutzerin. *(umgesetzt in M8)* |
 | E9 | Echte Dubletten gibt es nur **zwischen Quellen**. Sie werden über „liegt fast deckungsgleich übereinander“ erkannt, nicht über identische Geometrie. |
 | E10 | **Eigene Dateien bleiben möglich:** Neben OSM und ALKIS kann man zusätzlich eigene GeoPackages laden (z. B. Kartierungen). ALKIS selbst kommt trotzdem nur automatisch (E6). |
-| E11 | **Bundesland wird automatisch erkannt und ist änderbar:** Das Plugin bringt vereinfachte Ländergrenzen mit (offene Daten des Bundes, Lizenz in M9 prüfen), schlägt das Land vor, die Nutzerin kann es ändern. |
+| E11 | ~~**Bundesland wird automatisch erkannt und ist änderbar**~~ → **geändert am 19.11.2026 (M10b): Die Nutzerin wählt das Bundesland von Hand** aus einer Liste in Schritt 3 (`alkis_states()`, mit Stand je Land: verfügbar / kommt später / gesperrt). Keine Ländergrenzen-Datei im Plugin. Die Lizenz der BKG-Grenzen (VG2500) ist trotzdem geklärt: dl-de/by-2.0, kostenfrei, Quellenvermerk und Veränderungshinweis Pflicht – falls wir den Vorschlag später doch wollen. |
 | E12 | **Abgleich ALKIS ↔ OSM:** Mittelpunkt des einen liegt im anderen **und** die Flächen weichen höchstens **20 %** ab → wahrscheinlich gleich. Liegt der Mittelpunkt drin, aber die Abweichung ist größer → unsicher, wird zur Entscheidung angezeigt. Der Wert steht in einer Einstellungsdatei und ist änderbar. |
 | E13 | **Gebietsgröße: Warnung ab 25 km², Grenze 50 km²** (Gebiet inklusive Puffer, gemessen am umgebenden Rechteck, das heruntergeladen wird). Über 25 km² eine Warnung („kann lange dauern, Dateien werden groß“) mit „Trotzdem fortfahren?“; über 50 km² eine klare Meldung, und OSM/ALKIS werden nicht geladen (eigene Dateien bleiben möglich). *(geändert am 18.11.2026 auf Vorschlag von Person Windows nach dem Live-Test, PR #33; vorher harte Grenze 25 km²)* |
 | E14 | **Speicherort:** Vor jedem Download fragt das Plugin, in welchen Ordner die Daten sollen. Dateiname enthält Quelle und Datum. |
@@ -113,6 +121,7 @@ Plan von Person Windows zu bestätigen). Sie gelten für den Feature Freeze
 | E32 | **PDF-Aufbau.** Immer dabei: Karte, Legende, Block „Datenquellen und Lizenzen“ (E28), Datum. **Wählbar:** Maßstabsleiste, Nordpfeil, Titel und Untertitel (selbst eintippen), Namen/Gruppe/Hochschule/Kurs, Umriss des Untersuchungsgebiets mit Puffer, Übersichtskarte zur Lage. **Formate:** A4, A3, A2, A1, A0, jeweils hoch und quer. **Keine Online-Hintergrundkarte;** stattdessen kann ein **Schwarzplan aus den geladenen Gebäuden** als Hintergrund zugeschaltet werden. Nicht im PDF: Kennzahlen-Tabelle, Prüfprotokoll. |
 | E33 | **Kartenstile für die Analysekarte:** **Schwarzplan** (Gebäude schwarz), **Nutzungskarte farbig** (je Kategorie eine Planfarbe), **Graustufen** (für Druck). **Pixel** passend zum Plugin-Stil nur, wenn es wenig Mehraufwand ist. Der Stil gilt für die Ergebnis-Layer in QGIS und für das PDF. |
 | E34 | **Erreichbarkeit mit wählbaren Startpunkten** (präzisiert E22 und E26): Startpunkte sind nicht nur Haltestellen. Wählbar sind **Kategorie und Unterart**: Gesundheit (Krankenhaus, Arztpraxis, Apotheke), Nahversorgung (Supermarkt, Bäckerei, Drogerie), Bildung und Betreuung (Schule, Kita, Hochschule), Freizeit und Grün (Spielplatz, Sportplatz, Park, Bibliothek), ÖPNV-Haltestellen. **Ergebnis wählbar:** Radien (300 m / 500 m) um die Startpunkte und/oder Gebäude eingefärbt nach Abstand zum nächsten Ziel. Bis zum Feature Freeze nur **Stufe 1 (Luftlinie)**; Fußweg und ÖV-Güteklassen danach. |
+| E35 | **Niedersachsen-Cache als Notlösung (ergänzt E15):** Scheitert Overpass nach allen Wiederholungen, holt das Plugin OSM aus dem Niedersachsen-Cache des Teams (https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache, wöchentlich aus dem Geofabrik-Auszug gebaut) – nur, wenn das ganze Download-Rechteck im Cache liegt. Der Cache ist eine eigene, frische Quelle, kein alter Download (E15 bleibt). Ein Info-Hinweis sagt es immer, mit Datenstand und den Merkmalen, die im Cache fehlen (Hecken/Zäune/Mauern, Gebäudeteile, Strom). Lizenz ODbL wie OSM. Umsetzung: `osm_cache.py` (Mac), W11b (Windows). *(Wunsch Person Mac, 19.11.2026)* |
 
 Weiter gilt unverändert:
 
@@ -270,6 +279,12 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 | W11 Herunterladen in QGIS | Windows | OSM-Download mit Ordnerwahl, Wiederholungen, Rohdatei, GeoPackage im Projekt-KBS; lesbare Namen „Straßen (Linien)/(Flächen)“ | #40 |
 | W13 Teil 1 „Mehr erfahren“ in Schritt 4 | Windows | Kurzfassung je Hinweis, Rest aufklappbar; Mausrad verstellt keine Auswahllisten | #39 |
 | G6 Vorschlag Schritt 4–6 | Windows | Vertragsfelder für verständliche Schritte (Umsetzung in F0) | #41 |
+| Plan Feature Freeze | Mac | E29–E34, Etappe F | #42 |
+| F0 G11 Vertrag | gemeinsam | Kernfelder, `ColumnInfo`, `ColumnDecision`, Dubletten-Erklärung, `details`/`action`/`layer_id`, `source_kind` | #43 |
+| F1 M23 Spalten lesen | Mac | Namensliste, bekannte Spalten mit lesbarem Namen in `extra_attributes`, Hinweis „nicht übernommen“; in QGIS mit ALKIS-Export und OSM-Download geprüft | #44 |
+| F5 W18 Kartenstile und PDF-Karte | Windows | Nutzungskarte, Schwarzplan, Graustufen; PDF A4–A0 mit Legende, Maßstab, Nordpfeil, Gebiet, Lizenzblock; Feedback aus dem Live-Test | #45 |
+| F3 M24 Dubletten mit Beispiel | Mac | `duplicate_groups` mit Grund, Unterschieden und Beispielsatz; in QGIS geprüft | #46 |
+| F6, E35, F7, M10b | Mac | Ziel-Punkte; Niedersachsen-Cache; Erreichbarkeit Luftlinie; ALKIS-Aufträge für 10 Länder (WFS in 1-km-Kacheln) – live geprüft | PR offen |
 
 **Entfallen:** M22 „Fläche aus der Geometrie in `area_m2`“ (Wunsch Person
 Mac). Die Flächenberechnung selbst braucht nur der Abgleich ALKIS ↔ OSM (E12)
@@ -286,16 +301,18 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | Nr. | Aufgabe | Wer | Wartet auf |
 | --- | --- | --- | --- |
 | | **Etappe F – Feature Freeze, heute (19.11.) vor allem anderen** | | |
-| F0 | G11 Vertrag für Spalten, Hinweise und Dubletten (= G6 + E29–E31) | gemeinsam | – |
-| F1 | M23 Spalten lesen und lesbar benennen | Mac | F0 |
-| F2 | W14 Schritt 5 neu: Spaltenliste | Windows | F0, F1 |
-| F3 | M24 Dubletten mit Beispiel erklären | Mac | F0 |
+| F0 | G11 Vertrag für Spalten, Hinweise und Dubletten (= G6 + E29–E31) ✓ #43 | gemeinsam | – |
+| F1 | M23 Spalten lesen und lesbar benennen ✓ #44 | Mac | F0 |
+| F2 | W14 Schritt 5 neu: Spaltenliste (Branch `feature/ui-schritt5-spalten`) | Windows | F0, F1 |
+| F3 | M24 Dubletten mit Beispiel erklären ✓ #46 | Mac | F0 |
 | F4 | W17 Dubletten-Dialog mit Beispiel und Zoom | Windows | F3 |
-| F5 | W18 PDF-Layout und Kartenstile (mit 14a Lizenzblock) | Windows | – |
-| F6 | M17 Teil 1: Startpunkte als OSM-Punkte | Mac | – |
-| F7 | M20 Erreichbarkeit Stufe 1: Luftlinie | Mac | F6 |
+| F5 | W18 PDF-Layout und Kartenstile (mit 14a Lizenzblock) ✓ #45 | Windows | – |
+| F6 | M17 Teil 1: Startpunkte als OSM-Punkte ✓ (PR offen) | Mac | – |
+| F6b | Farben, Zeichen-Rang und Icons für die Punkt-Kategorien aus F6 | Windows | F6 |
+| F7 | M20 Erreichbarkeit Stufe 1: Luftlinie ✓ (PR offen) | Mac | F6 |
 | F8 | W16 Erreichbarkeit in der Benutzerführung | Windows | F7 |
-| F9 | G12 Plan nachziehen, Feature Freeze | gemeinsam | F0–F8 |
+| F8b | W11b Niedersachsen-Cache in QGIS, wenn Overpass scheitert (E35; `osm_cache.py` ✓, PR offen) | Windows | – |
+| F9 | G12 Plan nachziehen, gemeinsamer QGIS-Test, Feature Freeze | gemeinsam | F0–F8b |
 | | **Etappe A – jetzt starten** | | |
 | 1 | G6 Vertrag erweitern (→ in F0 aufgegangen) | gemeinsam | – |
 | 2 | M9 Recherche ALKIS-Dienste der Länder ✓ | Mac | – |
@@ -305,9 +322,9 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | 6 | M18 Recherche GTFS und Zensus | Mac | – |
 | 7 | M6 Fehlende Werte melden | Mac | – |
 | | **Etappe B – Download und mehrere Quellen** | | |
-| 8 | W10 Schritt 3 „Daten laden“ umbauen (Teil 1 ✓ #33) | Windows | Teil 2: 3, 10 |
+| 8 | W10 Schritt 3 „Daten laden“ umbauen (Teil 1 ✓ #33; Teil 2: Länderliste aus `alkis_states()` und ALKIS-Download in 1-km-Kacheln, Zusammenfügen über `oid`) | Windows | Teil 2: 3, 10 |
 | 9 | W11 Herunterladen in QGIS ✓ (OSM, #40) | Windows | 3 |
-| 10 | M10b ALKIS-Aufträge und Bundesland | Mac | 2 |
+| 10 | M10b ALKIS-Aufträge ✓ (PR offen; Bundesland von Hand, E11 geändert) | Mac | 2 |
 | 11 | M12 ALKIS-Profile für die Dienst-Daten (Teil 1 ✓ „ALKIS vereinfacht“) | Mac | 2 |
 | 12 | M13 Mehrere Quellen in einem Lauf | Mac | 1 |
 | 13 | M15 Teil 2: „Mehr erfahren“-Texte | Mac | 1 |

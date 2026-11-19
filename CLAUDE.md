@@ -57,8 +57,8 @@ Das Plugin selbst bleibt gebietsunabhängig – Donnerschwee ist nur Testgebiet.
 
 | Bereich | Wer | Dateien |
 | --- | --- | --- |
-| Datenpipeline | macOS-Person | `urban_analysis/data_pipeline.py`, `urban_analysis/geometry.py`, `urban_analysis/mapping.py`, `urban_analysis/mapping_rules.json`, `urban_analysis/sources.py` und `urban_analysis/sources_catalog.json` (beide neu in Phase 2), `STATUS_DATENPIPELINE.md`, Tests `test_data_pipeline.py`, `test_geometry.py`, `test_mapping.py` (und künftige Tests zu `sources.py`) |
-| Benutzerführung & Integration | Windows-Person | `urban_analysis/urban_analysis_plugin.py`, `urban_analysis/guided_dialog.py`, `urban_analysis/outputs.py`, `urban_analysis/user_guidance.py`, `urban_analysis/study_area.py`, `urban_analysis/theme.py`, `urban_analysis/icons/`, `urban_analysis/ui/**`, Tests `test_plugin_menu.py`, `test_user_guidance.py`, `test_outputs.py`, `test_study_area.py`, `test_theme.py`, `test_data_loading.py`, `test_review_step.py`, `test_mapping_step.py`, `test_harmonization_step.py`, `test_result_layers.py`, `test_summary_step.py`, `test_pixel_motion.py`, `test_scene.py`, `test_layer_icons.py`, `test_style_switch.py` |
+| Datenpipeline | macOS-Person | `urban_analysis/data_pipeline.py`, `urban_analysis/geometry.py`, `urban_analysis/mapping.py`, `urban_analysis/mapping_rules.json`, `urban_analysis/sources.py` und `urban_analysis/sources_catalog.json` (beide neu in Phase 2), `urban_analysis/osm_cache.py` (Niedersachsen-Cache, E35), `urban_analysis/accessibility.py` (Erreichbarkeit, E26/E34), `STATUS_DATENPIPELINE.md`, Tests `test_data_pipeline.py`, `test_geometry.py`, `test_mapping.py`, `test_sources.py`, `test_sources_catalog.py`, `test_alkis_vereinfacht.py`, `test_alkis_auftraege.py`, `test_columns.py`, `test_duplicate_groups.py`, `test_ziel_punkte.py`, `test_osm_cache.py`, `test_accessibility.py` |
+| Benutzerführung & Integration | Windows-Person | `urban_analysis/urban_analysis_plugin.py`, `urban_analysis/guided_dialog.py`, `urban_analysis/outputs.py`, `urban_analysis/user_guidance.py`, `urban_analysis/study_area.py`, `urban_analysis/theme.py`, `urban_analysis/osm_download.py`, `urban_analysis/map_styles.py`, `urban_analysis/icons/`, `urban_analysis/ui/**`, Tests `test_plugin_menu.py`, `test_user_guidance.py`, `test_outputs.py`, `test_study_area.py`, `test_theme.py`, `test_data_loading.py`, `test_review_step.py`, `test_mapping_step.py`, `test_harmonization_step.py`, `test_result_layers.py`, `test_summary_step.py`, `test_pixel_motion.py`, `test_scene.py`, `test_layer_icons.py`, `test_style_switch.py`, `test_osm_download.py`, `test_source_choice.py`, `test_more_info.py`, `test_map_styles.py`, `test_columns_step.py` |
 | Gemeinsam (nur nach Absprache, eigener PR) | beide | `urban_analysis/contracts.py`, `urban_analysis/ui_contract.py`, `metadata.txt`, `CLAUDE.md`, `PLAN.md`, `ARBEITSPLAN*.md`, `.gitignore`, `tests/test_contracts.py`, `tests/test_plugin_integration.py` |
 
 `tests/test_data_loading.py` nutzt Hilfsfunktionen aus
@@ -108,7 +108,17 @@ Siehe `PLAN.md` §6. Getroffene Entscheidungen hier kurz nachtragen.
     möglich (E10, E16).
   - Bei gleichen Objekten aus ALKIS und OSM wählt die Nutzerin je Kategorie
     die Quelle; das Plugin schlägt einen Vorrang vor (E7, E19).
-  - Gebiet + Puffer höchstens 25 km², Größe schon in Schritt 2 sichtbar
-    (E13, E17).
+  - Gebiet + Puffer: Warnung über 25 km², kein Download über 50 km²; Größe
+    schon in Schritt 2 sichtbar (E13 geändert am 18.11.2026, E17).
   - Umprojektion (z. B. OSM aus EPSG:4326) passiert in QGIS vor der Pipeline;
     die Pipeline selbst projiziert weiterhin nicht um.
+- **Feature Freeze (2026-11-19):** E29–E35 in `ARBEITSPLAN_DEUTSCHLANDWEIT.md`
+  §2. Kurz:
+  - Ergebnis-Layer haben wenige Kernfelder plus alle bekannten
+    Originalspalten mit lesbarem Namen; unbekannte Spalten sind zuschaltbar
+    und werden in einem Hinweis genannt (E29, E30, G11).
+  - Das Bundesland für ALKIS wählt die Nutzerin von Hand (E11 geändert).
+  - Scheitert Overpass, springt der Niedersachsen-Cache ein, wenn das Gebiet
+    ganz darin liegt – immer mit sichtbarem Hinweis (E35).
+  - ALKIS-WFS liefern höchstens 10 000 Objekte je Abfrage: Download in
+    Kacheln von etwa 1 km, Zusammenfügen über die Objekt-ID (M10b).
