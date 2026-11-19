@@ -61,6 +61,10 @@ LAYER_ICONS = {
     "GebaeudeBauwerk": "gebaeude",
     "Nutzung": "nutzung",
     "Flurstueck": "flurstuecke",
+    # OpenStreetMap download (layers as GDAL reads them)
+    "points": "grenzpunkte",
+    "lines": "linien",
+    "multipolygons": "flaechen",
 }
 # Split result layers of 'nutzung' (layer_suffix in mapping_rules.json)
 SUFFIX_ICONS = {
