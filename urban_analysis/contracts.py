@@ -161,6 +161,104 @@ class ValidationIssue:
     layer_id: Optional[str] = None
 
 
+# --- G13: general map topics (E36, S16) ----------------------------------------
+
+# Geometry of a topic class, as in the catalog.
+TOPIC_GEOMETRIES = ("Fläche", "Linie", "Punkt")
+
+# Hint codes of the topic step (ValidationIssue.code).
+TOPIC_LIMIT = "topic-limit"  # info: what a topic cannot show (one per topic)
+TOPIC_CLASS_EMPTY = "topic-class-empty"  # info: a chosen class has no object in the area
+
+
+@dataclass(frozen=True)
+class TopicClass:
+    """One class of a topic, e.g. „Wohnen“ in „Nutzungen“ (read only for the UI).
+
+    ``colour`` is a suggestion from the catalog (``#rrggbb``) or empty; the
+    map styles (E33) may replace it, e.g. for Schwarzplan or Graustufen.
+    ``uncertain`` marks classes that are only a guess („vermutlich“, e.g.
+    Erdgeschossnutzung) and must be confirmed before they count.
+    """
+
+    class_id: str
+    name: str
+    geometry: str
+    colour: str = ""
+    description: str = ""
+    uncertain: bool = False
+
+    def __post_init__(self) -> None:
+        if self.geometry not in TOPIC_GEOMETRIES:
+            raise ValueError(f"Unbekannte Geometrie einer Themenklasse: {self.geometry}")
+
+
+@dataclass(frozen=True)
+class TopicStep:
+    """One step of a scale: ``lower`` <= value < ``upper`` (None = open)."""
+
+    name: str
+    lower: Optional[float] = None
+    upper: Optional[float] = None
+    colour: str = ""
+
+
+@dataclass(frozen=True)
+class TopicScale:
+    """A graded map instead of classes, e.g. buildings by number of floors.
+
+    ``field`` names the column of the result layer that holds the value,
+    e.g. a core field or an accessibility column „Abstand Nahversorgung (m)“.
+    """
+
+    scale_id: str
+    name: str
+    field: str
+    steps: Tuple[TopicStep, ...] = ()
+
+
+@dataclass(frozen=True)
+class TopicInfo:
+    """One topic from the catalog (``topics_catalog.json``), read only for the UI.
+
+    ``limits`` are the sentences of the hint ``topic-limit`` (what the data
+    cannot show), ``source_tips`` say where better data could come from.
+    """
+
+    topic_id: str
+    name: str
+    description: str = ""
+    classes: Tuple[TopicClass, ...] = ()
+    scales: Tuple[TopicScale, ...] = ()
+    limits: Tuple[str, ...] = ()
+    source_tips: Tuple[str, ...] = ()
+
+    def class_by_id(self, class_id: str) -> Optional[TopicClass]:
+        return next((item for item in self.classes if item.class_id == class_id), None)
+
+
+@dataclass
+class TopicSelection:
+    """What the user ticked in step 7 for one topic (back from the UI).
+
+    Several selections may be chosen; together they are overlaid.  Each
+    harmonized record gets at most one class per selected topic in
+    ``topic_classes`` (topic_id -> class_id), next to its ``category``.
+    """
+
+    topic_id: str
+    class_ids: Tuple[str, ...] = ()
+    scale_ids: Tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.class_ids = tuple(self.class_ids)
+        self.scale_ids = tuple(self.scale_ids)
+        if not self.topic_id:
+            raise ValueError("Ein Thema braucht eine topic_id")
+        if not self.class_ids and not self.scale_ids:
+            raise ValueError(f"Thema {self.topic_id}: mindestens eine Klasse oder Stufe wählen")
+
+
 @dataclass
 class OutputSelection:
     """User-controlled output choices for the integrated workflow."""
@@ -187,6 +285,9 @@ class PipelineResult:
     harmonized_records: List[object] = field(default_factory=list)
     columns: List[ColumnInfo] = field(default_factory=list)
     duplicate_groups: List[DuplicateGroupInfo] = field(default_factory=list)
+    # G13: the topics chosen in step 7 (empty = old single topic via
+    # selected_topic, which stays until W19 is done).
+    selected_topics: List[TopicSelection] = field(default_factory=list)
 
     def columns_of(self, layer_id: str) -> List[ColumnInfo]:
         """All columns of one input layer, in the order of the source."""
@@ -212,6 +313,7 @@ class PipelineResult:
             "study_area_wkt": self.study_area_wkt,
             "buffer_meters": self.buffer_meters,
             "selected_topic": self.selected_topic,
+            "selected_topics": [selection.topic_id for selection in self.selected_topics],
             "input_layer_count": len(self.layers),
             "selected_layer_count": len(self.selected_layers()),
             "issue_count": len(self.visible_issues()),
