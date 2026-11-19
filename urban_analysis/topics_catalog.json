@@ -3,12 +3,14 @@
   "_hinweis_regeln": "Jede Klasse hat Regeln für OSM und für ALKIS. Eine Regel ist „Schlüssel=Wert“; mehrere Bedingungen mit „ & “ müssen alle passen, „Schlüssel!=Wert“ heißt „nicht dieser Wert“. „Schlüssel=*“ passt zu jedem Wert, „Wert*“ zu jedem Wert mit diesem Anfang, und „Hauptart“ passt auch zu „Hauptart, Detail“ (wie in mapping_rules.json). Geprüft werden alle gelesenen Merkmale: die Spalten der Quelle (ALKIS z. B. nutzart, bez, funktion, gebnutzbez; ALKIS-Export tn__bez, gfk__bez), alle OSM-Merkmale aus other_tags und drei eigene Schlüssel: kategorie (Kategorie der Pipeline), objektart (Objektart) und ebene (Name des Quell-Layers). Je Thema bekommt ein Objekt höchstens eine Klasse: die erste passende Klasse in der Reihenfolge der Liste gewinnt. Geometrie: Linien-Klassen nehmen nur Linien, Flächen- und Punkt-Klassen nehmen Flächen und Punkte (viele Einrichtungen sind in OSM mal Punkt, mal Fläche).",
   "_hinweis_vermutlich": "\"vermutlich\": true heißt: die Zuordnung ist nur ein Vorschlag (Deutung, keine gesicherte Angabe) und wird in der Oberfläche als „vermutlich“ gezeigt.",
   "_hinweis_stufen": "Stufen färben eine Zahlenspalte des Ergebnis-Layers: von <= Wert < bis, null = offen. Abstandsspalten entstehen erst durch die Erreichbarkeit (accessibility.py, Spaltenname „Abstand <Ziel> (m)“); die Grenzen folgen den Radien 300 m und 500 m aus mapping_rules.json.",
+  "_hinweis_kategorien": "\"kategorien\" je Thema: die Layer-Kategorien der Pipeline (mapping_rules.json), die in Schritt 7 beim Wählen des Themas vorausgewählt (angehakt) werden. Nur ein Vorschlag – die Nutzerin kann jede Kategorie an- oder abwählen. Gebäude und Straßen sind zur Orientierung überall dabei.",
   "stand": "2026-11-19",
 
   "themen": [
     {
       "id": "bebauung",
       "beschreibung": "Gebäude, Bauwerke und Flurstücke – die gebaute Struktur des Gebiets (enthält die bisherige Siedlungsstruktur).",
+      "kategorien": ["Gebäude", "Gebäudeteile", "Bauwerke und Überdachungen", "Straßen", "Plätze", "Wasserflächen"],
       "klassen": [
         {
           "id": "nebengebaeude",
@@ -103,6 +105,7 @@
     {
       "id": "nutzungen",
       "beschreibung": "Was in Gebäuden und auf Flächen stattfindet: Wohnen, Handel, Gastronomie, Dienstleistung, Gewerbe.",
+      "kategorien": ["Gebäude", "Nutzungsflächen", "Straßen", "Grünflächen", "Wasserflächen", "Bahnflächen", "Nahversorgung", "Gesundheit", "Bildung und Betreuung", "Freizeit und Grün", "Sonstige OSM-Punkte"],
       "klassen": [
         {
           "id": "einzelhandel",
@@ -197,6 +200,7 @@
     {
       "id": "versorgung",
       "beschreibung": "Einrichtungen für den täglichen Bedarf und die soziale Infrastruktur, auf Wunsch mit Abstand zum nächsten Ziel.",
+      "kategorien": ["Gebäude", "Straßen", "Nutzungsflächen", "Nahversorgung", "Gesundheit", "Bildung und Betreuung", "Freizeit und Grün", "ÖPNV-Haltestellen"],
       "klassen": [
         {
           "id": "nahversorgung",
@@ -311,6 +315,7 @@
     {
       "id": "freiraum",
       "beschreibung": "Öffentlich nutzbare Räume: Plätze, Fußgängerzonen, Parks, Spielplätze, Ufer und Orte zum Verweilen.",
+      "kategorien": ["Gebäude", "Straßen", "Plätze", "Fuß- und Radwege", "Grünflächen", "Wasserflächen", "Gewässer", "Hecken und Baumreihen", "Freizeit und Grün", "Sonstige OSM-Punkte"],
       "klassen": [
         {
           "id": "plaetze_fussgaengerzonen",
@@ -395,6 +400,7 @@
     {
       "id": "mobilitaet",
       "beschreibung": "Wie das Gebiet erschlossen ist: Straßen nach Rang, Fuß- und Radwege, Querungen, Haltestellen, Bahn und Stellplätze.",
+      "kategorien": ["Gebäude", "Straßen", "Fuß- und Radwege", "Plätze", "Bahnstrecken", "Bahnflächen", "ÖPNV-Haltestellen", "Schiffsverkehrsflächen", "Sonstige OSM-Punkte"],
       "klassen": [
         {
           "id": "fuss_radwege",
@@ -533,6 +539,7 @@
     {
       "id": "gruen_wasser_klima",
       "beschreibung": "Grünflächen, Wald, Bäume und Gewässer, dazu eine Näherung für versiegelte Flächen.",
+      "kategorien": ["Gebäude", "Straßen", "Grünflächen", "Wasserflächen", "Gewässer", "Hecken und Baumreihen", "Nutzungsflächen", "Plätze", "Sonstige OSM-Punkte"],
       "klassen": [
         {
           "id": "wald",
@@ -639,6 +646,7 @@
     {
       "id": "geschichte_stadtbild",
       "beschreibung": "Denkmäler, historische Orte, markante Gebäude und Aussichtspunkte, die das Stadtbild prägen.",
+      "kategorien": ["Gebäude", "Bauwerke und Überdachungen", "Straßen", "Plätze", "Grünflächen", "Wasserflächen", "Sonstige OSM-Punkte", "Sonstige OSM-Flächen"],
       "klassen": [
         {
           "id": "baudenkmale",
