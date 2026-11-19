@@ -22,6 +22,9 @@ BOBBER_REST_X = 150                   # float in front of the rabbit
 BOBBER_RIGHT_MARGIN = 30              # the long cast lands this far from the right edge
 TITLE_TOP, TITLE_HEIGHT = 8, 24       # "Urban Analysis" centred in the sky
 FISH_Y = SCENE_HEIGHT - 20
+# Water in three depths (top -> fish strip); y where each deeper band starts
+WATER_MID_Y = WATER_Y + 20
+WATER_DEEP_Y = FISH_Y - 5
 STEP_LEFT, STEP_RIGHT_MARGIN = 24, 40  # where the step fish swims
 
 SCENE_COLORS = {
@@ -31,8 +34,12 @@ SCENE_COLORS = {
     "water": COLORS["water"],
     "water_hi": "#B7D3CC",
     "water_2": "#82AEA5",
+    "water_mid": "#7AA59D",    # second depth
+    "water_mid_hi": "#9DC1B9",
+    "water_deep": "#668F88",   # fish strip, darkest
+    "water_deep_hi": "#7FA59E",
     "ripple": "#D6E8E3",
-    "shadow": "#5E8A81",
+    "shadow": "#3F6B64",       # fish under water: darker than the deep water
     "pine": COLORS["pine"],
     "pine_dark": COLORS["pine_dark"],
     "pine_light": "#8DB8A6",

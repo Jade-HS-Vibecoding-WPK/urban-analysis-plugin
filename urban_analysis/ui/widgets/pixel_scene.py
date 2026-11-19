@@ -179,12 +179,15 @@ class PixelScene(QWidget):
         back = QPixmap(width, height)
         back.fill(self._colors["sky"])
         p = QPainter(back)
-        self._dot(p, 0, water_y, "water", width, height - water_y)
+        # three depths: light on top, darker in the middle, darkest fish strip
+        self._dot(p, 0, water_y, "water", width, art.WATER_MID_Y - water_y)
+        self._dot(p, 0, art.WATER_MID_Y, "water_mid", width, art.WATER_DEEP_Y - art.WATER_MID_Y)
+        self._dot(p, 0, art.WATER_DEEP_Y, "water_deep", width, height - art.WATER_DEEP_Y)
+        for x in range(0, width, 2):  # pixel dither at the band edges
+            self._dot(p, x, art.WATER_MID_Y - 1, "water_mid")
+            self._dot(p, x + 1, art.WATER_DEEP_Y - 1, "water_deep")
         self._dot(p, 0, water_y, "outline", width, 1)
         self._dot(p, 0, water_y + 1, "water_hi", width, 1)
-        for row in range(4):  # calm horizontal light lines
-            for i, x in enumerate(range(10 + row * 23, width, 61)):
-                self._dot(p, x, water_y + 8 + row * 13, "water_hi", 6 + (i + row) % 4 * 3, 1)
         self._dot(p, 1, water_y + 1, "water_2", art.ISLAND_WIDTH, 2)  # reflection under the edge
         p.end()
 
@@ -206,6 +209,7 @@ class PixelScene(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         p.drawPixmap(0, 0, self._back)
+        self._paint_water_lines(p)
         self._paint_clouds(p)
         self._paint_title(p)
         p.drawPixmap(0, 0, self._front)
@@ -231,6 +235,23 @@ class PixelScene(QWidget):
         p.drawText(0, art.TITLE_TOP, self.width(), art.TITLE_HEIGHT,
                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, self.title)
         p.restore()
+
+    def _paint_water_lines(self, p):
+        """Calm light lines, one colour per depth; they drift slowly (rows
+        alternate direction).  Without animations ``water_offset`` stays 0."""
+        width, offset = self.width(), self.state.water_offset
+        for row in range(4):
+            y = art.WATER_Y + 8 + row * 13
+            if y >= art.WATER_DEEP_Y:
+                color = "water_deep_hi"
+            elif y >= art.WATER_MID_Y:
+                color = "water_mid_hi"
+            else:
+                color = "water_hi"
+            shift = offset if row % 2 == 0 else -offset
+            for i, x in enumerate(range(10 + row * 23, width + 61, 61)):
+                start = (x + shift) % (width + 61) - 30
+                self._dot(p, start, y, color, 6 + (i + row) % 4 * 3, 1)
 
     def _paint_clouds(self, p):
         width = self.width()
