@@ -37,6 +37,40 @@
     }
   },
 
+  "osm_cache": {
+    "_hinweis": "Niedersachsen-Cache (E35): vorberechnete OSM-Daten des Teams auf GitHub Pages, wöchentlich aus dem Geofabrik-Auszug gebaut. Wird nur benutzt, wenn Overpass nach allen Wiederholungen scheitert, und nur, wenn das Download-Rechteck ganz im Cache liegt. Repo: https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache",
+    "name": "Niedersachsen-Cache",
+    "basis_url": "https://jade-hs-vibecoding-wpk.github.io/niedersachsen-cache/daten/",
+    "manifest": "manifest.json",
+    "rohdatei": "osm_cache_{datum}.json",
+    "geojson": "osm_cache_{datum}_{layer}.geojson",
+    "geopackage": "osm_cache_{datum}.gpkg",
+    "lizenz": "ODbL-1.0",
+    "lizenz_url": "https://opendatacommons.org/licenses/odbl/1-0/",
+    "quellenvermerk": "© OpenStreetMap-Mitwirkende, ODbL (über den Niedersachsen-Cache)",
+    "merkmal_namen": {
+      "_hinweis": "Lesbare Namen für Merkmale, die im Cache fehlen können (für den Hinweis in Schritt 4).",
+      "barrier": "Hecken, Zäune und Mauern",
+      "building:part": "Gebäudeteile",
+      "power": "Stromleitungen und -anlagen",
+      "boundary": "Grenzen",
+      "amenity": "Einrichtungen",
+      "shop": "Geschäfte",
+      "highway": "Straßen und Wege",
+      "building": "Gebäude",
+      "landuse": "Landnutzung",
+      "leisure": "Freizeitflächen",
+      "natural": "Naturflächen",
+      "water": "Gewässer",
+      "waterway": "Wasserläufe",
+      "railway": "Bahnanlagen",
+      "public_transport": "ÖPNV-Anlagen",
+      "healthcare": "Gesundheitseinrichtungen",
+      "man_made": "Bauwerke",
+      "place": "Plätze"
+    }
+  },
+
   "laendergrenzen": {
     "_hinweis": "Vereinfachte Ländergrenzen für den Bundesland-Vorschlag (E11). Datei wird einmal ins Plugin gelegt, nicht bei jedem Lauf geladen. Lizenz in M10b am Datensatz selbst bestätigen.",
     "produkt": "VG2500 (Verwaltungsgebiete 1:2 500 000)",

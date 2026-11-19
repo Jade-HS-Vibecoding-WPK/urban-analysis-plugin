@@ -250,10 +250,64 @@ Setzt E22/E34 um. Branch `feature/pipeline-ziel-punkte` liegt auf
 - Noch nicht mit echten OSM-Punkten geprüft (lokale `OSM.gpkg` hat keine).
 - Tests: `tests/test_ziel_punkte.py` (5).
 
+## E35 – Niedersachsen-Cache, wenn Overpass scheitert (19.11.2026)
+
+Wunsch Person Mac: Ist Overpass nach allen Wiederholungen überlastet,
+holt das Plugin OSM aus dem Niedersachsen-Cache des Teams
+(https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache). Nur als
+Notlösung, nie still: ein Info-Hinweis sagt es. Branch
+`feature/pipeline-osm-cache` (liegt auf F6).
+
+- **Katalog:** Abschnitt `osm_cache` in `sources_catalog.json` (Adresse,
+  Dateinamen, Lizenz ODbL, Quellenvermerk, lesbare Namen fehlender
+  Merkmale).
+- **Neu `urban_analysis/osm_cache.py`** (QGIS-frei, nur Standardbibliothek):
+  - `manifest_url(catalog)` → Adresse von `manifest.json`.
+  - `plan_cache_download(box, manifest, catalog)` → `CachePlan`: nutzbar
+    nur, wenn **jede** z15-Kachel des Download-Rechtecks im Cache liegt
+    (sonst `reason` für die Fehlermeldung); `tile_urls` (z15-Kacheln plus
+    z12-Kacheln für große Objekte), `missing_keys` (heute `barrier`,
+    `building:part`, `power`), Dateinamen, Lizenz, Quellenvermerk.
+  - `merge_tiles(tiles)` → Objekte ohne Doppelte (ein Objekt liegt in jeder
+    Kachel, die es berührt).
+  - `elements_to_layers(elements, keys)` → GeoJSON `points`, `lines`,
+    `multipolygons` in EPSG:4326 mit **denselben Spalten wie GDAL** bei einer
+    `.osm`-Datei (`osm_id`, `osm_way_id`, `name`, …, `other_tags`);
+    geschlossene Wege mit Flächen-Merkmal → Fläche, Multipolygon-Relationen
+    aus Wegstücken zusammengesetzt (mit Löchern). Nicht schließbare
+    Relationen werden gezählt (`skipped`), nicht still verworfen.
+  - `cache_issue(plan, catalog, skipped)` → Info-Hinweis „OSM-Daten kommen
+    aus dem Niedersachsen-Cache (Stand …), weil der OSM-Server nicht
+    geantwortet hat. Nicht enthalten: Hecken, Zäune und Mauern,
+    Gebäudeteile, Stromleitungen und -anlagen.“
+- **Live geprüft** (Donnerschwee, Cache-Stand 17.11.2026): 32 Kacheln
+  (2 MB), 25 685 Objekte → 7 212 Punkte, 6 435 Linien, 11 353 Flächen,
+  keine Relation verloren. Durch die Pipeline: keine Fehler, dieselben
+  Kategorien wie beim Overpass-Download, Ziel-Punkte aus F6 erkannt
+  (z. B. REWE, PENNY als „Supermarkt“). München → „nicht im Cache“.
+- **Für Person Windows (W11b, `osm_download.py`):** Wenn `fetch` nach allen
+  Versuchen mit `DownloadError` (überlastet/keine Antwort) endet:
+  1. `manifest.json` über das QGIS-Netz laden, `plan_cache_download` mit
+     demselben 4326-Rechteck aufrufen.
+  2. Nicht nutzbar → bisherige Fehlermeldung plus `plan.reason`.
+  3. Nutzbar → alle `tile_urls` laden (gzip, mit `gzip.decompress` und
+     `json.loads` lesen), `merge_tiles`, Rohdatei `plan.raw_file_name`
+     unverändert speichern (`{"elements": …}`), `elements_to_layers` mit
+     `catalog["osm"]["abfrage"]["schluessel"]`, die drei GeoJSON
+     (`plan.geojson_name` mit `{layer}`) schreiben und wie bisher als
+     `points`/`lines`/`multipolygons` ins GeoPackage `plan.geopackage_name`
+     im Projekt-KBS umwandeln.
+  4. `cache_issue(...)` an die Hinweise anhängen; Datenquelle mit
+     `plan.attribution` vorausfüllen.
+- **Gemeinsam:** E35 in den Plan aufnehmen (ergänzt E15: der Cache ist eine
+  eigene, wöchentlich neue Quelle, kein alter Download); `osm_cache.py` in
+  die Dateitabelle von `CLAUDE.md` (Person Mac).
+- Tests: `tests/test_osm_cache.py` (7).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 308 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 315 grün.
 
 ## Als Nächstes (Person Mac)
 
