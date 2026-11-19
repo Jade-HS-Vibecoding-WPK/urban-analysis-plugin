@@ -284,8 +284,13 @@ def alkis_error_text(status, reason, attempts):
 
 def wfs_exception_text(data):
     """The error text of a WFS 'ExceptionReport' (delivered with status 200),
-    or None if ``data`` is not one."""
+    or None if ``data`` is not one.  An HTML page instead of data (e.g. a
+    maintenance page of the service) is an error, too."""
     head = data[:4000].decode("utf-8", "replace")
+    start = head.lstrip().lower()
+    if start.startswith("<!doctype html") or start.startswith("<html"):
+        return ("Der Dienst hat statt Daten eine Webseite geschickt – er ist wahrscheinlich "
+                "gerade in Wartung oder nicht erreichbar")
     if "ExceptionReport" not in head:
         return None
     start = head.find("<ows:ExceptionText>")

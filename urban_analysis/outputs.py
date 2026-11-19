@@ -92,10 +92,24 @@ def geometry_word(descriptor: LayerDescriptor) -> str:
 GEOMETRY_KINDS = ("point", "line", "polygon")  # order of the ticks in 'Ausgabe'
 
 
+# ALKIS exports often declare only "GEOMETRY"; their tables are known.
+ALKIS_TABLE_KINDS = {
+    "gebaeude": "polygon", "nutzung": "polygon", "flurstuecke": "polygon",
+    "bodenschaetzung": "polygon", "bewertung": "polygon", "grenzpunkte": "point",
+    "bauwerke_f": "polygon", "bauwerke_l": "line", "bauwerke_p": "point",
+}
+
+
 def geometry_kind_of(descriptor: LayerDescriptor) -> str:
     """'point', 'line', 'polygon' or '' (unknown) of a result layer."""
     word = geometry_word(descriptor)
-    return next((kind for kind, name in GEOMETRY_WORDS.items() if name == word), "")
+    kind = next((kind for kind, name in GEOMETRY_WORDS.items() if name == word), "")
+    if kind:
+        return kind
+    layer_id = descriptor.layer_id.lower()
+    if layer_id.startswith("nutzung_"):  # split land-use layers (areas)
+        return "polygon"
+    return ALKIS_TABLE_KINDS.get(layer_id, "")
 
 
 def geometry_counts(descriptors: Iterable[LayerDescriptor]) -> Dict[str, int]:

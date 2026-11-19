@@ -12,7 +12,12 @@ from urban_analysis.source_matching import (
     priority_choices,
 )
 
-SETTINGS = MatchSettings(max_area_deviation=0.2, suggested_priority={"Gebäude": "ALKIS", "Grünflächen": "OSM"})
+SETTINGS = MatchSettings(
+    max_area_deviation=0.3, max_area_deviation_mutual=0.5, suggested_priority={"Gebäude": "ALKIS", "Grünflächen": "OSM"}
+)
+# OSM 6 × 10 at the right edge of a 10 × 10 ALKIS building: its centre lies
+# in ALKIS, the ALKIS centre not in OSM (only one way), 40 % deviation.
+ONE_WAY_40 = "POLYGON ((5.5 0, 11.5 0, 11.5 10, 5.5 10, 5.5 0))"
 
 
 def square(x, y, size):
@@ -52,14 +57,30 @@ def test_slightly_shifted_building_is_a_certain_match():
 
 
 def test_centre_inside_but_area_differs_more_is_uncertain():
-    # 10 × 10 vs. 10 × 14: 29 % Abweichung
-    records = [record("ALKIS", square(0, 0, 10)), record("OSM", "POLYGON ((0 0, 10 0, 10 14, 0 14, 0 0))")]
+    records = [record("ALKIS", square(0, 0, 10)), record("OSM", ONE_WAY_40)]
 
     _, matches, issues = match_sources(records, SETTINGS)
 
     assert len(matches) == 1 and not matches[0].certain
-    assert issues[0].requires_confirmation and issues[0].severity == "warning"
+    assert matches[0].area_deviation == pytest.approx(0.4)
+    # decided in step 6, no tick in step 4
+    assert not issues[0].requires_confirmation and issues[0].severity == "warning"
     assert "unsicher" in issues[0].message
+
+
+def test_both_centres_inside_allow_a_larger_deviation():
+    # 10 × 10 vs. 10 × 6 in the middle: each centre lies in the other, 40 %
+    records = [record("ALKIS", square(0, 0, 10)), record("OSM", "POLYGON ((0 2, 10 2, 10 8, 0 8, 0 2))")]
+
+    _, matches, issues = match_sources(records, SETTINGS)
+
+    assert len(matches) == 1 and matches[0].certain
+    assert issues[0].severity == "info" and "unsicher" not in issues[0].message
+
+    # beyond the mutual limit (10 × 10 vs. 10 × 4: 60 %) it stays uncertain
+    records = [record("ALKIS", square(0, 0, 10)), record("OSM", "POLYGON ((0 3, 10 3, 10 7, 0 7, 0 3))")]
+    _, matches, _ = match_sources(records, SETTINGS)
+    assert not matches[0].certain
 
 
 def test_no_match_for_same_source_other_category_or_far_away():
@@ -81,7 +102,7 @@ def test_apply_source_priority_keeps_chosen_source_and_unmatched_objects():
         record("ALKIS", square(0, 0, 10)),
         record("OSM", square(1, 1, 10)),  # certain partner
         record("ALKIS", square(100, 0, 10), row=2),
-        record("OSM", "POLYGON ((100 0, 110 0, 110 14, 100 14, 100 0))", row=2),  # uncertain
+        record("OSM", "POLYGON ((105.5 0, 111.5 0, 111.5 10, 105.5 10, 105.5 0))", row=2),  # uncertain
         record("OSM", square(300, 0, 10), row=3),  # only in OSM
     ]
     marked, matches, _ = match_sources(records, SETTINGS)
@@ -118,5 +139,6 @@ def test_priority_choices_count_and_suggest_per_category():
 
 def test_settings_come_from_rules_file():
     settings = load_settings()
-    assert settings.max_area_deviation == 0.2
+    assert settings.max_area_deviation == 0.3
+    assert settings.max_area_deviation_mutual == 0.5
     assert settings.suggested_priority["Straßen"] == "OSM"

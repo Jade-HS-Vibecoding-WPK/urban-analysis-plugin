@@ -83,6 +83,10 @@ TARGET_FIELD_ALIASES: Mapping[str, Tuple[str, ...]] = {
     "year": ("year", "jahr", "baujahr"),
     "source": ("source", "quelle", "data_source"),
 }
+# Columns a WFS adds to every object (like a row number): they are unique per
+# delivered object and say nothing about it, so duplicate checks ignore them.
+# Normalized names (see _normalized): gml_id -> "gmlid".
+WFS_TECHNICAL_FIELDS = frozenset({"gmlid", "identifier"})
 class GeoPackageImportError(ValueError):
     """Raised when a path is not a readable GeoPackage."""
 
@@ -125,6 +129,9 @@ class HarmonizedRecord:
     # S12: group of probably identical objects from different sources, set
     # by source_matching.match_sources; None = no partner in another source.
     source_match: Optional[str] = None
+    # G13 (S16): at most one class per selected topic, topic_id -> class_id,
+    # set by topics.classify_topics (M25); empty until a topic is chosen.
+    topic_classes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1097,7 +1104,11 @@ class GeoPackageImporter:
         )
         # Exact duplicates: every source column except the primary key is equal,
         # including the geometry.  Only these are removed automatically.
-        compared_fields = tuple(field for field in layer.fields if field != layer.primary_key)
+        # Technical WFS columns (gml_id, identifier) do not count.
+        compared_fields = tuple(
+            field for field in layer.fields
+            if field != layer.primary_key and _normalized(field) not in WFS_TECHNICAL_FIELDS
+        )
         seen: set = set()
         duplicate_count = 0
         unique_rows: List[Tuple[int, Mapping[str, Any]]] = []
@@ -1223,7 +1234,9 @@ class GeoPackageImporter:
             groups.setdefault((object_id, row.get(geometry_column)), []).append(position)
 
         compared_fields = [
-            field for field in layer.fields if field not in (layer.primary_key, geometry_column)
+            field for field in layer.fields
+            if field not in (layer.primary_key, geometry_column)
+            and _normalized(field) not in WFS_TECHNICAL_FIELDS
         ]
         combined: Dict[int, Mapping[str, Any]] = {}
         dropped: set = set()
@@ -1388,7 +1401,7 @@ class GeoPackageImporter:
         return marked
 
 
-_TECHNICAL_FIELDS = {"fid", "geom", "geometry", "thegeom", "wktgeom"}
+_TECHNICAL_FIELDS = {"fid", "geom", "geometry", "thegeom", "wktgeom"} | WFS_TECHNICAL_FIELDS
 
 
 def _shown_value(value: Any) -> str:
@@ -1478,6 +1491,21 @@ def _add_source(
         table, _, number = group_id.rpartition(":")
         return f"{new_id(table)}:{number}" if table else group_id
 
+    # The download request knows where the data come from (attribution): it
+    # fills empty 'source' fields, so "Datenquelle fehlt" is not needed.
+    attribution = source.attribution.strip()
+    # An own file has no attribution; it names the file instead, so its
+    # objects never inherit the Datenquelle of a download (e.g. the OSM
+    # notice pre-filled in step 8) through apply_data_source.
+    record_source = attribution or (
+        f"Eigene Datei: {Path(source.path).name}" if source.source_kind == "Eigene Datei" else ""
+    )
+
+    def with_source(attributes: Mapping[str, Any]) -> Mapping[str, Any]:
+        if not record_source or attributes.get("source") not in (None, ""):
+            return attributes
+        return {**attributes, "source": record_source}
+
     for layer in part.layers:
         result.layers.append(replace(layer, layer_id=new_id(layer.layer_id), source_kind=source.source_kind))
     result.attribute_suggestions.extend(
@@ -1496,10 +1524,14 @@ def _add_source(
             duplicate_group=new_group(record.duplicate_group),
             source_kind=source.source_kind,
             source_file=str(source.path),
+            attributes=with_source(record.attributes),
+            pipeline_attributes=with_source(record.pipeline_attributes or record.attributes),
         )
         for record in part.harmonized_records
     )
     for issue in part.issues:
+        if attribution and issue.code == "missing-data-source":
+            continue
         message = issue.message if issue.code == "invalid-study-area" else f"{source.label} – {issue.message}"
         result.issues.append(replace(issue, message=message, layer_id=new_id(issue.layer_id)))
 
@@ -1617,6 +1649,71 @@ def apply_data_source(records: Sequence[HarmonizedRecord], data_source: str) -> 
             record = replace(record, attributes=attributes)
         updated.append(record)
     return updated
+
+
+def _geometry_kind(geometry_type: Optional[str]) -> str:
+    text = (geometry_type or "").upper()
+    for key, kind in (("POINT", "punkte"), ("LINE", "linien"), ("POLYGON", "flaechen"), ("SURFACE", "flaechen")):
+        if key in text:
+            return kind
+    return _normalized(text) or "geometrie"
+
+
+def combine_source_layers(
+    layers: Sequence[LayerDescriptor], records: Sequence[HarmonizedRecord]
+) -> Tuple[List[LayerDescriptor], List[HarmonizedRecord]]:
+    """One result layer per category and geometry instead of one per source.
+
+    With several sources (S11) the same category arrives twice, e.g.
+    buildings from ALKIS and from OSM.  After the choice in step 6
+    (``source_matching.apply_source_priority``) both parts belong into one
+    layer „Gebäude“; each object keeps ``source_kind`` and its ``source``
+    attribute (Quelle), so the origin stays visible per object.
+
+    Layers of the same category and geometry are combined only if they come
+    from different sources; a layer without category stays alone.  The
+    combined layer gets a new id ``<category>_<geometry>_quellen`` and no
+    ``source_kind``, it is selected if one of its parts was.  Call it at the
+    very end, right before building the result layers, on copies: the input
+    lists are not changed, so step 4–6 still see the layers per source.
+    """
+    groups: Dict[Tuple[str, str], List[LayerDescriptor]] = {}
+    for layer in layers:
+        if layer.category:
+            groups.setdefault((layer.category, _geometry_kind(layer.geometry_type)), []).append(layer)
+
+    new_ids: Dict[str, str] = {}
+    combined: Dict[str, LayerDescriptor] = {}
+    for (category, kind), members in groups.items():
+        if len({member.source_kind for member in members}) < 2:
+            continue
+        spelled = category.casefold().translate(str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}))
+        layer_id = f"{_normalized(spelled) or 'kategorie'}_{kind}_quellen"
+        names: List[str] = []
+        for member in members:
+            if member.source_name and member.source_name not in names:
+                names.append(member.source_name)
+            new_ids[member.layer_id] = layer_id
+        first = members[0]
+        combined[first.layer_id] = replace(
+            first,
+            layer_id=layer_id,
+            name=category,
+            source_name=", ".join(names),
+            source_kind="",
+            selected_for_topic=any(member.selected_for_topic for member in members),
+        )
+
+    result_layers = [
+        combined.get(layer.layer_id, layer)
+        for layer in layers
+        if layer.layer_id not in new_ids or layer.layer_id in combined
+    ]
+    result_records = [
+        replace(record, layer_id=new_ids[record.layer_id]) if record.layer_id in new_ids else record
+        for record in records
+    ]
+    return result_layers, result_records
 
 
 def _target_field(value: str, mapping_rules: MappingRules) -> str:
