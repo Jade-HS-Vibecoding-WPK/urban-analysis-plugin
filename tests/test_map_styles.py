@@ -8,7 +8,7 @@ from urban_analysis.map_styles import (
     category_colors,
     draw_rank,
 )
-from urban_analysis.outputs import layout_frames, page_size_mm, scale_label, sources_text
+from urban_analysis.outputs import page_size_mm, scale_label, sources_text
 
 
 def test_three_map_styles():
@@ -41,15 +41,59 @@ def test_buildings_are_drawn_above_land_use():
     assert draw_rank("Gebäude") > draw_rank("Straßen") > draw_rank("Nutzungsflächen")
 
 
-def test_page_sizes_and_frames():
+def _overlap(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return ax < bx + bw - 0.01 and bx < ax + aw - 0.01 and ay < by + bh - 0.01 and by < ay + ah - 0.01
+
+
+SOURCES = ("Maßstab 1:5.000\n\nDatenquellen und Lizenzen\n© OpenStreetMap-Mitwirkende, ODbL "
+           "(https://opendatacommons.org/licenses/odbl/1-0/)\n© GeoBasis-DE/LGLN 2026, CC BY 4.0 "
+           "(https://creativecommons.org/licenses/by/4.0/deed.de)\nDaten verändert (zugeschnitten, "
+           "harmonisiert) mit dem QGIS-Plugin Urban Analysis.\nStand: 19.11.2026")
+
+
+def test_page_sizes_and_plan_without_overlaps():
+    from urban_analysis.outputs import page_plan
+
     assert page_size_mm("A3", "quer") == (420, 297)
     assert page_size_mm("A0", "hoch") == (841, 1189)
-    frames = layout_frames(420, 297, "quer")
-    mx, my, mw, mh = frames["map"]
-    px, py, pw, ph = frames["panel"]
-    assert mw > pw and px > mx + mw  # map left, panel right
-    frames = layout_frames(297, 420, "hoch")
-    assert frames["panel"][1] > frames["map"][1] + frames["map"][3]  # panel below
+    for page in ("A4", "A3", "A2", "A1", "A0"):
+        for orientation in ("quer", "hoch"):
+            plan = page_plan(page, orientation, title="Innenstadt", subtitle="UDO",
+                             info_text=SOURCES)
+            parts = [plan[k] for k in ("map", "title", "subtitle", "symbols", "text", "legend")]
+            for i, first in enumerate(parts):
+                for second in parts[i + 1:]:
+                    assert not _overlap(first, second), (page, orientation, first, second)
+            width, height = plan["width"], plan["height"]
+            for x, y, w, h in parts:
+                assert x >= 0 and y >= 0 and x + w <= width + 0.01 and y + h <= height + 0.01
+            assert plan["fits"]
+    quer = page_plan("A3", "quer")
+    assert quer["legend"][0] > quer["map"][0] + quer["map"][2]  # panel right of the map
+    hoch = page_plan("A3", "hoch")
+    assert hoch["legend"][1] > hoch["map"][1] + hoch["map"][3]  # panel below the map
+
+
+def test_font_sizes_grow_with_the_paper():
+    from urban_analysis.outputs import font_sizes
+
+    assert font_sizes("A4") == (14, 12)
+    assert font_sizes("A0") == (24, 20)
+    sizes = [font_sizes(page) for page in ("A4", "A3", "A2", "A1", "A0")]
+    assert sizes == sorted(sizes)
+
+
+def test_suggested_scale_and_warnings_for_own_scales():
+    from urban_analysis.outputs import scale_problem, suggested_scale
+
+    small_paper = suggested_scale(1200, 900, "A4", "quer")
+    assert small_paper > suggested_scale(1200, 900, "A0", "quer")  # bigger paper, larger scale
+    assert scale_problem(small_paper, small_paper) is None
+    assert "passt das Gebiet nicht" in scale_problem(small_paper // 2, small_paper)
+    assert "sehr klein" in scale_problem(small_paper * 5, small_paper)
+    assert scale_problem(None, small_paper) is None
 
 
 def test_pdf_orientation_follows_the_area():
@@ -85,7 +129,7 @@ def test_scale_and_sources_texts():
 def test_fitting_scale_is_always_a_usual_one():
     from urban_analysis.outputs import SCALES, fitting_scale
 
-    assert fitting_scale(7342) == 10000
+    assert fitting_scale(7342) == 7500  # in-between steps: the map fills the paper better
     assert fitting_scale(2400) == 2500
     assert fitting_scale(2000) == 2000
     assert fitting_scale(40) == 50

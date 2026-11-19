@@ -94,7 +94,12 @@ from .outputs import (
     SCALES,
     build_result_layers,
     data_source_text,
+    STANDARD_SCALES,
+    auto_orientation,
     export_map_pdf,
+    map_extent,
+    scale_problem,
+    suggested_scale,
     format_count,
     scale_label,
     time_text,
@@ -4551,18 +4556,214 @@ def _create_dock(plugin):
         grey = QCheckBox("Umgebung außerhalb des Gebiets in Graustufen")
         grey.setChecked(draft.setdefault("grey_outside", True))
         grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
+        page_box = labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3")
+        orientation_box = labelled_combo(
+            "Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
+                            ("quer", "Querformat"), ("hoch", "Hochformat")],
+            "pdf_orientation", "auto")
+        buffer_box, buffer_changed = pdf_buffer_block(draft)
+        scale_box, refresh_scale = pdf_scale_block(draft)
+        for box in (page_box, orientation_box):
+            box.findChild(QComboBox).currentIndexChanged.connect(lambda _i: refresh_scale())
+        buffer_changed.append(refresh_scale)
         pdf_extra = (
             labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
             labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
-            labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3"),
-            labelled_combo("Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
-                                           ("quer", "Querformat"), ("hoch", "Hochformat")],
-                           "pdf_orientation", "auto"),
-            labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
+            page_box,
+            orientation_box,
+            buffer_box,
+            scale_box,
             north,
             grey,
+            # pdf_preview_block() – off for now: crashed QGIS in a test run (see PR)
         )
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
+
+    def pdf_extent_size(draft):
+        """(width, height) in m of what the PDF map shows, or None."""
+        flow = workflow()
+        area = QgsGeometry.fromWkt(flow.result.study_area_wkt or "")
+        if area is None or area.isEmpty():
+            return None
+        box = map_extent(area, draft.get("pdf_buffer_m", flow.result.buffer_meters),
+                         draft.get("pdf_buffer_on", True))
+        return box.width(), box.height()
+
+    def pdf_suggestion(draft):
+        """(suggested scale, 'A3 quer') for the current settings, or (None, '')."""
+        size = pdf_extent_size(draft)
+        if size is None:
+            return None, ""
+        page = draft.get("pdf_page", "A3")
+        orientation = draft.get("pdf_orientation", "auto")
+        if orientation not in ("quer", "hoch"):
+            orientation = auto_orientation(*size)
+        word = "quer" if orientation == "quer" else "hoch"
+        return suggested_scale(size[0], size[1], page, orientation), f"{page} {word}"
+
+    def pdf_buffer_block(draft):
+        """'Puffer in der Karte zeigen' and how wide (up to the buffer of step 2,
+        only there are data).  Returns (widget, list of callbacks on change)."""
+        flow = workflow()
+        project_buffer = int(flow.result.buffer_meters or 0)
+        draft.setdefault("pdf_buffer_on", project_buffer > 0)
+        draft.setdefault("pdf_buffer_m", project_buffer)
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 4, 0, 0)
+        show = QCheckBox("Puffer in der Karte zeigen")
+        show.setChecked(bool(draft["pdf_buffer_on"]) and project_buffer > 0)
+        show.setEnabled(project_buffer > 0)
+        spin = QSpinBox()
+        spin.setRange(0, max(project_buffer, 0))
+        spin.setSingleStep(max(10, project_buffer // 10 or 10))
+        spin.setSuffix(" m")
+        spin.setValue(min(int(draft["pdf_buffer_m"]), project_buffer))
+        width_box = QWidget()
+        width_row = QHBoxLayout(width_box)
+        width_row.setContentsMargins(INDENT_PX, 0, 0, 0)
+        width_row.addWidget(QLabel("Breite"))
+        width_row.addWidget(stepper(spin))
+        width_row.addStretch()
+        note = QLabel(f"Höchstens {format_count(project_buffer)} m – so weit wurden in "
+                      "Schritt 2 Daten geladen.")
+        note.setWordWrap(True)
+        set_role(note, "hint")
+        layout.addWidget(show)
+        layout.addWidget(width_box)
+        layout.addWidget(indented(note))
+        callbacks = []
+
+        def changed(*_args):
+            draft["pdf_buffer_on"] = show.isChecked()
+            draft["pdf_buffer_m"] = spin.value()
+            width_box.setEnabled(show.isChecked())
+            for callback in callbacks:
+                callback()
+
+        show.toggled.connect(changed)
+        spin.valueChanged.connect(changed)
+        width_box.setEnabled(show.isChecked())
+        return box, callbacks
+
+    def pdf_scale_block(draft):
+        """Maßstab: the fitting one for paper size and area is shown; an own
+        scale that does not suit the area asks first (keep / choose again).
+        Returns (widget, refresh)."""
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 4, 0, 0)
+        layout.addWidget(QLabel("Maßstab"))
+        fitting = QLabel()
+        fitting.setWordWrap(True)
+        set_role(fitting, "key")
+        layout.addWidget(fitting)
+        combo = QComboBox()
+        combo.addItem("Passend zum Blatt (empfohlen)", 0)
+        for value in STANDARD_SCALES:
+            combo.addItem(scale_label(value), value)
+        index = combo.findData(draft.setdefault("pdf_scale", 0))
+        combo.setCurrentIndex(max(index, 0))
+        layout.addWidget(combo)
+        state = {"busy": False}
+
+        def refresh():
+            suggestion, paper = pdf_suggestion(draft)
+            if suggestion:
+                fitting.setText(f"Passend für {paper}: {scale_label(suggestion)}")
+                combo.setItemText(0, f"Passend zum Blatt: {scale_label(suggestion)} (empfohlen)")
+            fitting.setVisible(bool(suggestion))
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        def chosen(_index):
+            if state["busy"]:
+                return
+            value = combo.currentData() or 0
+            draft["pdf_scale"] = value
+            suggestion, _paper = pdf_suggestion(draft)
+            problem = scale_problem(value, suggestion)
+            if not problem:
+                return
+            ask = QMessageBox(dock)
+            ask.setWindowTitle("Maßstab prüfen")
+            ask.setIcon(QMessageBox.Warning)
+            ask.setText(problem)
+            keep = ask.addButton("Trotzdem verwenden", QMessageBox.AcceptRole)
+            ask.addButton(f"Neu wählen ({scale_label(suggestion)})", QMessageBox.RejectRole)
+            ask.exec()
+            if ask.clickedButton() is not keep:
+                state["busy"] = True
+                position = combo.findData(suggestion)
+                combo.setCurrentIndex(position if position >= 0 else 0)
+                draft["pdf_scale"] = combo.currentData() or 0
+                state["busy"] = False
+
+        combo.currentIndexChanged.connect(chosen)
+        refresh()
+        return box, refresh
+
+    def pdf_preview_block():
+        """'Vorschau aktualisieren': the PDF page as small picture."""
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 6, 0, 0)
+        button = QPushButton("Vorschau aktualisieren")
+        set_role(button, "accent")
+        button.setCursor(Qt.PointingHandCursor)
+        picture = QLabel()
+        picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        picture.setStyleSheet("border: 1px solid #9aa3ae; background: #ffffff;")
+        picture.hide()
+        caption = QLabel()
+        caption.setWordWrap(True)
+        set_role(caption, "hint")
+        caption.hide()
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(button)
+        row.addStretch()
+        layout.addLayout(row)
+        layout.addWidget(picture)
+        layout.addWidget(caption)
+
+        def show_preview():
+            dock.clear_message()
+            group = ensure_layers()
+            if group is None:
+                return
+            visible = [node.layer() for node in group.findLayers()
+                       if node.layer() is not None and node.isVisible()]
+            if not visible:
+                reject(REMAKE_NO_LAYERS_MESSAGE)
+                return
+            target = Path(tempfile.gettempdir()) / "urban_analysis" / "pdf_vorschau.png"
+            dock.start_work("PDF-Vorschau wird erstellt …")
+            ok = False
+            try:
+                _path, scale = write_map_pdf(workflow(), None, visible, image_path=target)
+                ok = True
+            except (OSError, RuntimeError, ValueError) as error:
+                dock.show_message(f"Die Vorschau konnte nicht erstellt werden: {error_text(error)}")
+                return
+            finally:
+                dock.end_work(ok)
+            pixmap = QPixmap(str(target))
+            width = max(200, box.width() - 4)
+            picture.setPixmap(pixmap.scaledToWidth(width, Qt.SmoothTransformation))
+            picture.show()
+            caption.setText(f"So sieht das PDF ungefähr aus – Maßstab {scale_label(scale)}. "
+                            "Nach Änderungen erneut „Vorschau aktualisieren“.")
+            caption.show()
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        button.clicked.connect(lambda: guarded("PDF-Vorschau", show_preview))
+        return box
+
+    def guarded(context, action):
+        try:
+            action()
+        except Exception as error:  # show every program error visibly
+            dock.show_unexpected_error(context, error)
         if dock.last_saved:
             area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
         area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
@@ -4577,17 +4778,21 @@ def _create_dock(plugin):
         texts = dock.output_draft.get("source_texts") or {}
         return with_source_texts(used, dock.sources, texts)
 
-    def write_map_pdf(flow, path, layers):
-        """PDF map with the settings of 'Speichern'."""
+    def write_map_pdf(flow, path, layers, image_path=None):
+        """PDF map with the settings of 'Speichern' (or its preview picture).
+        Returns (path, scale)."""
         draft = dock.output_draft
         used = current_used_sources(flow)
         source = (data_source_text(used, flow.result.output.data_source) if used
                   else flow.result.output.data_source)
+        if not source:  # preview before anything was confirmed
+            source = draft.get("source", "")
         return export_map_pdf(
-            path, layers=layers,
+            path, layers=layers, image_path=image_path,
             grey_outside=draft.get("grey_outside", True),
             study_area_wkt=flow.result.study_area_wkt,
-            buffer_meters=flow.result.buffer_meters,
+            buffer_meters=draft.get("pdf_buffer_m", flow.result.buffer_meters),
+            show_buffer=draft.get("pdf_buffer_on", True),
             crs_authid=flow.result.project_crs,
             title=draft.get("pdf_title") or flow.result.selected_topic or DEFAULT_TOPIC,
             subtitle=draft.get("pdf_subtitle", ""),
@@ -4628,7 +4833,7 @@ def _create_dock(plugin):
         if pdf:
             if not visible:
                 return reject(REMAKE_NO_LAYERS_MESSAGE)
-            jobs.append(("pdf", lambda path: write_map_pdf(flow, path, visible)))
+            jobs.append(("pdf", lambda path: write_map_pdf(flow, path, visible)[0]))
         saved, failures = [], []
         working = {"geopackage": "GeoPackage wird gespeichert …", "pdf": "PDF wird erstellt …"}
         dock.start_work(working[jobs[0][0]] if jobs else "Wird gespeichert …")
