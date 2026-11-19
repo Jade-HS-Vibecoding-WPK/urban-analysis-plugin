@@ -121,7 +121,14 @@ Plan von Person Windows zu bestätigen). Sie gelten für den Feature Freeze
 | E32 | **PDF-Aufbau.** Immer dabei: Karte, Legende, Block „Datenquellen und Lizenzen“ (E28), Datum. **Wählbar:** Maßstabsleiste, Nordpfeil, Titel und Untertitel (selbst eintippen), Namen/Gruppe/Hochschule/Kurs, Umriss des Untersuchungsgebiets mit Puffer, Übersichtskarte zur Lage. **Formate:** A4, A3, A2, A1, A0, jeweils hoch und quer. **Keine Online-Hintergrundkarte;** stattdessen kann ein **Schwarzplan aus den geladenen Gebäuden** als Hintergrund zugeschaltet werden. Nicht im PDF: Kennzahlen-Tabelle, Prüfprotokoll. |
 | E33 | **Kartenstile für die Analysekarte:** **Schwarzplan** (Gebäude schwarz), **Nutzungskarte farbig** (je Kategorie eine Planfarbe), **Graustufen** (für Druck). **Pixel** passend zum Plugin-Stil nur, wenn es wenig Mehraufwand ist. Der Stil gilt für die Ergebnis-Layer in QGIS und für das PDF. |
 | E34 | **Erreichbarkeit mit wählbaren Startpunkten** (präzisiert E22 und E26): Startpunkte sind nicht nur Haltestellen. Wählbar sind **Kategorie und Unterart**: Gesundheit (Krankenhaus, Arztpraxis, Apotheke), Nahversorgung (Supermarkt, Bäckerei, Drogerie), Bildung und Betreuung (Schule, Kita, Hochschule), Freizeit und Grün (Spielplatz, Sportplatz, Park, Bibliothek), ÖPNV-Haltestellen. **Ergebnis wählbar:** Radien (300 m / 500 m) um die Startpunkte und/oder Gebäude eingefärbt nach Abstand zum nächsten Ziel. Bis zum Feature Freeze nur **Stufe 1 (Luftlinie)**; Fußweg und ÖV-Güteklassen danach. |
-| E35 | **Niedersachsen-Cache als Notlösung (ergänzt E15):** Scheitert Overpass nach allen Wiederholungen, holt das Plugin OSM aus dem Niedersachsen-Cache des Teams (https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache, wöchentlich aus dem Geofabrik-Auszug gebaut) – nur, wenn das ganze Download-Rechteck im Cache liegt. Der Cache ist eine eigene, frische Quelle, kein alter Download (E15 bleibt). Ein Info-Hinweis sagt es immer, mit Datenstand und den Merkmalen, die im Cache fehlen (Hecken/Zäune/Mauern, Gebäudeteile, Strom). Lizenz ODbL wie OSM. Umsetzung: `osm_cache.py` (Mac), W11b (Windows). *(Wunsch Person Mac, 19.11.2026)* |
+| E35 | **Niedersachsen-Cache als Notlösung (ergänzt E15):** Scheitert Overpass nach allen Wiederholungen, holt das Plugin OSM aus dem Niedersachsen-Cache des Teams (https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache, wöchentlich aus dem Geofabrik-Auszug gebaut) – nur, wenn das ganze Download-Rechteck im Cache liegt. Der Cache ist eine eigene, frische Quelle, kein alter Download (E15 bleibt). Ein Info-Hinweis sagt es immer, mit Datenstand und den Merkmalen, die im Cache fehlen (Hecken/Zäune/Mauern, Gebäudeteile, Strom). Lizenz ODbL wie OSM. Umsetzung: `osm_cache.py` (Mac), W11b (Windows). *(Wunsch Person Mac, 19.11.2026)* **Ergänzt nach dem QGIS-Test (19.11.2026):** (a) Der Cache springt auch ein, wenn Overpass **gar nicht antwortet** (Zeitüberschreitung), nicht nur bei 429/502/503/504. (b) Während des Wartens auf Overpass gibt es einen Knopf **„Stattdessen Niedersachsen-Cache verwenden“**, damit niemand minutenlang warten muss. Der Info-Hinweis erscheint in beiden Fällen. |
+
+Besprochen von Person Mac und Person Windows (19.11.2026, im PR zu diesem
+Plan zu bestätigen):
+
+| Nr. | Vorschlag |
+| --- | --- |
+| E36 | **Allgemeine Kartenthemen für städtebauliche Bestandsanalysen.** Statt nur „Siedlungsstruktur“ gibt es wählbare Themen, die zu **jeder** Analyseaufgabe und jedem Gebiet passen – nicht zu einer bestimmten Übung: **Bebauung & Stadtstruktur** (enthält die bisherige Siedlungsstruktur), **Nutzungen**, **Versorgung & soziale Infrastruktur**, **Freiraum & öffentlicher Raum**, **Mobilität & Erschließung**, **Grün, Wasser & Klima**, **Geschichte & Stadtbild**. **Baukasten statt fester Karten:** In jedem Thema lassen sich einzelne **Klassen an- und abwählen**, mehrere Themen lassen sich **überlagern** (z. B. für eine Synthese). So stellt sich jede Aufgabe ihre Karten selbst zusammen. Die Themen stehen **als Daten** in einem Katalog (wie `sources_catalog.json`), nicht als Code; neue Themen oder Klassen kommen ohne Programmierung dazu. Jedes Thema nennt sichtbar, **was das Plugin nicht kann** (z. B. Leerstand, Aufenthaltsqualität, Sichtachsen) – keine stillen Lücken. Kommt eine Klasse im Gebiet nicht vor (z. B. kein Gewässer), sagt ein Info-Hinweis das. **Prüffall:** eine Analyseaufgabe aus dem Studium mit sieben Analyseebenen; sie muss sich mit den Themen abdecken lassen, gibt aber nicht deren Namen vor. **Kein Pilotthema:** Vertrag und Katalog-Aufbau werden vorher an allen Themen geprüft (S16), danach bauen beide gleichzeitig (Etappe G). |
 
 Weiter gilt unverändert:
 
@@ -260,6 +267,92 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 - Ausgabe: Zusatzfelder an den Ausgangsobjekten (E23), Stufe 2 außerdem
   Einzugsbereiche als neue Flächen-Layer.
 
+### S16 – Kartenthemen *(Katalog und Einordnung Mac, Oberfläche Windows, Vertrag gemeinsam)* – *Entwurf*
+
+**Ergebnis der Prüfung an allen Themen** (warum der Aufbau so aussieht):
+
+1. **Ein Objekt gehört oft zu mehreren Themen.** Ein Café ist Nutzung und
+   Treffpunkt im Freiraum, ein Park ist Grün und öffentlicher Raum, eine
+   Schule ist Nutzung und Versorgung. Die bisherige Kategorie (eine je Objekt, erste Regel gewinnt) reicht
+   dafür nicht. → Die Kategorie bleibt, **zusätzlich** bekommt jedes Objekt
+   je gewähltem Thema **höchstens eine Themenklasse**.
+2. **Regeln brauchen OSM und ALKIS.** Wohnen kommt z. B. aus
+   `building=apartments` (OSM) und aus `funktion` bzw. `nutzart` (ALKIS). →
+   Regeln wie bisher als „Schlüssel=Wert“, für ALKIS mit Spaltenname
+   (`nutzart=Wohnbaufläche`).
+3. **Manche Klassen hängen an Nebenmerkmalen.** Brücken (`bridge=yes`) und
+   Radstreifen (`cycleway=*`) sitzen an Straßen-Linien. → Themenregeln
+   dürfen alle gelesenen Merkmale (`tag_columns`) prüfen, nicht nur das
+   Hauptmerkmal.
+4. **Manche Karten sind Abstufungen, keine Klassen:** Geschosszahl
+   (Bebauung), Abstand zum nächsten Ziel (Versorgung, Werte aus F7). → Ein Thema kann neben
+   Klassen auch **Stufen** haben (Spalte + Grenzen).
+5. **Reihenfolge der Schritte:** Das Thema wird in Schritt 7 gewählt, der
+   Download passiert in Schritt 3. → Der Download holt **immer die Merkmale
+   aller Themen**. Neu in der Overpass-Abfrage: `historic`, `heritage`,
+   `tourism`, `office`, `craft`. Größe danach einmal live prüfen.
+6. **Unsichere Zuordnungen** (z. B. „Erdgeschossnutzung“ = Punkt liegt im
+   Gebäude) sind nur Vorschläge, als „vermutlich“ markiert und zu bestätigen
+   (CLAUDE.md).
+7. **Grenzen sichtbar:** Je Thema ein Info-Hinweis `topic-limit` mit dem,
+   was die Daten nicht hergeben.
+8. **Jede Aufgabe braucht etwas anderes.** Die eine braucht Uferzugänge,
+   die andere Stellplätze, die dritte nur Gebäude. → Klassen sind
+   einzeln an- und abwählbar, Themen überlagerbar; der Katalog ist
+   erweiterbar, ohne Code. Leere Klassen im Gebiet → Info-Hinweis statt
+   stiller Lücke.
+
+**Aufbau (Entwurf):**
+
+- Datei `urban_analysis/topics_catalog.json` (neu, Mac; ohne Code änderbar)
+  und `urban_analysis/topics.py` (neu, Mac, QGIS-frei). Bewusst nicht
+  `theme.py` – das ist der Oberflächen-Stil (Windows).
+- Je Thema: `id` (z. B. `"mobilitaet"`), `name` (aus `ui_contract.py`),
+  `beschreibung` (ein Satz), `klassen` (je Klasse: `id`, `name`, Geometrie
+  Fläche/Linie/Punkt, Regeln, Farbvorschlag), optional `stufen` (Spalte,
+  Grenzen, Namen), `grenzen` (Sätze für den Hinweis `topic-limit`),
+  `quellen_tipps` (z. B. „Baumkataster der Stadt als Eigene Datei“).
+- Vertrag (`contracts.py`, gemeinsamer PR G13): `TopicInfo` und
+  `TopicClass` (nur lesen, für die Oberfläche); am Datensatz
+  `topic_classes: dict` (Thema → Klasse, leer als Standard); am Ergebnis die
+  gewählten Themen und Klassen. `MVP_TOPIC_NAME` bleibt vorerst als Name
+  für das Thema Bebauung & Stadtstruktur.
+- Funktionen (Mac): `topic_catalog()` → alle Themen;
+  `classify_topics(result, selection)` mit `selection` = Thema → gewählte
+  Klassen → setzt `topic_classes` und liefert die Hinweise `topic-limit`
+  und `topic-class-empty`.
+- Oberfläche (Windows): Schritt 7 mit Häkchen je Thema und darunter je
+  Klasse (mehrere Themen möglich); Ausgabe je Thema eine Layergruppe;
+  Kartenstile aus den Farbvorschlägen (Schwarzplan/Graustufen wie E33);
+  Überlagerung mehrerer Themen in einer Karte.
+
+**Prüfung je Thema** (● gut aus Daten, ◐ teilweise, ○ nur vor Ort / Deutung):
+
+| Thema | Klassen (Auswahl) | Daten | Grenzen (Hinweis) |
+| --- | --- | --- | --- |
+| Bebauung & Stadtstruktur | ● Haupt-/Nebengebäude, Stufen nach Geschosszahl, ● Flurstücke, ◐ Brücken und Bauwerke | ALKIS Gebäude/Bauwerke/Flurstücke, OSM `building`, `bridge` | ○ Raumkanten, Körnung, Typologien (Deutung) |
+| Nutzungen | ● Wohnen, Einzelhandel, Gastronomie, Dienstleistungen, Gewerbe/Industrie, ◐ gemischt | OSM `shop`, `amenity`, `office`, `craft`, `landuse`; ALKIS `funktion`, `nutzart` | ◐ Erdgeschossnutzung nur vermutet, ○ Leerstand kaum in OSM |
+| Versorgung & soziale Infrastruktur | ● Nahversorgung, Gesundheit, Bildung und Betreuung, Kultur, Sport, Stufen nach Abstand (F7) | OSM `shop`, `amenity`, `healthcare`, `leisure`; Ziele aus F6 | ◐ Kapazitäten, Öffnungszeiten |
+| Freiraum & öffentlicher Raum | ◐ Plätze/Fußgängerzonen, Parks, Spielplätze, Sitzgelegenheiten, Ufer- und Wasserzugänge, Treffpunkte | OSM `highway=pedestrian`, `place=square`, `leisure`, `amenity=bench`, `man_made=pier`; ALKIS `nutzart=Platz` | ○ Aufenthaltsqualität, Nutzungsintensität; Bänke lückenhaft |
+| Mobilität & Erschließung | ● Fuß-/Radwege, Straßen nach Rang, Stellplätze, Querungen, Haltestellen, Bahn | OSM `highway`, `cycleway`, `crossing`, `amenity=parking`, `public_transport`, `railway` | ◐ Anlieferung lückenhaft; Verkehrsmengen fehlen |
+| Grün, Wasser & Klima | ● Grünflächen, Wald, Gewässer, ◐ Bäume, ◐ Versiegelung (Näherung) | OSM `leisure`, `landuse`, `natural`, `water`, `waterway`; ALKIS `nutzart` | ◐ Bäume lückenhaft (Tipp: Baumkataster), ○ Verschattung, Mikroklima |
+| Geschichte & Stadtbild | ◐ Denkmäler, historische Orte, markante Gebäude, Aussichtspunkte | OSM `historic`, `heritage`, `building=church`, `tourism=viewpoint` | ◐ Denkmalliste des Landes als Eigene Datei, ○ Sichtachsen, Ortsbild |
+| *Überlagerung* | – (mehrere gewählte Themen in einer Karte, z. B. für eine Synthese) | – | ○ Bewertung durch die Studierenden |
+
+**Prüffall – deckt das eine echte Aufgabe ab?** Die Analyseaufgabe aus dem
+Studium (sieben Ebenen) lässt sich so zusammenstellen: Stadtmorphologie →
+Bebauung & Stadtstruktur (+ Plätze aus Freiraum); Nutzungen & Funktionen →
+Nutzungen (+ Versorgung); Öffentlicher Raum → Freiraum & öffentlicher Raum;
+Mobilität → Mobilität & Erschließung; Grün, Wasser, Stadtklima → Grün,
+Wasser & Klima; Identität & Stadtbild → Geschichte & Stadtbild; Synthese →
+Überlagerung. Keine Ebene braucht ein eigenes Thema.
+
+**Offen, im PR zu klären (Person Windows):**
+
+- Farben im Katalog (Vorschlag, Mac) oder in `map_styles.py` (Windows)?
+- Heißt das Thema Bebauung in der Oberfläche weiter „Siedlungsstruktur“?
+- PDF: eine Seite je Thema, eine überlagerte Karte oder beides wählbar?
+
 ---
 
 ## 5. Erledigt
@@ -311,7 +404,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | F6b | Farben, Zeichen-Rang und Icons für die Punkt-Kategorien aus F6 | Windows | F6 |
 | F7 | M20 Erreichbarkeit Stufe 1: Luftlinie ✓ (PR offen) | Mac | F6 |
 | F8 | W16 Erreichbarkeit in der Benutzerführung | Windows | F7 |
-| F8b | W11b Niedersachsen-Cache in QGIS, wenn Overpass scheitert (E35; `osm_cache.py` ✓, PR offen) | Windows | – |
+| F8b | W11b Niedersachsen-Cache in QGIS, wenn Overpass scheitert oder nicht antwortet, dazu Knopf „Stattdessen Niedersachsen-Cache verwenden“ (E35 mit Ergänzung; `osm_cache.py` ✓, PR offen) | Windows | – |
 | F9 | G12 Plan nachziehen, alles in QGIS testen; Feature Freeze erst danach entscheiden | gemeinsam | F0–F8b |
 | | **Etappe A – jetzt starten** | | |
 | 1 | G6 Vertrag erweitern (→ in F0 aufgegangen) | gemeinsam | – |
@@ -439,6 +532,49 @@ die Rechnung aus F7 bleibt) → F4 (Dubletten-Text aus F3 genügt) → F6/F7.
 - **Ziel:** §5 Erledigt und §6 aktualisieren, `PLAN.md`/`CLAUDE.md`
   anpassen, dann **alles in QGIS testen** (beide, auf dem gemeinsamen Stand).
   Erst danach entscheiden wir, ob und wann der Feature Freeze gilt.
+
+### Etappe G – Allgemeine Kartenthemen (E36, S16)
+
+Kein Pilotthema: erst G13, dann M25 und W19/W20 gleichzeitig, dann G14.
+
+#### G13. Vertrag für Kartenthemen *(gemeinsam)*
+
+- **Absicht:** Die Schnittstelle steht, bevor jemand baut.
+- **Ziel:** Eigener PR für `contracts.py`, `ui_contract.py` (Themennamen),
+  `tests/test_contracts.py`: `TopicInfo`, `TopicClass`,
+  `topic_classes` am Datensatz, gewählte Themen und Klassen am Ergebnis;
+  Codes `topic-limit` und `topic-class-empty`. Die offenen Fragen aus S16 sind geklärt.
+- **Wer:** Person Mac schreibt den Entwurf, Person Windows prüft und mergt.
+- **Wartet auf:** Bestätigung von E36 und S16.
+
+#### M25. Themenkatalog und Einordnung *(Mac)*
+
+- **Ziel:** `topics_catalog.json` mit allen sieben Themen (Klassen, Stufen,
+  Grenzen, Tipps); `topics.py` mit `topic_catalog()` und
+  `classify_topics()`; neue Overpass-Schlüssel in `sources_catalog.json`;
+  Tests mit künstlichen Daten je Thema.
+- **Wartet auf:** G13.
+
+#### W19. Themenwahl in Schritt 7 *(Windows)*
+
+- **Ziel:** Häkchen je Thema (mehrere möglich) und darunter je Klasse,
+  kurze Beschreibung und die Grenzen des Themas sichtbar; Ergebnis je Thema als Layergruppe mit
+  Stil je Klasse bzw. Stufe (Schwarzplan/Graustufen wie E33).
+- **Wartet auf:** G13 (Daten aus M25 für den Test).
+
+#### W20. Ausgabe und PDF je Thema *(Windows)*
+
+- **Ziel:** PDF nach der Entscheidung aus S16 (Seite je Thema und/oder
+  überlagerte Karte), Legende aus den gewählten Klassen.
+- **Wartet auf:** W19.
+
+#### G14. Alle Themen in QGIS testen *(gemeinsam)*
+
+- **Ziel:** Jedes Thema einmal mit OSM und ALKIS für Donnerschwee und für
+  ein zweites, andersartiges Gebiet (z. B. Innenstadt mit Wasser); dazu den
+  Prüffall aus S16 einmal komplett zusammenstellen. Fehlende Merkmale oder
+  falsche Klassen als Folgeaufgaben.
+- **Wartet auf:** M25, W19, W20.
 
 ### Etappe A – jetzt starten
 
