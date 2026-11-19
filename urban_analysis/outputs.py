@@ -554,6 +554,8 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
         from .map_styles import CATEGORY_PROPERTY, STYLE_PROPERTY, apply_style, fix_legend
 
         for layer in layers:
+            if layer.customProperty(CATEGORY_PROPERTY) is None:
+                continue  # e.g. accessibility targets and radii keep their own style
             restore.append((layer, layer.renderer().clone()))
             apply_style(layer, layer.customProperty(CATEGORY_PROPERTY) or None,
                         layer.customProperty(STYLE_PROPERTY) or "nutzung", study_area_wkt)

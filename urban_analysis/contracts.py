@@ -14,7 +14,6 @@ MVP_UI_STEPS = (
     "Attributzuordnung",
     "Harmonisierung",
     "Kartenthema",
-    "Ausgabe",
     "Verarbeitung starten",
 )
 
