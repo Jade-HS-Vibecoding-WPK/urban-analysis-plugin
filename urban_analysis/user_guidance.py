@@ -31,6 +31,45 @@ def severity_label(severity: str, count: int) -> str:
 
 # Hints confirmed in a later step instead of step 4 ("Layer prüfen").
 DECIDED_IN_HARMONIZATION = ("uncertain-duplicate",)
+# All hints whose decision comes in step 6 (no check box in step 4); the
+# same objects in ALKIS and OSM are chosen there per category (M14).
+DECIDED_LATER = DECIDED_IN_HARMONIZATION + ("cross-source-duplicate",)
+
+
+def merge_same_hints(issues):
+    """Hints that only differ in their source ('OpenStreetMap – Datenquelle
+    fehlt …', 'ALKIS Niedersachsen – Datenquelle fehlt …') become one entry.
+
+    Returns ``[(text, [issues])]`` in the original order; the text names the
+    sources in brackets when several are merged.  Hints without a source
+    prefix stay single."""
+    merged = []
+    by_key = {}
+    for issue in issues:
+        source, separator, rest = issue.message.partition(" – ")
+        if not separator or not rest:
+            merged.append((issue.message, [issue]))
+            continue
+        key = (issue.code, issue.severity, rest)
+        if key in by_key:
+            text, members, sources = by_key[key]
+            members.append(issue)
+            sources.append(source)
+            continue
+        entry = [issue.message, [issue], [source]]
+        by_key[key] = entry
+        merged.append(entry)
+    result = []
+    for entry in merged:
+        if isinstance(entry, list):
+            message, members, sources = entry
+            if len(sources) > 1:
+                rest = message.partition(" – ")[2]
+                message = f"{rest} (betrifft: {', '.join(sources)})"
+            result.append((message, members))
+        else:
+            result.append(entry)
+    return result
 # Errors that leave no usable data (decision E4): only these block step 4.
 BLOCKING_ERROR_CODES = ("invalid-study-area", "no-feature-layers")
 UNCERTAIN_DUPLICATE_EXPLANATION = (
@@ -304,7 +343,7 @@ class GuidedWorkflow:
     @staticmethod
     def needs_review_confirmation(issue: ValidationIssue) -> bool:
         """True if the hint gets a check box in step 4."""
-        return issue.requires_confirmation and issue.code not in DECIDED_IN_HARMONIZATION
+        return issue.requires_confirmation and issue.code not in DECIDED_LATER
 
     def open_review_confirmations(self) -> Tuple[ValidationIssue, ...]:
         """Hints in step 4 that still have to be confirmed."""

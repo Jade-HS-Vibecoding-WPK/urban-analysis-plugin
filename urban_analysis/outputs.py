@@ -97,12 +97,28 @@ def result_layer_names(descriptors: Iterable[LayerDescriptor], readable=None) ->
     of a technical id."""
     descriptors = list(descriptors)
     names = {d.layer_id: result_layer_name(d, readable) for d in descriptors}
-    counts: Dict[str, int] = {}
-    for name in names.values():
-        counts[name] = counts.get(name, 0) + 1
+
+    def doubled():
+        counts: Dict[str, int] = {}
+        for name in names.values():
+            counts[name] = counts.get(name, 0) + 1
+        return {name for name, count in counts.items() if count > 1}
+
+    # several sources (M13): 'Gebäude (ALKIS)', 'Gebäude (OSM)'
+    kinds = {getattr(d, "source_kind", "") for d in descriptors} - {""}
+    if len(kinds) > 1:
+        twice = doubled()
+        for d in descriptors:
+            if names[d.layer_id] in twice and getattr(d, "source_kind", ""):
+                names[d.layer_id] = f"{names[d.layer_id]} ({d.source_kind})"
+    twice = doubled()
     for d in descriptors:
-        if counts[names[d.layer_id]] > 1 and geometry_word(d):
-            names[d.layer_id] = f"{names[d.layer_id]} ({geometry_word(d)})"
+        if names[d.layer_id] in twice and geometry_word(d):
+            name = names[d.layer_id]
+            if name.endswith(")"):  # 'Straßen (OSM)' -> 'Straßen (OSM, Linien)'
+                names[d.layer_id] = f"{name[:-1]}, {geometry_word(d)})"
+            else:
+                names[d.layer_id] = f"{name} ({geometry_word(d)})"
     used = set()
     for d in descriptors:  # still the same name: the layer id keeps them apart
         if names[d.layer_id] in used:
@@ -331,7 +347,7 @@ def unique_layer_names(names: Iterable[str]) -> List[str]:
     return unique
 
 
-def write_result_geopackage(path, layers: Sequence[object]) -> str:
+def write_result_geopackage(path, layers: Sequence[object], used_sources=()) -> str:
     """Write the result layers into one new GeoPackage (W8b).
 
     Each layer keeps its readable name as GeoPackage layer name.  An existing
@@ -363,14 +379,63 @@ def write_result_geopackage(path, layers: Sequence[object]) -> str:
         error, message = written[0], written[1]
         if error != QgsVectorFileWriter.NoError:
             raise RuntimeError(f"Layer „{name}“: {message or 'unbekannter Fehler'}")
+    if used_sources:
+        _write_sources_table(target, used_sources, set(names))
     return str(target)
+
+
+SOURCES_TABLE = "Datenquellen und Lizenzen"
+
+
+def _write_sources_table(target, used_sources, taken) -> None:
+    """Table without geometry in the GeoPackage: one row per used source (E28)."""
+    from qgis.core import (
+        QgsCoordinateTransformContext, QgsFeature, QgsField, QgsVectorFileWriter, QgsVectorLayer,
+    )
+    from qgis.PyQt.QtCore import QMetaType
+
+    meta = getattr(QMetaType, "Type", QMetaType)
+    table = QgsVectorLayer("None", SOURCES_TABLE, "memory")
+    columns = ("Quelle", "Quellenvermerk", "Lizenz", "Link", "Objekte")
+    table.dataProvider().addAttributes(
+        [QgsField(name, meta.Int if name == "Objekte" else meta.QString) for name in columns])
+    table.updateFields()
+    rows = []
+    for source in used_sources:
+        feature = QgsFeature(table.fields())
+        feature.setAttributes([source.name, source.attribution, source.licence,
+                               source.licence_url, int(source.record_count)])
+        rows.append(feature)
+    table.dataProvider().addFeatures(rows)
+    options = QgsVectorFileWriter.SaveVectorOptions()
+    options.driverName = "GPKG"
+    options.fileEncoding = "UTF-8"
+    options.layerName = SOURCES_TABLE if SOURCES_TABLE not in taken else f"{SOURCES_TABLE} (Plugin)"
+    options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+    written = QgsVectorFileWriter.writeAsVectorFormatV3(
+        table, str(target), QgsCoordinateTransformContext(), options)
+    if written[0] != QgsVectorFileWriter.NoError:
+        raise RuntimeError(f"Tabelle „{SOURCES_TABLE}“: {written[1] or 'unbekannter Fehler'}")
 
 
 # --- F5 / W18: real map PDF with a QGIS print layout -------------------------
 
 PAGE_SIZES_MM = {"A4": (210, 297), "A3": (297, 420), "A2": (420, 594),
                  "A1": (594, 841), "A0": (841, 1189)}
-SCALES = (None, 1000, 2500, 5000, 10000, 25000)  # None = fits the area
+# Usual scales of plans and maps; "passend zum Gebiet" takes the next one
+# that shows the whole area (never an odd value like 1:7.342).
+STANDARD_SCALES = (50, 100, 200, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000,
+                   50000, 100000, 200000)
+SCALES = (None,) + STANDARD_SCALES  # None = fits the area
+
+
+def fitting_scale(scale):
+    """The smallest usual scale at which the area still fits (``scale`` is
+    the exact scale that fits it); beyond the list rounded up to 10 000s."""
+    for value in STANDARD_SCALES:
+        if value >= scale * 0.999:
+            return value
+    return int(-(-scale // 10000) * 10000)
 
 
 def auto_orientation(width, height):
@@ -388,23 +453,81 @@ def scale_label(scale):
     return "passend zum Gebiet" if not scale else f"1:{int(round(scale)):,}".replace(",", ".")
 
 
-def layout_frames(width, height, orientation="quer"):
+# share of the page for the panel (legend, title …): grows when the legend
+# does not fit, the map gets a bit smaller instead of a cut legend
+PANEL_SHARES = {"quer": (0.28, 0.36, 0.44), "hoch": (0.26, 0.36, 0.46)}
+
+
+def panel_parts(panel, orientation, factor=1.0, subtitle=False):
+    """Inside the panel (x, y, w, h): where title, legend and the block with
+    north arrow, scale bar and sources go.  Landscape: one column, legend in
+    the middle.  Portrait: info left, legend right over the full height."""
+    px, py, pw, ph = panel
+    head = (13 + (8 if subtitle else 0)) * factor
+    bottom = 42 * factor
+    if orientation == "quer":
+        return {
+            "title": (px, py, pw),
+            "legend": (px, py + head, pw, max(20.0, ph - head - bottom)),
+            "info": (px, py + ph - bottom, pw, bottom),
+        }
+    gap = 6 * factor
+    info_w = min(pw * 0.38, 80 * factor)
+    return {
+        "title": (px, py, info_w),
+        "legend": (px + info_w + gap, py, pw - info_w - gap, ph),
+        "info": (px, py + max(head, ph - bottom), info_w, bottom),
+    }
+
+
+def layout_frames(width, height, orientation="quer", panel_share=None):
     """Rectangles (x, y, w, h) in mm for map and side panel; panel holds
     title, legend, north arrow, scale bar and sources."""
     margin = max(8.0, width * 0.03)
+    share = panel_share or PANEL_SHARES.get(orientation, PANEL_SHARES["quer"])[0]
     if orientation == "quer":
-        panel_w = (width - 3 * margin) * 0.28
+        panel_w = (width - 3 * margin) * share
         map_w = width - 3 * margin - panel_w
         return {
             "map": (margin, margin, map_w, height - 2 * margin),
             "panel": (2 * margin + map_w, margin, panel_w, height - 2 * margin),
         }
-    panel_h = (height - 3 * margin) * 0.26
+    panel_h = (height - 3 * margin) * share
     map_h = height - 3 * margin - panel_h
     return {
         "map": (margin, margin, width - 2 * margin, map_h),
         "panel": (margin, 2 * margin + map_h, width - 2 * margin, panel_h),
     }
+
+
+def licence_lines(used_sources):
+    """One line per used source (``data_pipeline.UsedSource``) for the block
+    'Datenquellen und Lizenzen': attribution, licence and link."""
+    import re
+
+    def plain(text):  # 'CC-BY-4.0' -> 'ccby', 'ODbL-1.0' -> 'odbl'
+        return re.sub(r"\d+$", "", re.sub(r"[^a-z0-9]", "", text.casefold()))
+
+    lines = []
+    for source in used_sources:
+        line = source.attribution or source.name
+        if source.licence and plain(source.licence) not in re.sub(r"[^a-z0-9]", "", line.casefold()):
+            line += f", {source.licence}"
+        if source.licence_url:
+            line += f" ({source.licence_url})"
+        lines.append(line)
+    return lines
+
+
+def data_source_text(used_sources, typed=""):
+    """Text for 'Datenquellen und Lizenzen': the used sources with licence,
+    plus what the user typed if it says something else."""
+    lines = licence_lines(used_sources)
+    typed = (typed or "").strip()
+    auto = "; ".join(source.attribution for source in used_sources if source.attribution)
+    if typed and typed != auto and typed not in lines:
+        lines.append(typed)
+    return "\n".join(lines) or typed
 
 
 def sources_text(data_source, day):
@@ -415,6 +538,47 @@ def sources_text(data_source, day):
         "Daten verändert (zugeschnitten, harmonisiert) mit dem QGIS-Plugin Urban Analysis.\n"
         f"Stand: {day.strftime('%d.%m.%Y')}"
     )
+
+
+# Legend too long for the panel: first smaller text in one column, columns
+# only when needed - (columns, text size factor), tried in this order.
+LEGEND_STEPS = ((1, 1.0), (1, 0.85), (1, 0.72), (2, 0.72), (1, 0.6), (2, 0.6), (2, 0.5),
+                (3, 0.5), (3, 0.42))
+LEGEND_CUT_TITLE = "Legende (gekürzt – für alle Einträge ein größeres Papierformat wählen)"
+
+
+def fit_legend(legend, width, height, factor=1.0):
+    """Make the legend fit into width × height (mm): smaller text and more
+    columns step by step.  Returns False if even the smallest step is too
+    big (the caller then says so in the title)."""
+    from qgis.core import QgsLayoutUtils, QgsLegendRenderer, QgsLegendStyle
+
+    def content_size():
+        """Real size of the legend content in mm (not the frame size)."""
+        context = QgsLayoutUtils.createRenderContextForLayout(legend.layout(), None)
+        return QgsLegendRenderer(legend.model(), legend.legendSettings()).minimumSize(context)
+
+    styles = (QgsLegendStyle.Title, QgsLegendStyle.Group, QgsLegendStyle.Subgroup,
+              QgsLegendStyle.SymbolLabel)
+    base = {}
+    for kind in styles:
+        size = legend.rstyle(kind).textFormat().size()
+        base[kind] = size * factor if size > 0 else 10 * factor
+    symbol_w, symbol_h = legend.symbolWidth() * factor, legend.symbolHeight() * factor
+    for columns, shrink in LEGEND_STEPS:
+        for kind in styles:
+            text_format = legend.rstyle(kind).textFormat()
+            text_format.setSize(base[kind] * shrink)
+            legend.rstyle(kind).setTextFormat(text_format)
+        legend.setSymbolWidth(symbol_w * shrink)
+        legend.setSymbolHeight(symbol_h * shrink)
+        legend.setColumnCount(columns)
+        legend.setSplitLayer(True)
+        legend.setEqualColumnWidth(True)
+        size = content_size()
+        if size.height() <= height and size.width() <= width:
+            return True
+    return False
 
 
 def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
@@ -473,39 +637,11 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
         item.attemptMove(QgsLayoutPoint(x, y, QgsUnitTypes.LayoutMillimeters))
         item.attemptResize(QgsLayoutSize(w, h, QgsUnitTypes.LayoutMillimeters))
 
-    # map
-    mx, my, mw, mh = frames["map"]
+    # legend first: its size decides how much room the map leaves (no overlap)
     map_item = QgsLayoutItemMap(layout)
     map_item.setFrameEnabled(True)
-    place(map_item, mx, my, mw, mh)
     map_item.setCrs(project.crs() if not crs_authid else area_layer.crs())
     map_item.setLayers([area_layer, buffer_layer] + list(layers))
-    extent = QgsRectangle(buffer_geometry.boundingBox())
-    extent.scale(1.05)
-    map_item.zoomToExtent(extent)
-    if scale:
-        map_item.setScale(scale)
-
-    # side panel: title, subtitle, legend, north arrow, scale bar, sources
-    px, py, pw, ph = frames["panel"]
-    y = py
-    title_label = QgsLayoutItemLabel(layout)
-    title_label.setText(title or "Urban Analysis")
-    font = QFont()
-    font.setPointSizeF(16 * factor)
-    font.setBold(True)
-    title_label.setFont(font)
-    place(title_label, px, y, pw, 12 * factor)
-    y += 13 * factor
-    if subtitle:
-        sub = QgsLayoutItemLabel(layout)
-        sub.setText(subtitle)
-        font_sub = QFont()
-        font_sub.setPointSizeF(10 * factor)
-        sub.setFont(font_sub)
-        place(sub, px, y, pw, 7 * factor)
-        y += 8 * factor
-
     legend = QgsLayoutItemLegend(layout)
     legend.setTitle("Legende")
     legend.setAutoUpdateModel(False)
@@ -517,34 +653,75 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend.model().setRootGroup(root)
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)
-    legend.setResizeToContents(False)
     legend.setReferencePoint(QgsLayoutItemLegend.UpperLeft)  # starts at the top, not centred
-    bottom_reserved = 42 * factor
-    place(legend, px, y, pw, max(20.0, py + ph - y - bottom_reserved))
+    layout.addLayoutItem(legend)
+    fits = False
+    for share in PANEL_SHARES[orientation]:
+        frames = layout_frames(width, height, orientation, share)
+        parts = panel_parts(frames["panel"], orientation, factor, bool(subtitle))
+        _lx, _ly, lw, lh = parts["legend"]
+        if fit_legend(legend, lw, lh, factor):
+            fits = True
+            break
+    if not fits:
+        legend.setTitle(LEGEND_CUT_TITLE)  # never cut silently
 
-    base_y = py + ph - bottom_reserved
+    # map
+    mx, my, mw, mh = frames["map"]
+    place(map_item, mx, my, mw, mh)
+    extent = QgsRectangle(buffer_geometry.boundingBox())
+    extent.scale(1.05)
+    map_item.zoomToExtent(extent)
+    # a usual scale: the chosen one, or the next one that shows the whole area
+    scale = scale or fitting_scale(map_item.scale())
+    map_item.setScale(scale)
+
+    # panel: title, subtitle, legend, north arrow, scale bar, sources
+    tx, ty, tw = parts["title"]
+    title_label = QgsLayoutItemLabel(layout)
+    title_label.setText(title or "Urban Analysis")
+    font = QFont()
+    font.setPointSizeF(16 * factor)
+    font.setBold(True)
+    title_label.setFont(font)
+    place(title_label, tx, ty, tw, 12 * factor)
+    if subtitle:
+        sub = QgsLayoutItemLabel(layout)
+        sub.setText(subtitle)
+        font_sub = QFont()
+        font_sub.setPointSizeF(10 * factor)
+        sub.setFont(font_sub)
+        place(sub, tx, ty + 13 * factor, tw, 7 * factor)
+
+    lx, ly, lw, lh = parts["legend"]
+    legend.setResizeToContents(False)
+    legend.attemptMove(QgsLayoutPoint(lx, ly, QgsUnitTypes.LayoutMillimeters))
+    legend.attemptResize(QgsLayoutSize(lw, lh, QgsUnitTypes.LayoutMillimeters))
+
+    ix, iy, iw, ih = parts["info"]
     if north_arrow:
         arrow = QgsLayoutItemPicture(layout)
         arrow.setPicturePath(QgsSymbolLayerUtils.svgSymbolNameToPath(
             "arrows/NorthArrow_02.svg", project.pathResolver()))
-        place(arrow, px, base_y, 10 * factor, 10 * factor)
+        place(arrow, ix, iy, 10 * factor, 10 * factor)
     bar = QgsLayoutItemScaleBar(layout)
     bar.setStyle("Single Box")
     bar.setLinkedMap(map_item)
     bar.setUnits(QgsUnitTypes.DistanceMeters)
     bar.setNumberOfSegments(2)
     bar.setNumberOfSegmentsLeft(0)
+    bar.setMaximumBarWidth(max(20.0, iw - 15 * factor))
     bar.applyDefaultSize()
     layout.addLayoutItem(bar)
-    bar.attemptMove(QgsLayoutPoint(px + 13 * factor, base_y + 2 * factor, QgsUnitTypes.LayoutMillimeters))
+    bar.attemptMove(QgsLayoutPoint(ix + 13 * factor, iy + 2 * factor, QgsUnitTypes.LayoutMillimeters))
 
     info = QgsLayoutItemLabel(layout)
-    info.setText(f"Maßstab {scale_label(map_item.scale() if not scale else scale)}\n\n"
+    info.setText(f"Maßstab {scale_label(scale)}\n\n"
                  + sources_text(data_source, day))
     font_info = QFont()
     font_info.setPointSizeF(6.5 * factor)
     info.setFont(font_info)
-    place(info, px, base_y + 13 * factor, pw, bottom_reserved - 13 * factor)
+    place(info, ix, iy + 13 * factor, iw, ih - 13 * factor)
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

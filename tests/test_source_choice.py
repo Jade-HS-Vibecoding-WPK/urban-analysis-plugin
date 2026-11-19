@@ -1,14 +1,13 @@
-"""W10: area size in step 2 (E13/E17) and source choice in step 3 (placeholders)."""
+"""W10/M13: area size in step 2 (E13/E17) and source choice in step 3."""
 
 from urban_analysis.guided_dialog import (
     CHOOSE_FILE_MESSAGE,
     CHOOSE_SOURCE_MESSAGE,
     CHOOSE_STATE_MESSAGE,
-    DOWNLOAD_PENDING_MESSAGE,
-    ONE_SOURCE_MESSAGE,
-    GERMAN_STATES,
     source_choice_problem,
+    state_item_text,
 )
+from urban_analysis.sources import STATE_BLOCKED, STATE_LATER, STATE_READY, StateInfo, alkis_states
 from urban_analysis.study_area import (
     download_box_km2,
     download_size_text,
@@ -18,15 +17,28 @@ from urban_analysis.study_area import (
     oversize_warning_text,
 )
 
+READY = StateInfo("NI", "Niedersachsen", STATE_READY)
+LATER = StateInfo("BY", "Bayern", STATE_LATER, "Eigenes Datenformat, wird noch eingebaut.")
+BLOCKED = StateInfo("ST", "Sachsen-Anhalt", STATE_BLOCKED, "Die Lizenz ist noch nicht bestätigt.")
+
 
 def test_download_box_includes_the_buffer_on_all_sides():
     # Donnerschwee: 2041 m x 2582 m, buffer 500 m -> 3041 m x 3582 m
     km2 = download_box_km2(446950, 5888700, 448991, 5891282, 500)
     assert round(km2, 1) == 10.9
     assert download_size_text(km2) == (
-        "Gebiet mit Puffer: 10,9 km² von höchstens 50 km² (Rechteck für den Download)"
+        "Gebiet mit Puffer: 10,9 km² von höchstens 50 km² (Rechteck für den Download, "
+        "grau gestrichelt in der Karte)"
     )
     assert not is_large(km2) and not is_oversized(km2)
+
+
+def test_rectangle_from_two_corners_in_any_direction():
+    from urban_analysis.study_area import download_box, rectangle_ring
+
+    assert rectangle_ring((10, 20), (0, 0)) == [(0, 0), (10, 0), (10, 20), (0, 20), (0, 0)]
+    assert rectangle_ring((5, 5), (5, 9)) is None  # a click without dragging
+    assert download_box(0, 0, 100, 50, 500) == (-500, -500, 600, 550)
 
 
 def test_large_area_warns_but_downloads_stay_possible():
@@ -64,8 +76,13 @@ def test_own_file_needs_a_file_and_then_loads():
     assert choice(own=True, path="daten.gpkg") is None
 
 
-def test_alkis_needs_a_state():
+def test_alkis_needs_a_ready_state():
     assert choice(alkis=True) == ("error", CHOOSE_STATE_MESSAGE)
+    assert choice(alkis=True, state=READY) is None
+    kind, text = choice(alkis=True, state=LATER)
+    assert kind == "error" and "Bayern kommt später" in text and "Was tun" in text
+    kind, text = choice(alkis=True, state=BLOCKED)
+    assert "ist gesperrt" in text and "Lizenz" in text
 
 
 def test_downloads_are_blocked_only_above_50_km2():
@@ -76,15 +93,13 @@ def test_downloads_are_blocked_only_above_50_km2():
     assert choice(own=True, path="daten.gpkg", download_km2=60.0) is None
 
 
-def test_osm_downloads_now_alkis_comes_later():
-    assert choice(osm=True) is None  # W11: OSM is downloaded
-    assert choice(alkis=True, state="Niedersachsen", own=True, path="x.gpkg") == (
-        "info", DOWNLOAD_PENDING_MESSAGE)
+def test_several_sources_in_one_run():
+    assert choice(osm=True, alkis=True, state=READY, own=True, path="x.gpkg") is None
 
 
-def test_only_one_source_per_run_until_m13():
-    assert choice(osm=True, own=True, path="x.gpkg") == ("error", ONE_SOURCE_MESSAGE)
-
-
-def test_all_16_states_are_listed():
-    assert len(GERMAN_STATES) == 16 and "Niedersachsen" in GERMAN_STATES
+def test_state_list_shows_all_16_with_their_status():
+    states = alkis_states()
+    assert len(states) == 16
+    names = [state_item_text(state) for state in states]
+    assert "Niedersachsen" in names
+    assert any(name.endswith("(kommt später)") for name in names)

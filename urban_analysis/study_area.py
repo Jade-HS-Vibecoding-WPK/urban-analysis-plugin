@@ -12,6 +12,32 @@ DRAW_INSTRUCTIONS = (
     "Linksklick setzt einen Punkt, Rücktaste entfernt den letzten Punkt, "
     "Rechtsklick schließt das Polygon ab, Esc bricht ab."
 )
+RECTANGLE_INSTRUCTIONS = (
+    "Mit gedrückter linker Maustaste ein Rechteck aufziehen und loslassen. Esc bricht ab."
+)
+DRAW_BOTH_INSTRUCTIONS = (
+    "Polygon: Linksklick setzt Punkte, Rechtsklick schließt ab. Rechteck: mit "
+    "gedrückter Maustaste aufziehen. Esc bricht ab."
+)
+# Download rectangle (E17) in the map: grey dashed, only while steps 2/3 are open
+DOWNLOAD_BOX_COLOR = (90, 90, 90, 220)
+
+
+def rectangle_ring(first, second):
+    """Closed ring of the rectangle between two corner points (x, y), or
+    None if it has no area (a click without dragging)."""
+    (x1, y1), (x2, y2) = first, second
+    xmin, xmax = sorted((x1, x2))
+    ymin, ymax = sorted((y1, y2))
+    if xmax - xmin <= 0 or ymax - ymin <= 0:
+        return None
+    return [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax), (xmin, ymin)]
+
+
+def download_box(xmin, ymin, xmax, ymax, buffer_meters):
+    """The download rectangle: bounding box of the area grown by the buffer."""
+    return (xmin - buffer_meters, ymin - buffer_meters,
+            xmax + buffer_meters, ymax + buffer_meters)
 
 
 # The study area is drawn as a simple line (no fill), in map and PDF.
@@ -71,7 +97,7 @@ def download_size_text(km2):
     """Line below the area, e.g. 'Gebiet mit Puffer: 6,1 km² von höchstens 25 km²'."""
     return (
         f"Gebiet mit Puffer: {format_km2(km2)} km² von höchstens "
-        f"{MAX_DOWNLOAD_TEXT} km² (Rechteck für den Download)"
+        f"{MAX_DOWNLOAD_TEXT} km² (Rechteck für den Download, grau gestrichelt in der Karte)"
     )
 
 
@@ -287,3 +313,109 @@ def create_polygon_draw_tool(canvas, on_finished, on_canceled):
             super().deactivate()
 
     return PolygonDrawTool()
+
+
+def create_rectangle_draw_tool(canvas, on_finished, on_canceled):
+    """Map tool to drag one rectangle; calls back with a geometry in canvas CRS."""
+    from qgis.core import Qgis, QgsGeometry, QgsPointXY
+    from qgis.gui import QgsMapTool, QgsRubberBand
+    from qgis.PyQt.QtCore import Qt
+    from qgis.PyQt.QtGui import QColor
+
+    class RectangleDrawTool(QgsMapTool):
+        def __init__(self):
+            super().__init__(canvas)
+            self.start = None
+            self.band = QgsRubberBand(canvas, Qgis.GeometryType.Polygon)
+            self.band.setStrokeColor(QColor(*DRAW_STROKE_RGBA))
+            self.band.setFillColor(QColor(*DRAW_FILL_RGBA))
+            self.band.setWidth(2)
+            self.setCursor(Qt.CrossCursor)
+
+        def _ring(self, end):
+            ring = rectangle_ring((self.start.x(), self.start.y()), (end.x(), end.y()))
+            return [QgsPointXY(x, y) for x, y in ring] if ring else None
+
+        def canvasPressEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.start = event.mapPoint()
+
+        def canvasMoveEvent(self, event):
+            if self.start is None:
+                return
+            ring = self._ring(event.mapPoint())
+            self.band.reset(Qgis.GeometryType.Polygon)
+            for point in ring or ():
+                self.band.addPoint(point, False)
+            self.band.show()
+            self.band.updatePosition()
+            self.band.update()
+
+        def canvasReleaseEvent(self, event):
+            if event.button() != Qt.LeftButton or self.start is None:
+                return
+            ring = self._ring(event.mapPoint())
+            self.clear()
+            if ring is None:
+                on_canceled("Das Rechteck hat keine Fläche. Bitte mit gedrückter Maustaste "
+                            "aufziehen.")
+                return
+            on_finished(QgsGeometry.fromPolygonXY([ring]))
+
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key_Escape:
+                self.clear()
+                on_canceled("Zeichnen abgebrochen. Es wurde kein Rechteck gespeichert.")
+
+        def clear(self):
+            self.start = None
+            self.band.reset(Qgis.GeometryType.Polygon)
+
+        def deactivate(self):
+            self.clear()
+            super().deactivate()
+
+    return RectangleDrawTool()
+
+
+class DownloadBoxMarker:
+    """Grey dashed rectangle in the map: what OSM/ALKIS download (E17)."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.band = None
+
+    def show(self, box, crs):
+        """``box`` = (xmin, ymin, xmax, ymax) in ``crs``."""
+        from qgis.core import (
+            Qgis, QgsCoordinateTransform, QgsCsException, QgsGeometry, QgsProject, QgsRectangle,
+        )
+        from qgis.gui import QgsRubberBand
+        from qgis.PyQt.QtCore import Qt
+        from qgis.PyQt.QtGui import QColor
+
+        geometry = QgsGeometry.fromRect(QgsRectangle(*box))
+        canvas_crs = self.canvas.mapSettings().destinationCrs()
+        if crs != canvas_crs:
+            try:
+                geometry.transform(QgsCoordinateTransform(crs, canvas_crs, QgsProject.instance()))
+            except QgsCsException:
+                self.hide()
+                return
+        if self.band is None:
+            self.band = QgsRubberBand(self.canvas, Qgis.GeometryType.Polygon)
+            self.band.setStrokeColor(QColor(*DOWNLOAD_BOX_COLOR))
+            self.band.setFillColor(QColor(0, 0, 0, 0))
+            self.band.setWidth(2)
+            self.band.setLineStyle(Qt.DashLine)
+        self.band.setToGeometry(geometry, None)
+        self.band.show()
+
+    def hide(self):
+        if self.band is not None:
+            self.band.hide()
+
+    def remove(self):
+        if self.band is not None:
+            self.canvas.scene().removeItem(self.band)
+            self.band = None

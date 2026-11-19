@@ -34,18 +34,21 @@ from .data_pipeline import (
 )
 from .accessibility_view import (
     GUIDE_NOTE,
+    MAX_RADIUS_M,
     AccessibilityChoice,
+    OwnTarget,
+    OwnTargetMarkers,
     RadiusError,
     add_columns_to_layer,
     build_layers as build_accessibility_layers,
     calculate as calculate_accessibility,
     choice_problem,
+    create_target_pick_tool,
     distance_columns,
     guide_value,
-    parse_radii,
-    radii_for,
+    own_target_label,
     radii_text,
-    ring_colors,
+    rings_with_guide,
 )
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import (
@@ -53,6 +56,7 @@ from .osm_download import (
     DownloadError,
     ensure_project_crs,
     lonlat_box,
+    run_alkis_download,
     run_download,
     unique_path,
 )
@@ -62,6 +66,7 @@ from .outputs import (
     PAGE_SIZES_MM,
     SCALES,
     build_result_layers,
+    data_source_text,
     export_map_pdf,
     format_count,
     scale_label,
@@ -73,12 +78,17 @@ from .outputs import (
     result_layers_text,
 )
 from .study_area import (
+    DRAW_BOTH_INSTRUCTIONS,
     DRAW_INSTRUCTIONS,
+    RECTANGLE_INSTRUCTIONS,
+    DownloadBoxMarker,
     StudyAreaError,
     MAX_DOWNLOAD_TEXT,
     add_drawn_area_layer,
     area_summary_text,
     create_polygon_draw_tool,
+    create_rectangle_draw_tool,
+    download_box,
     download_box_km2,
     download_size_text,
     format_km2,
@@ -96,7 +106,8 @@ from .theme import (
 from .ui_contract import UI_LABELS
 from .ui.layer_icons import LAYER_ICONS, icon_key
 from .user_guidance import (
-    DECIDED_IN_HARMONIZATION,
+    DECIDED_LATER,
+    merge_same_hints,
     SEVERITY_LABELS,
     SEVERITY_ORDER,
     describe_group,
@@ -176,9 +187,7 @@ PAGE_ACTIONS = (
     UI_LABELS["start_processing"],
 )
 
-# Step 3 (W10): sources OSM / ALKIS / own file.  OSM and ALKIS are
-# placeholders until M10 (sources.py: suggest_state, download jobs) and W11
-# (download in QGIS); only "Eigene Datei" loads data for now.
+# Step 3 (W10, M13): sources OSM / ALKIS / own file, several in one run.
 SOURCE_OSM_LABEL = "OpenStreetMap (OSM)"
 SOURCE_ALKIS_LABEL = "ALKIS (amtliche Daten)"
 SOURCE_OWN_LABEL = "Eigene Datei"
@@ -187,46 +196,39 @@ SOURCE_OSM_HINT = (
     "Quellenvermerk: © OpenStreetMap-Mitwirkende (ODbL)."
 )
 SOURCE_ALKIS_HINT = (
-    "Amtliches Liegenschaftskataster deines Bundeslands. Ob das Land ALKIS frei "
-    "anbietet, prüft das Plugin, sobald der Quellen-Katalog fertig ist."
+    "Amtliches Liegenschaftskataster deines Bundeslands: Gebäude und tatsächliche "
+    "Nutzung, direkt vom Dienst des Landes. Nicht jedes Land bietet ALKIS frei an – "
+    "die Liste zeigt, wo es geht."
 )
+PARCELS_LABEL = "Auch Flurstücke laden"
+PARCELS_HINT = "Flurstücke machen den Download deutlich größer und werden für die Karte selten gebraucht."
 CHOOSE_STATE_ITEM = "Bundesland wählen …"
-# Placeholder until M10 suggests the state from the study area (E11).
-GERMAN_STATES = (
-    "Baden-Württemberg", "Bayern", "Berlin", "Brandenburg", "Bremen", "Hamburg",
-    "Hessen", "Mecklenburg-Vorpommern", "Niedersachsen", "Nordrhein-Westfalen",
-    "Rheinland-Pfalz", "Saarland", "Sachsen", "Sachsen-Anhalt",
-    "Schleswig-Holstein", "Thüringen",
-)
 LOCAL_DATA_HINT = (
     "Eine GeoPackage-Datei (.gpkg) von deinem Rechner, z. B. eine eigene "
-    "Kartierung oder ein eigener ALKIS-Export. Pro Durchlauf wird eine Datei geladen."
+    "Kartierung oder ein eigener ALKIS-Export."
 )
 CHOOSE_SOURCE_MESSAGE = (
     "Bitte mindestens eine Quelle ankreuzen: „OpenStreetMap“, „ALKIS“ oder "
     "„Eigene Datei“."
 )
 CHOOSE_STATE_MESSAGE = "Für ALKIS bitte das Bundesland wählen."
-DOWNLOAD_PENDING_MESSAGE = (
-    "Das Herunterladen von ALKIS-Daten wird in einem späteren Schritt "
-    "angeschlossen. Bitte vorerst „OpenStreetMap“ oder „Eigene Datei“ verwenden."
-)
-ONE_SOURCE_MESSAGE = (
-    "Mehrere Quellen in einem Durchlauf kommen in einem späteren Schritt. Bitte "
-    "vorerst nur eine Quelle ankreuzen: „OpenStreetMap“ oder „Eigene Datei“."
+STATE_NOT_READY_MESSAGE = (
+    "ALKIS für {name} {status}: {note}\n"
+    "Was tun: „ALKIS“ abwählen und mit OpenStreetMap arbeiten oder einen eigenen "
+    "ALKIS-Export als „Eigene Datei“ laden."
 )
 LAST_DOWNLOAD_FOLDER_SETTING = "urban_analysis/last_download_folder"
-DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die OSM-Daten wählen"
+DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die heruntergeladenen Daten wählen"
 CHOOSE_FOLDER_ACTION = "Speicherort wählen"
 
 
 def folder_chosen_text(folder):
     """Info after choosing the download folder (button now 'Daten laden')."""
     return (f"Speicherort gewählt: {short_folder(folder)}. "
-            "Jetzt auf „Daten laden“ klicken, um die OSM-Daten herunterzuladen.")
+            "Jetzt auf „Daten laden“ klicken, um die Daten herunterzuladen.")
 DOWNLOAD_FOLDER_HINT = (
-    "Zuerst unten „Speicherort wählen“: In diesem Ordner werden die OSM-Daten "
-    "gespeichert (z. B. dein Projektordner). Danach „Daten laden“."
+    "Zuerst unten „Speicherort wählen“: In diesem Ordner werden die heruntergeladenen "
+    "Daten gespeichert (z. B. dein Projektordner). Danach „Daten laden“."
 )
 DOWNLOAD_NO_FOLDER_MESSAGE = "Kein Ordner gewählt – es wurde nichts heruntergeladen."
 DOWNLOAD_TOO_LARGE_MESSAGE = (
@@ -342,12 +344,10 @@ LAYERS_ACTION = "Layer erzeugen"
 LAYERS_AGAIN_ACTION = "Layer neu erzeugen"
 ACCESS_ACTION = "Analyse starten"
 SAVE_ACTION = "Speichern"
-LAYERS_INTRO = ("Hier entstehen die Ergebnis-Layer in QGIS (eine neue Gruppe). Deine "
-                "Eingangsdaten bleiben unverändert.")
-LAYERS_NEXT_HINT = ("Optional weiter mit „Erreichbarkeit“, dann „Speichern“ – die Knöpfe "
-                    "oben sind jederzeit anwählbar.")
-LAYERS_FIRST_HINT = ("Noch keine Ergebnis-Layer: Sie werden beim Klick unten automatisch "
-                     "zuerst erzeugt (Einstellungen unter „Ausgabe“).")
+LAYERS_INTRO = "Legt die Ergebnis-Layer als neue Gruppe in QGIS an; deine Daten bleiben unverändert."
+LAYERS_NEXT_HINT = "Jetzt sind „Erreichbarkeit“ und „Speichern“ oben anwählbar."
+LAYERS_FIRST_TOOLTIP = "Erst unter „Ausgabe“ die Layer erzeugen."
+NEEDS_LAYERS_MESSAGE = "Bitte zuerst unter „Ausgabe“ auf „Layer erzeugen“ klicken."
 SAVE_INTRO = ("Gespeichert wird der aktuelle Stand in QGIS: das GeoPackage mit allen Layern "
               "der Ergebnis-Gruppe (auch der Erreichbarkeit), das PDF mit den gerade "
               "sichtbaren Layern in ihrer Reihenfolge. Erneut speichern überschreibt die "
@@ -359,6 +359,13 @@ ACCESS_INTRO = ("Wie weit ist es von jedem Gebäude zum nächsten Ziel (Luftlini
                 "Abstand je Gebäude in der Attributtabelle und Radien um die Ziele in der Karte. "
                 "Die Ziele werden als eigene Punkte mit ihrer ganzen Attributtabelle kopiert.")
 ACCESS_RADII_GUIDE = "Radien je Ziel in Metern (vorgeschlagen: Richtwert)"
+OWN_TARGETS_HINT = ("Eigene Ziele setzen, z. B. einen geplanten Standort: „Punkt setzen“ und in "
+                    "die Karte klicken, oder „Objekt anklicken“ und z. B. ein Gebäude wählen. "
+                    "Sie werden zusammen als Ziel „Eigene Ziele“ ausgewertet.")
+OWN_POINT_INSTRUCTIONS = ("Linksklick in die Karte setzt ein eigenes Ziel. Rechtsklick oder Esc "
+                          "beendet.")
+OWN_OBJECT_INSTRUCTIONS = ("Linksklick auf ein Objekt (z. B. ein Gebäude) nimmt es als eigenes "
+                           "Ziel. Rechtsklick oder Esc beendet.")
 ACCESS_TARGETS_HINT = ("Ganze Kategorien ankreuzen (z. B. „ÖPNV-Haltestellen“) oder aufklappen "
                        "und einzelne Arten wählen (z. B. nur „Supermarkt“). Mehrere Ziele sind möglich.")
 ACCESS_NO_TARGETS = ("In den geladenen Daten gibt es keine Ziele wie Haltestellen, Supermärkte "
@@ -366,7 +373,7 @@ ACCESS_NO_TARGETS = ("In den geladenen Daten gibt es keine Ziele wie Haltestelle
                      "„OpenStreetMap“ laden.")
 ACCESS_RADII_HINT = ("Mehrere Radien mit Komma trennen. Jeder Radius wird als gestrichelte "
                      "Linie um die Ziele gezeichnet; gemessen wird die Luftlinie.")
-ACCESS_FILL_LABEL = "Flächen einfärben (Deckkraft 15 %)"
+ACCESS_FILL_LABEL = "Flächen einfärben"
 STEP5_QUESTION = (
     "Deine Daten haben viele Spalten. Sollen sie automatisch zugeordnet werden? "
     "Danach siehst du das Ergebnis als Tabelle und kannst bei Bedarf noch ändern."
@@ -683,22 +690,78 @@ def issue_icon_key(flow, issue):
 
 
 def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_data):
-    """Check the step-3 sources.  Returns None (go on: load the file or keep
-    the loaded data) or (kind, text) with kind 'error' or 'info'."""
+    """Check the step-3 sources (several at once, M13).  ``state`` is the
+    chosen ``sources.StateInfo`` or None.  Returns None (go on) or
+    (kind, text) with kind 'error' or 'info'."""
+    from .sources import STATE_BLOCKED, STATE_READY
+
     if not (osm or alkis or own):
         return None if has_data else ("error", CHOOSE_SOURCE_MESSAGE)
-    if alkis and not state:
+    if alkis and state is None:
         return ("error", CHOOSE_STATE_MESSAGE)
     if (osm or alkis) and download_km2 is not None and is_oversized(download_km2):
         return ("error", DOWNLOAD_TOO_LARGE_MESSAGE.format(
             size=format_km2(download_km2), limit=MAX_DOWNLOAD_TEXT))
-    if alkis:
-        return ("info", DOWNLOAD_PENDING_MESSAGE)  # until M10b, never silent
-    if osm and own:
-        return ("error", ONE_SOURCE_MESSAGE)  # until M13 (several sources)
-    if own and path is None and not has_data:
+    if alkis and state.status != STATE_READY:
+        status = "ist gesperrt" if state.status == STATE_BLOCKED else "kommt später"
+        return ("error", STATE_NOT_READY_MESSAGE.format(
+            name=state.name, status=status, note=state.note))
+    if own and path is None:
         return ("error", CHOOSE_FILE_MESSAGE)
-    return None  # OSM: download (W11); own file: load it
+    return None  # download OSM/ALKIS, load the own file, all in one run
+
+
+REVIEW_LATER_TITLE = "Wird in Schritt 6 entschieden"
+SOURCES_TITLE = "Gleiche Objekte aus mehreren Quellen"
+SOURCES_INTRO = (
+    "Manche Objekte gibt es in ALKIS und in OSM, z. B. dasselbe Gebäude. Wähle je "
+    "Kategorie, welche Quelle bleibt – die andere Fassung wird weggelassen. Objekte, "
+    "die es nur in einer Quelle gibt, bleiben immer erhalten."
+)
+UNCERTAIN_SOURCES_HINT = (
+    "Unsicher heißt: Die Flächen weichen um mehr als 20 % ab – es könnten auch "
+    "verschiedene Objekte sein. Ohne Häkchen bleiben bei diesen Paaren beide erhalten."
+)
+
+
+def source_title_text(category, count, kinds):
+    """'Gebäude: 812 in ALKIS und OSM'."""
+    return f"{category}: {format_count(count)} in {' und '.join(kinds)}"
+
+
+def source_choice_hint_text(choice):
+    """What happens with the choice, with the counts."""
+    certain = choice.group_count - choice.uncertain_count
+    return (f"{format_count(certain)} sichere Paare werden auf die gewählte Quelle reduziert"
+            + (f", {format_count(choice.uncertain_count)} sind unsicher." if choice.uncertain_count
+               else "."))
+
+
+def uncertain_sources_label(count):
+    return f"Auch die {format_count(count)} unsicheren Fälle so entscheiden"
+
+
+def sources_applied_text(removed):
+    if not removed:
+        return "Quellen abgeglichen: Es wurde nichts weggelassen."
+    return (f"Quellen abgeglichen: {format_count(removed)} doppelte Objekte aus der jeweils "
+            "anderen Quelle weggelassen.")
+
+
+GEOMETRY_ORDER = {"point": 0, "line": 1, "polygon": 2}
+
+
+def layer_order_key(kind, rank):
+    """Sort key for the result layers (top first): points, lines, areas;
+    inside each the higher draw rank of the category first."""
+    return (GEOMETRY_ORDER.get(kind, 3), -rank)
+
+
+def state_item_text(state):
+    """Entry of the state list: 'Niedersachsen' or 'Bayern (kommt später)'."""
+    from .sources import STATE_READY
+
+    return state.name if state.status == STATE_READY else f"{state.name} ({state.status})"
 
 
 def output_slug(text):
@@ -1111,6 +1174,7 @@ def _create_dock(plugin):
         Qgis,
         QgsApplication,
         QgsCoordinateReferenceSystem,
+        QgsCoordinateTransform,
         QgsFeedback,
         QgsGeometry,
         QgsProject,
@@ -1179,6 +1243,7 @@ def _create_dock(plugin):
         QRadioButton,
         QScrollArea,
         QSizePolicy,
+        QSpinBox,
         QToolButton,
         QVBoxLayout,
         QWidget,
@@ -1255,6 +1320,9 @@ def _create_dock(plugin):
             self.last_group_name = None
             self.step9_tab = "output"  # open area of the last step
             self.last_access_lines = []  # result of the last accessibility run
+            self.sources = []  # SourceFile of the last load (licence block, E28)
+            self.download_marker = None  # grey dashed download rectangle (E17)
+            self.own_markers = None  # own accessibility targets in the map
             self.download_feedback = None  # QgsFeedback of a running OSM download
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -1371,8 +1439,15 @@ def _create_dock(plugin):
             outer.addWidget(self.classic_header)
             self._show_header(ui_style.current())
             outer.addWidget(content, 1)
+            # Fixed area above the scrolling page (last step: its area buttons)
+            self.sticky = QWidget()
+            self.sticky_layout = QVBoxLayout(self.sticky)
+            self.sticky_layout.setContentsMargins(8, 6, 8, 0)
+            self.sticky.hide()
+
             layout.addLayout(header)
             layout.addLayout(busy_row)
+            layout.addWidget(self.sticky)
             layout.addWidget(scroll, 1)
             layout.addWidget(self.message_scroll)
             layout.addLayout(buttons)
@@ -1492,6 +1567,11 @@ def _create_dock(plugin):
             last = index == len(self.pages) - 1
             if last:
                 self.step9_tab = "output"  # 'Ausgabe' is open first
+            if index not in (1, 2):
+                self.hide_download_box()  # only while area and download are chosen
+            _clear_layout(self.sticky_layout)  # the page fills it again if needed
+            self.sticky.hide()
+            self.hide_own_markers()
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -1676,6 +1756,7 @@ def _create_dock(plugin):
                 self.next_message = None
                 self.step9_tab = "output"
                 self.last_access_lines = []
+                self.sources = []
                 self.last_group_name = None
                 for page in self.pages:
                     if page.rebuild:
@@ -1689,8 +1770,53 @@ def _create_dock(plugin):
             except Exception as error:  # show every program error visibly
                 self.show_unexpected_error("Zurücksetzen", error)
 
-        def start_drawing(self, on_finished, on_canceled):
-            """Activate the polygon drawing tool in the QGIS map."""
+        def show_download_box(self, box, crs):
+            """Grey dashed download rectangle in the map (steps 2 and 3)."""
+            if self.download_marker is None:
+                self.download_marker = DownloadBoxMarker(plugin.iface.mapCanvas())
+            self.download_marker.show(box, crs)
+
+        def hide_download_box(self):
+            if self.download_marker is not None:
+                self.download_marker.hide()
+
+        def show_own_markers(self, geometries, crs):
+            """Own accessibility targets as markers (canvas CRS)."""
+            canvas = plugin.iface.mapCanvas()
+            if self.own_markers is None:
+                self.own_markers = OwnTargetMarkers(canvas)
+            canvas_crs = canvas.mapSettings().destinationCrs()
+            shown = []
+            for geometry in geometries:
+                if crs != canvas_crs:
+                    geometry.transform(QgsCoordinateTransform(crs, canvas_crs, QgsProject.instance()))
+                shown.append(geometry)
+            self.own_markers.show(shown)
+
+        def hide_own_markers(self):
+            if self.own_markers is not None:
+                self.own_markers.hide()
+
+        def start_picking(self, mode, on_pick, on_finished):
+            """Map tool for own accessibility targets (point or object)."""
+            canvas = plugin.iface.mapCanvas()
+            self.stop_drawing()
+
+            def picked(geometry, attributes):
+                on_pick(geometry, attributes, canvas.mapSettings().destinationCrs())
+
+            def finished(message, keep=False):
+                if not keep:
+                    self.stop_drawing()
+                on_finished(message)
+
+            self.previous_map_tool = canvas.mapTool()
+            self.draw_tool = create_target_pick_tool(canvas, mode, picked, finished)
+            canvas.setMapTool(self.draw_tool)
+            canvas.setFocus()
+
+        def start_drawing(self, on_finished, on_canceled, shape="polygon"):
+            """Activate the polygon or rectangle drawing tool in the QGIS map."""
             canvas = plugin.iface.mapCanvas()
             self.stop_drawing()
 
@@ -1703,7 +1829,8 @@ def _create_dock(plugin):
                 on_canceled(message)
 
             self.previous_map_tool = canvas.mapTool()
-            self.draw_tool = create_polygon_draw_tool(canvas, finished, canceled)
+            make_tool = create_rectangle_draw_tool if shape == "rectangle" else create_polygon_draw_tool
+            self.draw_tool = make_tool(canvas, finished, canceled)
             canvas.setMapTool(self.draw_tool)
             canvas.setFocus()
 
@@ -1728,6 +1855,12 @@ def _create_dock(plugin):
                 self.import_task = None
             self.scene.stop()
             self.stop_drawing()
+            if self.download_marker is not None:
+                self.download_marker.remove()
+                self.download_marker = None
+            if self.own_markers is not None:
+                self.own_markers.remove()
+                self.own_markers = None
 
     dock = GuidedDock()
 
@@ -1819,10 +1952,20 @@ def _create_dock(plugin):
         set_role(no_layer_hint, "hint")
 
         draw_button = QPushButton("Polygon zeichnen")
-        draw_button.setToolTip("Polygon in der Karte zeichnen")
-        set_role(draw_button, "secondary")
-        draw_button.setCursor(Qt.PointingHandCursor)
-        draw_hint = QLabel(DRAW_INSTRUCTIONS)
+        draw_button.setToolTip("Polygon Punkt für Punkt in der Karte zeichnen")
+        rectangle_button = QPushButton("Rechteck zeichnen")
+        rectangle_button.setToolTip("Rechteck in der Karte aufziehen – schneller, wenn die "
+                                    "genaue Form egal ist")
+        for button in (draw_button, rectangle_button):
+            set_role(button, "secondary")
+            button.setCursor(Qt.PointingHandCursor)
+        draw_row = QWidget()
+        draw_row_layout = QHBoxLayout(draw_row)
+        draw_row_layout.setContentsMargins(0, 0, 0, 0)
+        draw_row_layout.addWidget(draw_button)
+        draw_row_layout.addWidget(rectangle_button)
+        draw_row_layout.addStretch()
+        draw_hint = QLabel(DRAW_BOTH_INSTRUCTIONS)
         draw_hint.setWordWrap(True)
         set_role(draw_hint, "hint")
 
@@ -1839,7 +1982,7 @@ def _create_dock(plugin):
         page.layout.addWidget(use_layer)
         page.layout.addWidget(indented(layer_box, selected_only, no_layer_hint))
         page.layout.addWidget(use_drawing)
-        page.layout.addWidget(indented(draw_button, draw_hint))
+        page.layout.addWidget(indented(draw_row, draw_hint))
         size = QLabel()  # E17: size of the download rectangle
         size.setWordWrap(True)
         set_role(size, "hint")
@@ -1871,6 +2014,7 @@ def _create_dock(plugin):
             selected_only.setEnabled(not drawing)
             no_layer_hint.setVisible(not drawing and not has_layers)
             draw_button.setEnabled(drawing)
+            rectangle_button.setEnabled(drawing)
             draw_hint.setVisible(drawing)
             watch_selection()
             update_area_status(page)
@@ -1899,9 +2043,13 @@ def _create_dock(plugin):
             except StudyAreaError as error:
                 dock.show_message(str(error))
                 return
+            old_id = page.widgets["drawn_layer_id"]
+            if old_id and QgsProject.instance().mapLayer(old_id) is not None:
+                QgsProject.instance().removeMapLayer(old_id)  # only the newest drawing counts
             page.widgets["drawn_layer_id"] = layer.id()
             dock.show_message(
-                f"Polygon gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt.",
+                f"Gebiet gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt. "
+                "Grau gestrichelt: das Rechteck, für das OSM und ALKIS geladen werden.",
                 kind="info",
             )
             update_area_status(page)
@@ -1909,16 +2057,18 @@ def _create_dock(plugin):
         def drawing_canceled(message):
             dock.show_message(message, kind="info")
 
-        def start_drawing():
+        def start_drawing(shape):
             dock.clear_message()
-            dock.show_message(DRAW_INSTRUCTIONS, kind="info")
-            dock.start_drawing(drawing_finished, drawing_canceled)
+            dock.show_message(RECTANGLE_INSTRUCTIONS if shape == "rectangle" else DRAW_INSTRUCTIONS,
+                              kind="info")
+            dock.start_drawing(drawing_finished, drawing_canceled, shape)
 
         use_layer.toggled.connect(refresh)
         layer_box.layerChanged.connect(refresh)
         selected_only.toggled.connect(refresh_status)
         buffer_input.valueChanged.connect(refresh_status)
-        draw_button.clicked.connect(start_drawing)
+        draw_button.clicked.connect(lambda: start_drawing("polygon"))
+        rectangle_button.clicked.connect(lambda: start_drawing("rectangle"))
         refresh()
 
     def target_crs():
@@ -1947,6 +2097,7 @@ def _create_dock(plugin):
         size = page.widgets["size"]
         page.widgets["download_km2"] = None
         size.hide()
+        dock.hide_download_box()
         try:
             geometry, count = chosen_area(page)
         except StudyAreaError as error:
@@ -1958,8 +2109,14 @@ def _create_dock(plugin):
         if target_crs().mapUnits() != Qgis.DistanceUnit.Meters:
             return  # sizes in degrees make no sense; CRS hint is in step 1
         box = geometry.boundingBox()
+        buffer = page.widgets["buffer"].value()
         km2 = download_box_km2(box.xMinimum(), box.yMinimum(), box.xMaximum(),
-                               box.yMaximum(), page.widgets["buffer"].value())
+                               box.yMaximum(), buffer)
+        try:
+            dock.show_download_box(download_box(box.xMinimum(), box.yMinimum(), box.xMaximum(),
+                                                box.yMaximum(), buffer), target_crs())
+        except Exception:  # only a drawing aid: the size text below still says it
+            pass
         page.widgets["download_km2"] = km2
         if is_large(km2):
             set_role(size, "warning")
@@ -2092,13 +2249,22 @@ def _create_dock(plugin):
         question.setWordWrap(True)
         page.layout.addWidget(question)
 
-        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT),
-                      hint_label(DOWNLOAD_FOLDER_HINT))
+        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT))
+
+        from .sources import alkis_states
 
         state = QComboBox()
-        state.addItem(CHOOSE_STATE_ITEM)
-        state.addItems(GERMAN_STATES)
-        source_choice(page, "alkis", SOURCE_ALKIS_LABEL, hint_label(SOURCE_ALKIS_HINT), state)
+        state.addItem(CHOOSE_STATE_ITEM, None)
+        try:
+            states = alkis_states()
+        except Exception as error:  # catalog broken: said, not hidden
+            states = []
+            dock.show_message(f"Die Liste der Bundesländer fehlt: {error_text(error)}")
+        for info in states:
+            state.addItem(state_item_text(info), info)
+        parcels = QCheckBox(PARCELS_LABEL)
+        source_choice(page, "alkis", SOURCE_ALKIS_LABEL, hint_label(SOURCE_ALKIS_HINT), state,
+                      parcels, hint_label(PARCELS_HINT))
 
         choose_button = QPushButton("Datei wählen …")
         set_role(choose_button, "secondary")
@@ -2106,25 +2272,33 @@ def _create_dock(plugin):
         file_info = hint_label("Noch keine Datei gewählt.")
         source_choice(page, "own", SOURCE_OWN_LABEL, hint_label(LOCAL_DATA_HINT),
                       choose_button, file_info)
+        folder_hint = hint_label(DOWNLOAD_FOLDER_HINT)
+        page.layout.addWidget(folder_hint)
 
         page.widgets.update(
-            state=state, choose_button=choose_button, file_info=file_info, path=None,
-            download_folder=None,
+            state=state, parcels=parcels, choose_button=choose_button, file_info=file_info,
+            path=None, download_folder=None,
         )
         choose_button.clicked.connect(lambda: choose_file(page))
 
+        def downloads():
+            return page.widgets["osm"].isChecked() or page.widgets["alkis"].isChecked()
+
         def action_text():
             """'Speicherort wählen' first for downloads, then 'Daten laden'."""
-            if page.widgets["osm"].isChecked() and page.widgets.get("download_folder") is None:
+            if downloads() and page.widgets.get("download_folder") is None:
                 return CHOOSE_FOLDER_ACTION
             return UI_LABELS["load_data"]
 
         def refresh_action(*_args):
+            folder_hint.setVisible(downloads() and page.widgets.get("download_folder") is None)
             if dock.pages and dock.pages[dock.current] is page:
                 dock.primary_button.setText(action_text())
 
         page.widgets["action_text"] = action_text
         page.widgets["osm"].toggled.connect(refresh_action)
+        page.widgets["alkis"].toggled.connect(refresh_action)
+        refresh_action()
 
     def choose_file(page):
         """Open the system file dialog and remember the chosen GeoPackage."""
@@ -2146,13 +2320,10 @@ def _create_dock(plugin):
 
     def validate_data(page):
         widgets = page.widgets
-        state = widgets["state"]
+        osm, alkis, own = (widgets[key].isChecked() for key in ("osm", "alkis", "own"))
+        state = widgets["state"].currentData() if alkis else None
         problem = source_choice_problem(
-            osm=widgets["osm"].isChecked(),
-            alkis=widgets["alkis"].isChecked(),
-            state=state.currentText() if state.currentIndex() > 0 else None,
-            own=widgets["own"].isChecked(),
-            path=widgets["path"],
+            osm=osm, alkis=alkis, state=state, own=own, path=widgets["path"],
             download_km2=dock.settings.get("download_km2"),
             has_data=plugin.workflow is not None,
         )
@@ -2160,28 +2331,26 @@ def _create_dock(plugin):
             kind, text = problem
             dock.show_message(text, kind=kind)
             return False
-        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
-            if widgets["osm"].isChecked() or widgets["own"].isChecked():
-                return reject(MISSING_AREA_MESSAGE)
-        if widgets["osm"].isChecked():
-            if widgets.get("download_folder") is None:
-                # first click: only choose the folder, the button then says "Daten laden"
-                folder = QFileDialog.getExistingDirectory(
-                    dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
-                if not folder:
-                    dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
-                    return False
-                QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
-                widgets["download_folder"] = folder
-                dock.primary_button.setText(UI_LABELS["load_data"])
-                dock.show_message(folder_chosen_text(folder), kind="info")
-                return False
-            start_osm_download(widgets["download_folder"])
-            return False  # the page changes when download and import are done
-        if not widgets["own"].isChecked() or widgets["path"] is None:
+        if not (osm or alkis or own):
             return True  # data already loaded (earlier run or Python console)
-        start_import(widgets["path"])
-        return False  # the page changes when the background import is done
+        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
+            return reject(MISSING_AREA_MESSAGE)
+        if (osm or alkis) and widgets.get("download_folder") is None:
+            # first click: only choose the folder, the button then says "Daten laden"
+            folder = QFileDialog.getExistingDirectory(
+                dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
+            if not folder:
+                dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
+                return False
+            QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
+            widgets["download_folder"] = folder
+            dock.primary_button.setText(UI_LABELS["load_data"])
+            dock.show_message(folder_chosen_text(folder), kind="info")
+            return False
+        start_load(osm=osm, state=state, parcels=widgets["parcels"].isChecked(),
+                   own_path=widgets["path"] if own else None,
+                   folder=widgets.get("download_folder"))
+        return False  # the page changes when downloads and import are done
 
     def download_folder():
         """Folder suggested in the folder dialog (E14/E18): the last one, else
@@ -2192,36 +2361,117 @@ def _create_dock(plugin):
         home = QgsProject.instance().homePath()
         return Path(home) if home and Path(home).is_dir() else Path.home()
 
-    def start_osm_download(folder):
-        """W11: plan with sources.py, download into ``folder`` in the
-        background, then load the GeoPackage like an own file."""
-        settings = dict(dock.settings)
+    def plan_downloads(osm, state, parcels):
+        """OSM and ALKIS jobs from sources.py.  Returns (osm_request,
+        alkis_requests, notes) or raises ValueError with the reason."""
+        import copy
+
+        from .sources import load_catalog, plan_alkis_download
+
+        settings = dock.settings
         project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
         context = QgsProject.instance().transformContext()
         geometry = QgsGeometry.fromWkt(settings["study_area_wkt"])
-        try:
-            box = lonlat_box(geometry, settings["buffer_meters"], project_crs, context)
+        box = lonlat_box(geometry, settings["buffer_meters"], project_crs, context)
+        osm_request, alkis_jobs, notes = None, [], []
+        if osm:
             plan = plan_osm_download(settings["study_area_wkt"], settings["buffer_meters"], box)
+            errors = [issue.message for issue in plan.issues if issue.severity == "error"]
+            if errors or not plan.requests:
+                raise ValueError("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
+            osm_request = plan.requests[0]
+        if state is not None:
+            catalog = copy.deepcopy(load_catalog())
+            if not parcels:
+                layers = catalog["alkis_abfrage"]["ebenen"]
+                catalog["alkis_abfrage"]["ebenen"] = [name for name in layers if name != "flurstuecke"]
+            plan = plan_alkis_download(settings["study_area_wkt"], settings["buffer_meters"], box,
+                                       state.code, catalog=catalog)
+            errors = [issue.message for issue in plan.issues if issue.severity == "error"]
+            if errors or not plan.requests:
+                raise ValueError("\n".join(errors) or "Für dieses Gebiet gibt es keinen ALKIS-Auftrag.")
+            notes.extend(issue.message for issue in plan.issues)
+            alkis_jobs = plan.requests
+        return osm_request, alkis_jobs, notes
+
+    def start_load(*, osm, state, parcels, own_path, folder):
+        """M13: download OSM and/or ALKIS, add the own file, import everything
+        in one run (import_sources) and compare the sources (match_sources).
+        Runs as one QGIS background task with a busy bar."""
+        from .data_pipeline import SourceFile
+        from .source_matching import match_sources
+
+        settings = dict(dock.settings)
+        try:
+            osm_request, alkis_jobs, notes = plan_downloads(osm, state, parcels)
         except Exception as error:  # catalog broken, CRS cannot be converted …
-            dock.show_message(f"Der OSM-Download konnte nicht vorbereitet werden: {error_text(error)}")
+            dock.show_message(f"Der Download konnte nicht vorbereitet werden: {error_text(error)}")
             return
-        errors = [issue.message for issue in plan.issues if issue.severity == "error"]
-        if errors or not plan.requests:
-            dock.show_message("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
-            return
-        request = plan.requests[0]
+        project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
+        context = QgsProject.instance().transformContext()
         feedback = QgsFeedback()
         dock.download_feedback = feedback
-        status = {"text": None}  # hint from the worker thread (retry countdown)
-        dock.set_busy("OSM-Daten werden geladen …")
+        status = {"text": None}  # hint from the worker thread
+        info = {"converted": None, "notes": list(notes)}
+        phases = [kind for kind, wanted in (("osm", osm_request), ("alkis", alkis_jobs),
+                                            ("own", own_path)) if wanted] + ["import"]
+        dock.set_busy("Daten werden geladen …")
 
         def run(task):
             def report(text):
                 status["text"] = text
                 task.setProgress(task.progress() + 0.001)  # wakes the panel up
 
-            return run_download(request, folder, project_crs, context, feedback,
-                                task.isCanceled, report, task.setProgress)
+            def part(index):
+                """progress(percent of this phase) -> overall task progress."""
+                share = 100 / len(phases)
+                return lambda percent: task.setProgress(index * share + percent * share / 100)
+
+            sources = []
+            for index, phase in enumerate(phases):
+                if task.isCanceled():
+                    raise ImportCanceled()
+                if phase == "osm":
+                    path = run_download(osm_request, folder, project_crs, context, feedback,
+                                        task.isCanceled, report, part(index))
+                    sources.append(SourceFile(path, "OSM", "OpenStreetMap", osm_request.licence,
+                                              osm_request.licence_url, osm_request.attribution))
+                elif phase == "alkis":
+                    path, found = run_alkis_download(alkis_jobs, folder, project_crs, context,
+                                                     feedback, task.isCanceled, report, part(index))
+                    info["notes"].extend(found)
+                    first = alkis_jobs[0]
+                    sources.append(SourceFile(path, "ALKIS", f"ALKIS {state.name}", first.licence,
+                                              first.licence_url, first.attribution))
+                elif phase == "own":
+                    report(f"Lade „{own_path.name}“ …")
+                    used, changed = ensure_project_crs(
+                        own_path, project_crs, context,
+                        Path(tempfile.gettempdir()) / "urban_analysis")
+                    if changed:
+                        info["converted"] = (used, changed)
+                    sources.append(SourceFile(used, "Eigene Datei", own_path.name))
+                else:
+                    report("Daten werden zugeschnitten und vereinheitlicht …")
+                    importer = GeoPackageImporter()
+                    result = importer.import_sources(
+                        sources,
+                        project_crs=settings["project_crs"],
+                        study_area_wkt=settings["study_area_wkt"],
+                        buffer_meters=settings["buffer_meters"],
+                        progress=cancel_aware_progress(
+                            task.isCanceled,
+                            lambda percent, p=part(index): p(percent)),
+                    )
+                    if len({source.source_kind for source in sources}) > 1:
+                        report("Gleiche Objekte aus verschiedenen Quellen werden gesucht …")
+                        records, matches, issues = match_sources(result.harmonized_records)
+                        result.harmonized_records = records
+                        result.issues.extend(issues)
+                    else:
+                        matches = []
+                    return result, sources, matches
+            return None
 
         def progress_changed(percent):
             if dock.closing:
@@ -2230,13 +2480,13 @@ def _create_dock(plugin):
                 dock.busy_text = status["text"]
             dock.set_busy_progress(percent)
 
-        def finished(exception, result=None):
+        def finished(exception, outcome=None):
             dock.import_task = None
             dock.download_feedback = None
             if dock.closing:
                 return
             try:
-                if isinstance(exception, DownloadCanceled) or dock.cancel_requested:
+                if isinstance(exception, (DownloadCanceled, ImportCanceled)) or dock.cancel_requested:
                     dock.clear_busy("cancel")
                     dock.show_message(CANCELED_MESSAGE, kind="info")
                     return
@@ -2244,98 +2494,48 @@ def _create_dock(plugin):
                     dock.clear_busy("error")
                     if isinstance(exception, (DownloadError, OSError)):
                         dock.show_message(str(exception))
+                    elif isinstance(exception, (GeoPackageImportError, ValueError)) and own_path:
+                        dock.show_message(import_error_text(own_path.name, exception, own_path))
                     else:
                         dock.show_unexpected_error(UI_LABELS["load_data"], exception)
                     return
-                dock.clear_busy("cancel")
-                # Datenquelle in step 8 pre-filled with the OSM attribution (E28)
-                if not dock.output_draft.get("source"):
-                    dock.output_draft["source"] = request.attribution
-                start_import(Path(result))
-            except Exception as error:  # show every program error visibly
-                dock.show_unexpected_error(UI_LABELS["load_data"], error)
-
-        task = QgsTask.fromFunction("Urban Analysis: OSM-Daten laden", run, on_finished=finished)
-        task.progressChanged.connect(progress_changed)
-        dock.import_task = task
-        QgsApplication.taskManager().addTask(task)
-
-    def start_import(path):
-        """Run the pipeline (S1) as a QGIS background task with a busy bar."""
-        settings = dict(dock.settings)
-        dock.input_paths.add(Path(path))  # protected from being overwritten in step 8
-        dock.set_busy(f"Lade „{path.name}“ … Das kann bei großen Dateien etwas dauern.")
-        project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
-        context = QgsProject.instance().transformContext()
-        converted = {"path": None, "layers": []}  # copy in the project CRS, if needed
-
-        def run_import(task):
-            # Layers in another CRS: convert a copy first (originals stay as they are)
-            used, changed = ensure_project_crs(
-                path, project_crs, context, Path(tempfile.gettempdir()) / "urban_analysis")
-            if changed:
-                converted.update(path=used, layers=changed)
-            if task.isCanceled():
-                raise ImportCanceled()
-            importer = GeoPackageImporter()
-            options = {}
-            if pipeline_reports_progress(importer):
-                # fraction 0..1 from the pipeline -> task progress 0..100;
-                # stops the pipeline when 'Laden abbrechen' was pressed
-                options["progress"] = cancel_aware_progress(task.isCanceled, task.setProgress)
-            if task.isCanceled():
-                raise ImportCanceled()
-            return importer.import_file(
-                used,
-                project_crs=settings["project_crs"],
-                study_area_wkt=settings["study_area_wkt"],
-                buffer_meters=settings["buffer_meters"],
-                **options,
-            )
-
-        def finished(exception, result=None):
-            dock.import_task = None
-            if dock.closing:
-                return
-            try:
-                if isinstance(exception, ImportCanceled) or dock.cancel_requested:
-                    # stopped by the user (also if the pipeline finished anyway)
+                if outcome is None:
                     dock.clear_busy("cancel")
                     dock.show_message(CANCELED_MESSAGE, kind="info")
                     return
-                if exception is not None:
-                    dock.clear_busy("error")
-                    if isinstance(exception, DownloadError):
-                        dock.show_message(str(exception))
-                    elif isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
-                        dock.show_message(import_error_text(path.name, exception, path))
-                    else:
-                        dock.show_unexpected_error(UI_LABELS["load_data"], exception)
-                    return
-                if result is None:
-                    dock.clear_busy("cancel")
-                    dock.show_message(CANCELED_MESSAGE, kind="info")
-                    return
+                result, sources, matches = outcome
                 dock.clear_busy("done")
                 plugin.start_workflow(result)
+                plugin.workflow.source_matches = matches
+                dock.sources = sources
+                for source in sources:
+                    dock.input_paths.add(Path(source.path))  # never overwritten later
+                if own_path:
+                    dock.input_paths.add(Path(own_path))
+                # Datenquelle pre-filled with the attributions of the sources (E28)
+                attributions = [source.attribution for source in sources if source.attribution]
+                if attributions and not dock.output_draft.get("source"):
+                    dock.output_draft["source"] = "; ".join(attributions)
                 dock.show_page(3)
-                text = (f"„{path.name}“ geladen: {len(result.layers)} Layer. "
+                names = ", ".join(source.label for source in sources)
+                text = (f"Geladen: {names} – {len(result.layers)} Layer. "
                         "Bitte die Prüfhinweise ansehen.")
-                if converted["path"] is not None:
-                    dock.input_paths.add(Path(converted["path"]))
-                    text += (f"\n{len(converted['layers'])} Layer lagen in einem anderen CRS und "
-                             f"wurden als Kopie nach {settings['project_crs']} umgerechnet "
-                             f"({Path(converted['path']).name}); die Originaldatei ist unverändert.")
-                dock.show_message(text, kind="info")
+                if matches:
+                    text += (f"\n{len(matches)} Objekte kommen in mehreren Quellen vor – "
+                             "in Schritt 6 wählst du je Kategorie die Quelle.")
+                if info["converted"] is not None:
+                    used, changed = info["converted"]
+                    text += (f"\n{len(changed)} Layer der eigenen Datei lagen in einem anderen CRS "
+                             f"und wurden als Kopie nach {settings['project_crs']} umgerechnet "
+                             f"({Path(used).name}); die Originaldatei ist unverändert.")
+                for note in info["notes"]:
+                    text += "\n" + note
+                dock.show_message(text, kind="warning" if info["notes"] else "info")
             except Exception as error:  # show every program error visibly
                 dock.show_unexpected_error(UI_LABELS["load_data"], error)
 
-        task = QgsTask.fromFunction(
-            f"Urban Analysis: {path.name} laden", run_import, on_finished=finished
-        )
-        task.progressChanged.connect(
-            lambda percent: dock.set_busy_progress(percent) if not dock.closing else None
-        )
+        task = QgsTask.fromFunction("Urban Analysis: Daten laden", run, on_finished=finished)
+        task.progressChanged.connect(progress_changed)
         dock.import_task = task
         QgsApplication.taskManager().addTask(task)
 
@@ -2350,27 +2550,41 @@ def _create_dock(plugin):
         groups = flow.issues_by_severity()
         if not any(groups.values()):
             page.layout.addWidget(QLabel("Keine Prüfhinweise."))
+        later = []  # decided in step 6: one folded section at the end
         for severity in SEVERITY_ORDER:
-            issues = groups[severity]
+            issues = [issue for issue in groups[severity] if issue.code not in DECIDED_LATER]
+            later.extend((severity, issue) for issue in groups[severity] if issue.code in DECIDED_LATER)
             if not issues:
                 continue
+            entries = merge_same_hints(issues)
+            # count every hint (as in the line above), merged ones show once
             title = f"{SEVERITY_LABELS[severity][1]} ({len(issues)})"
             group_layout = choice_with_panel(page, f"review_{severity}", title)
-            for issue in issues:
-                group_layout.addWidget(issue_card(flow, severity, issue))
-            page.widgets[f"review_{severity}_button"].setChecked(True)
+            for text, members in entries:
+                group_layout.addWidget(issue_card(flow, severity, members, text))
+            # open: errors, and warnings with something still to confirm
+            to_confirm = any(flow.needs_review_confirmation(issue) and issue.confirmed is not True
+                             for issue in issues)
+            if severity == "error" or to_confirm:
+                page.widgets[f"review_{severity}_button"].setChecked(True)
+        if later:
+            group_layout = choice_with_panel(page, "review_later", f"{REVIEW_LATER_TITLE} ({len(later)})")
+            for severity, issue in later:
+                group_layout.addWidget(issue_card(flow, severity, [issue], issue.message))
 
-    def issue_card(flow, severity, issue):
+    def issue_card(flow, severity, members, message):
+        """One hint (or several merged ones with the same text) as a card."""
+        issue = members[0]
         card = QFrame()
         set_role(card, f"issue-{severity}")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 6, 8, 6)
-        short, more = split_summary(issue.message, getattr(issue, "details", None))
+        short, more = split_summary(message, getattr(issue, "details", None))
         text = QLabel(short)
         text.setWordWrap(True)
         key = issue_icon_key(flow, issue)
         card_layout.addWidget(with_icon(key, text) if key else text)
-        if issue.code in DECIDED_IN_HARMONIZATION:
+        if issue.code in DECIDED_LATER:
             step6 = QLabel("Entscheidung in Schritt 6 „Harmonisierung“")
             step6.setWordWrap(True)
             set_role(step6, "hint")
@@ -2402,11 +2616,12 @@ def _create_dock(plugin):
             card_layout.addWidget(more_label)
         if flow.needs_review_confirmation(issue):
             confirm = QCheckBox("Gelesen und bestätigt")
-            confirm.setChecked(issue.confirmed is True)
+            confirm.setChecked(all(member.confirmed is True for member in members))
             confirm.setCursor(Qt.PointingHandCursor)
 
-            def toggled(checked, issue=issue):
-                flow.confirm_issue(issue, checked)
+            def toggled(checked, members=members):
+                for member in members:  # merged hints are confirmed together
+                    flow.confirm_issue(member, checked)
                 dock.clear_message()
 
             confirm.toggled.connect(toggled)
@@ -2705,11 +2920,13 @@ def _create_dock(plugin):
     # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
     def build_harmonization(page):
         flow = workflow()
+        has_sources = build_source_choice(page)
         layers = flow.duplicate_layers()
         if not layers:
-            none = QLabel(NO_DUPLICATES_TEXT)
-            none.setWordWrap(True)
-            page.layout.addWidget(none)
+            if not has_sources:
+                none = QLabel(NO_DUPLICATES_TEXT)
+                none.setWordWrap(True)
+                page.layout.addWidget(none)
             return
         intro = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION_STEP6)
         intro.setWordWrap(True)
@@ -2728,6 +2945,82 @@ def _create_dock(plugin):
                 layer_icon_key(flow, layer.table_name),
                 opened=layer.table_name not in flow.duplicate_decisions)
             panel.addWidget(duplicate_card(flow, layer))
+
+    # 6a (W12, M14): same objects from ALKIS and OSM - one source per category
+    def build_source_choice(page):
+        """Returns True if there was something to choose."""
+        flow = workflow()
+        matches = getattr(flow, "source_matches", None) or []
+        if not matches:
+            return False
+        from .source_matching import priority_choices
+
+        choices = priority_choices(matches)
+        if getattr(flow, "source_priority", None) is None:
+            flow.source_priority = {c.category: c.suggested_source for c in choices}
+            flow.source_uncertain_ok = set()
+        heading = QLabel(f"<b>{SOURCES_TITLE}</b>")
+        heading.setWordWrap(True)
+        page.layout.addWidget(heading)
+        intro = QLabel(SOURCES_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        for number, choice in enumerate(choices):
+            panel = collapsible(
+                page, f"src_{number}",
+                source_title_text(choice.category, choice.group_count, choice.source_kinds),
+                icon_key(category=choice.category), opened=True)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 2, 0, 0)
+            group = QButtonGroup(page.widget)
+            for kind in choice.source_kinds:
+                text = kind + (" (Vorschlag)" if kind == choice.suggested_source else "")
+                button = QRadioButton(text)
+                button.setCursor(Qt.PointingHandCursor)
+                button.setChecked(flow.source_priority.get(choice.category) == kind)
+                button.toggled.connect(
+                    lambda on, c=choice.category, k=kind: on and flow.source_priority.__setitem__(c, k))
+                group.addButton(button)
+                row.addWidget(button)
+            row.addStretch()
+            panel.addLayout(row)
+            page.widgets[f"src_group_{number}"] = group  # keep the group alive
+            explain = QLabel(source_choice_hint_text(choice))
+            explain.setWordWrap(True)
+            set_role(explain, "hint")
+            panel.addWidget(explain)
+            if choice.uncertain_count:
+                uncertain = QCheckBox(uncertain_sources_label(choice.uncertain_count))
+                uncertain.setChecked(choice.category in flow.source_uncertain_ok)
+                uncertain.toggled.connect(
+                    lambda on, c=choice.category: (flow.source_uncertain_ok.add(c) if on
+                                                   else flow.source_uncertain_ok.discard(c)))
+                panel.addWidget(uncertain)
+                note = QLabel(UNCERTAIN_SOURCES_HINT)
+                note.setWordWrap(True)
+                set_role(note, "hint")
+                panel.addWidget(note)
+        return True
+
+    def apply_sources(flow):
+        """Keep, per matched group, only the chosen source.  Starts each time
+        from the records before the first choice, so going back and choosing
+        again works.  Returns the number of removed objects or None."""
+        matches = getattr(flow, "source_matches", None) or []
+        if not matches:
+            return None
+        from .source_matching import apply_source_priority
+
+        base = getattr(flow, "records_before_sources", None)
+        if base is None:
+            base = flow.result.harmonized_records
+            flow.records_before_sources = base
+        uncertain_ok = getattr(flow, "source_uncertain_ok", set())
+        confirmed = [m.group_id for m in matches if not m.certain and m.category in uncertain_ok]
+        kept = apply_source_priority(base, flow.source_priority or {}, matches, confirmed)
+        flow.result.harmonized_records = kept
+        return len(base) - len(kept)
 
     def duplicate_card(flow, layer):
         card = QWidget()
@@ -2805,10 +3098,14 @@ def _create_dock(plugin):
                 "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
                 "Noch offen: " + ", ".join(readable_names().layer(name) for name in open_layers)
             )
-        if not flow.duplicate_layers():
-            return True
-        removed = flow.apply_duplicate_decisions()
-        dock.next_message = duplicates_applied_text(removed)
+        texts = []
+        if flow.duplicate_layers():
+            texts.append(duplicates_applied_text(flow.apply_duplicate_decisions()))
+        dropped = apply_sources(flow)
+        if dropped is not None:
+            texts.append(sources_applied_text(dropped))
+        if texts:
+            dock.next_message = "\n".join(texts)
         return True
 
     # 7 Kartenthema
@@ -2837,6 +3134,8 @@ def _create_dock(plugin):
     def build_accessibility(page):
         flow = workflow()
         choice = getattr(flow, "accessibility", None) or AccessibilityChoice()
+        if getattr(flow, "own_targets", None) is None:
+            flow.own_targets = list(choice.own_targets)
         try:
             from .accessibility import target_choices
             available = target_choices(flow.result.harmonized_records)
@@ -2853,8 +3152,8 @@ def _create_dock(plugin):
             label.setWordWrap(True)
             details_layout.addWidget(label)
 
-        # ① targets: whole categories or single kinds (subtypes)
-        step_heading("① Ziele wählen")
+        # ① targets from the data: whole categories or single kinds (subtypes)
+        step_heading("① Ziele aus den Daten")
         tree = QTreeWidget()
         tree.setHeaderHidden(True)
         if available:
@@ -2888,103 +3187,249 @@ def _create_dock(plugin):
             set_role(none, "warning")
             details_layout.addWidget(none)
 
-        # ② radii per chosen target: suggested from the guide values
-        step_heading("② " + ACCESS_RADII_GUIDE)
-        radii_box = QWidget()
-        radii_layout = QVBoxLayout(radii_box)
-        radii_layout.setContentsMargins(0, 0, 0, 0)
-        details_layout.addWidget(radii_box)
-        radii_hint = QLabel(ACCESS_RADII_HINT + " " + GUIDE_NOTE)
-        radii_hint.setWordWrap(True)
-        set_role(radii_hint, "hint")
-        details_layout.addWidget(radii_hint)
-        page.widgets["access_radii"] = {}  # category -> line edit
-        own_radii = dict(choice.radii)  # typed values survive a rebuild of the rows
+        # ② own targets: set points or pick objects in the map
+        step_heading("② Eigene Ziele (optional)")
+        own_hint = QLabel(OWN_TARGETS_HINT)
+        own_hint.setWordWrap(True)
+        set_role(own_hint, "hint")
+        details_layout.addWidget(own_hint)
+        own_buttons = QWidget()
+        own_row = QHBoxLayout(own_buttons)
+        own_row.setContentsMargins(0, 0, 0, 0)
+        point_button = QPushButton("Punkt setzen")
+        object_button = QPushButton("Objekt anklicken")
+        for button, mode in ((point_button, "point"), (object_button, "object")):
+            set_role(button, "secondary")
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _c=False, m=mode: start_target_pick(page, m))
+            own_row.addWidget(button)
+        own_row.addStretch()
+        details_layout.addWidget(own_buttons)
+        own_list = QWidget()
+        own_list_layout = QVBoxLayout(own_list)
+        own_list_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.addWidget(own_list)
+        page.widgets["access_own_list"] = own_list_layout
+        refresh_own_targets(page)
 
-        def chosen_targets():
-            return tree_targets(tree)
+        # ③ rings: tick how many, set each radius and colour
+        step_heading("③ Ringe (Radius in Metern, Luftlinie)")
+        rings_box = QWidget()
+        rings_layout = QVBoxLayout(rings_box)
+        rings_layout.setContentsMargins(0, 0, 0, 0)
+        rings_layout.setSpacing(2)
+        details_layout.addWidget(rings_box)
+        ring_widgets = []
+        for number, (on, metres, color) in enumerate(choice.rings, start=1):
+            row_box = QWidget()
+            row = QHBoxLayout(row_box)
+            row.setContentsMargins(0, 0, 0, 0)
+            tick = QCheckBox(f"Ring {number}")
+            tick.setChecked(on)
+            spin = QSpinBox()
+            spin.setRange(1, MAX_RADIUS_M)
+            spin.setSingleStep(50)
+            spin.setSuffix(" m")
+            spin.setValue(int(metres))
+            spin.setEnabled(on)
+            spin.setToolTip("Radius dieses Rings in Metern (Luftlinie)")
+            color_button = QgsColorButton()
+            color_button.setColor(QColor(color))
+            color_button.setFixedWidth(46)
+            color_button.setToolTip(f"Farbe für Ring {number}")
+            radius_box = stepper(spin)
+            tick.toggled.connect(radius_box.setEnabled)
+            row.addWidget(tick)
+            row.addWidget(radius_box)
+            row.addWidget(color_button)
+            row.addStretch()
+            rings_layout.addWidget(row_box)
+            ring_widgets.append((tick, spin, color_button))
+            # only two rings at first (and every ticked one); more on request
+            row_box.setVisible(number <= 2 or on)
+        page.widgets["access_rings"] = ring_widgets
+        more_rings = QPushButton("+ Weiteren Ring hinzufügen")
+        set_role(more_rings, "secondary")
+        more_rings.setCursor(Qt.PointingHandCursor)
+        rows = [rings_layout.itemAt(i).widget() for i in range(rings_layout.count())]
 
-        def remember_radii():
-            for category, line in page.widgets["access_radii"].items():
-                own_radii[category] = line.text()
-
-        def refresh_radii(*_args):
-            remember_radii()
-            _clear_layout(radii_layout)
-            lines = {}
-            targets = chosen_targets()
-            if not targets:
-                none = QLabel("Erst oben ein Ziel ankreuzen.")
-                set_role(none, "hint")
-                radii_layout.addWidget(none)
-            for category, subtypes in targets.items():
-                guide_radii, guide_text = guide_value(category, subtypes)
-                label = QLabel(f"{', '.join(subtypes) if subtypes else category}:")
-                label.setWordWrap(True)
-                radii_layout.addWidget(label)
-                typed = own_radii.get(category)
-                text = typed if isinstance(typed, str) else radii_text(typed or guide_radii)
-                line = QLineEdit(text)
-                line.setPlaceholderText(radii_text(guide_radii))
-                line.editingFinished.connect(refresh_colors)
-                radii_layout.addWidget(line)
-                guide = QLabel(f"Richtwert {radii_text(guide_radii)} m – {guide_text}")
-                guide.setWordWrap(True)
-                set_role(guide, "hint")
-                radii_layout.addWidget(guide)
-                lines[category] = line
-            page.widgets["access_radii"] = lines
-            refresh_colors()
+        def show_next_ring():
+            hidden = [index for index, row in enumerate(rows) if row.isHidden()]
+            if hidden:
+                rows[hidden[0]].setVisible(True)
+                ring_widgets[hidden[0]][0].setChecked(True)  # a new ring is meant to be used
+            more_rings.setVisible(len(hidden) > 1)
             QTimer.singleShot(0, dock.fit_wrapped_labels)
 
-        # ③ display: fill between the rings (15 %), colours per ring
-        step_heading("③ Darstellung")
+        more_rings.clicked.connect(show_next_ring)
+        more_rings.setVisible(any(row.isHidden() for row in rows))
+        more_row = QHBoxLayout()
+        more_row.setContentsMargins(0, 2, 0, 0)
+        more_row.addWidget(more_rings)
+        more_row.addStretch()
+        details_layout.addLayout(more_row)
+        guide_box = QWidget()
+        guide_layout = QVBoxLayout(guide_box)
+        guide_layout.setContentsMargins(0, 4, 0, 0)
+        details_layout.addWidget(guide_box)
+        note = QLabel(GUIDE_NOTE)
+        note.setWordWrap(True)
+        set_role(note, "hint")
+        details_layout.addWidget(note)
+
+        def apply_guide(guide_radii):
+            rings = rings_with_guide(ring_values(page), guide_radii)
+            for (tick, spin, _color), (on, metres, _c) in zip(ring_widgets, rings):
+                tick.setChecked(on)
+                spin.setValue(int(metres))
+            dock.show_message(f"Richtwert übernommen: {radii_text(guide_radii)} m.", kind="info")
+
+        def refresh_guides(*_args):
+            _clear_layout(guide_layout)
+            for category, subtypes in tree_targets(tree).items():
+                guide_radii, guide_text = guide_value(category, subtypes)
+                line = QWidget()
+                line_layout = QHBoxLayout(line)
+                line_layout.setContentsMargins(0, 0, 0, 0)
+                name = ", ".join(subtypes) if subtypes else category
+                text = QLabel(f"Richtwert {name}: {radii_text(guide_radii)} m – {guide_text}")
+                text.setWordWrap(True)
+                set_role(text, "hint")
+                take = QPushButton("übernehmen")
+                set_role(take, "secondary")
+                take.setCursor(Qt.PointingHandCursor)
+                take.setToolTip("Die Ringe auf diesen Richtwert setzen")
+                take.clicked.connect(lambda _c=False, r=guide_radii: apply_guide(r))
+                line_layout.addWidget(text, 1)
+                line_layout.addWidget(take, 0, Qt.AlignmentFlag.AlignTop)
+                guide_layout.addWidget(line)
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        # ④ display: fill between the rings with a chosen opacity
+        step_heading("④ Darstellung")
+        fill_row_box = QWidget()
+        fill_row = QHBoxLayout(fill_row_box)
+        fill_row.setContentsMargins(0, 0, 0, 0)
         fill = QCheckBox(ACCESS_FILL_LABEL)
         fill.setChecked(choice.fill)
-        details_layout.addWidget(fill)
-        colors_box = QWidget()
-        colors_layout = QHBoxLayout(colors_box)
-        colors_layout.setContentsMargins(INDENT_PX, 0, 0, 0)
-        details_layout.addWidget(colors_box)
-        page.widgets["access_colors"] = []
+        opacity = QSpinBox()
+        opacity.setRange(0, 100)
+        opacity.setSingleStep(5)
+        opacity.setSuffix(" %")
+        opacity.setValue(int(round(choice.opacity * 100)))
+        opacity.setToolTip("Deckkraft der Flächen zwischen den Ringen")
+        opacity.setEnabled(choice.fill)
+        opacity_box = stepper(opacity)
+        fill_row.addWidget(fill)
+        fill_row.addStretch()
+        details_layout.addWidget(fill_row_box)
+        # own line: in the narrow panel the row would cut text and buttons
+        opacity_row_box = QWidget()
+        opacity_row = QHBoxLayout(opacity_row_box)
+        opacity_row.setContentsMargins(INDENT_PX, 0, 0, 0)
+        opacity_row.addWidget(QLabel("Deckkraft der Flächen"))
+        opacity_row.addWidget(opacity_box)
+        opacity_row.addStretch()
+        details_layout.addWidget(opacity_row_box)
+        fill.toggled.connect(opacity_row_box.setEnabled)
+        opacity_row_box.setEnabled(choice.fill)
 
-        def refresh_colors(*_args):
-            # as many colours as the target with the most radii
-            values = ()
-            for line in page.widgets["access_radii"].values():
-                try:
-                    found = parse_radii(line.text())
-                except RadiusError:
-                    continue
-                if len(found) > len(values):
-                    values = found
-            values = values or (300, 500)
-            current = [b.color().name() for b in page.widgets["access_colors"]] or list(choice.colors)
-            _clear_layout(colors_layout)
-            buttons = []
-            for number, color in enumerate(ring_colors(values, current), start=1):
-                box = QWidget()
-                box_layout = QVBoxLayout(box)
-                box_layout.setContentsMargins(0, 0, 4, 0)
-                button = QgsColorButton()
-                button.setColor(QColor(color))
-                button.setFixedWidth(46)
-                button.setToolTip(f"Farbe für den {number}. Ring von innen")
-                box_layout.addWidget(button)
-                caption = QLabel(f"{number}. Ring")
-                set_role(caption, "hint")
-                box_layout.addWidget(caption)
-                colors_layout.addWidget(box)
-                buttons.append(button)
-            colors_layout.addStretch()
-            page.widgets["access_colors"] = buttons
-            colors_box.setVisible(fill.isChecked())
-
-        fill.toggled.connect(lambda on: colors_box.setVisible(on))
         if available:
-            tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_radii))
-        refresh_radii()
-        page.widgets.update(access_tree=tree, access_fill=fill, access_available=bool(available))
+            tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
+        refresh_guides()
+        page.widgets.update(access_tree=tree, access_fill=fill, access_opacity=opacity,
+                            access_available=bool(available))
+        show_own_markers()
+
+    def stepper(spin):
+        """Number field with visible '−' and '+' buttons (the small arrows of
+        Qt are hard to see, in the pixel style not at all)."""
+        spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        box = QWidget()
+        layout = QHBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        for text, step, tip in (("−", -1, "kleiner"), ("+", 1, "größer")):
+            button = QPushButton(text)
+            set_role(button, "secondary")
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFixedWidth(34)
+            button.setStyleSheet("padding: 0px; min-width: 0px; font-weight: bold;")
+            button.setToolTip(f"{spin.singleStep()} {spin.suffix().strip()} {tip}".strip())
+            button.setAutoRepeat(True)  # held down: keeps counting
+            button.clicked.connect(lambda _c=False, s=step: spin.stepBy(s))
+            layout.addWidget(button)
+            if step < 0:
+                layout.addWidget(spin)
+        # switched on/off as a whole (box.setEnabled) by the caller
+        box.setEnabled(spin.isEnabled())
+        spin.setEnabled(True)
+        return box
+
+    def ring_values(page):
+        return tuple((tick.isChecked(), spin.value(), color.color().name())
+                     for tick, spin, color in page.widgets["access_rings"])
+
+    def refresh_own_targets(page):
+        """The list of own targets with 'entfernen' per entry."""
+        layout = page.widgets.get("access_own_list")
+        if layout is None:
+            return
+        _clear_layout(layout)
+        targets = workflow().own_targets
+        for index, target in enumerate(targets):
+            line = QWidget()
+            line_layout = QHBoxLayout(line)
+            line_layout.setContentsMargins(0, 0, 0, 0)
+            text = QLabel(f"• {target.label}")
+            text.setWordWrap(True)
+            remove = QPushButton("entfernen")
+            set_role(remove, "secondary")
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.clicked.connect(lambda _c=False, i=index: remove_own_target(page, i))
+            line_layout.addWidget(text, 1)
+            line_layout.addWidget(remove)
+            layout.addWidget(line)
+        if not targets:
+            none = QLabel("Noch keine eigenen Ziele.")
+            set_role(none, "hint")
+            layout.addWidget(none)
+        show_own_markers()
+        QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+    def remove_own_target(page, index):
+        targets = workflow().own_targets
+        if 0 <= index < len(targets):
+            del targets[index]
+        refresh_own_targets(page)
+
+    def show_own_markers():
+        if dock.step9_tab != "access" or dock.current != len(dock.pages) - 1:
+            dock.hide_own_markers()
+            return
+        geometries = [QgsGeometry.fromWkt(target.wkt) for target in workflow().own_targets]
+        dock.show_own_markers(geometries, target_crs())
+
+    def start_target_pick(page, mode):
+        """'Punkt setzen' / 'Objekt anklicken': map tool until right click or Esc."""
+        project_crs = QgsCoordinateReferenceSystem(workflow().result.project_crs)
+
+        def picked(geometry, attributes, canvas_crs):
+            if canvas_crs != project_crs:
+                geometry.transform(QgsCoordinateTransform(canvas_crs, project_crs, QgsProject.instance()))
+            targets = workflow().own_targets
+            label = own_target_label(len(targets) + 1, attributes)
+            targets.append(OwnTarget(geometry.asWkt(), label, attributes))
+            refresh_own_targets(page)
+            dock.show_message(f"Eigenes Ziel hinzugefügt: {label}. Weitere setzen oder mit "
+                              "Rechtsklick/Esc beenden.", kind="info")
+
+        def finished(message):
+            dock.show_message(message or "Eigene Ziele: fertig.", kind="info")
+
+        dock.show_message(OWN_POINT_INSTRUCTIONS if mode == "point" else OWN_OBJECT_INSTRUCTIONS,
+                          kind="info")
+        dock.start_picking(mode, picked, finished)
 
     def tree_targets(tree):
         """{category: subtypes} of the ticked targets (empty = whole category)."""
@@ -3001,19 +3446,14 @@ def _create_dock(plugin):
         return targets
 
     def accessibility_from(page):
-        """Read the accessibility settings of step 9 (raises RadiusError)."""
+        """Read the accessibility settings of the last step."""
         widgets = page.widgets
-        radii = {}
-        for category, line in widgets["access_radii"].items():
-            try:
-                radii[category] = parse_radii(line.text())
-            except RadiusError as error:
-                raise RadiusError(f"{category}: {error}")
         return AccessibilityChoice(
             targets=tree_targets(widgets["access_tree"]),
-            radii=radii,
+            rings=ring_values(page),
             fill=widgets["access_fill"].isChecked(),
-            colors=tuple(button.color().name() for button in widgets["access_colors"]),
+            opacity=widgets["access_opacity"].value() / 100,
+            own_targets=list(workflow().own_targets),
         )
 
     def validate_topic(page):
@@ -3179,9 +3619,18 @@ def _create_dock(plugin):
         return QgsProject.instance().layerTreeRoot().findGroup(dock.last_group_name)
 
     def build_summary(page):
-        """Last step: a row of buttons (always selectable), below the chosen area."""
+        """Last step: a row of buttons fixed below the progress (does not
+        scroll), below it the chosen area.  'Erreichbarkeit' and 'Speichern'
+        stay grey until the layers exist ('Ausgabe' first)."""
+        has_layers = result_group() is not None
+        if not has_layers:
+            dock.step9_tab = "output"
         tab = dock.step9_tab
-        row = QHBoxLayout()
+        if tab != "access":
+            dock.hide_own_markers()
+        _clear_layout(dock.sticky_layout)
+        row_box = QWidget()
+        row = QHBoxLayout(row_box)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         for key, text in STEP9_TABS:
@@ -3190,9 +3639,13 @@ def _create_dock(plugin):
             button.setChecked(key == tab)
             button.setCursor(Qt.PointingHandCursor)
             set_role(button, "choice")
+            if key != "output" and not has_layers:
+                button.setEnabled(False)
+                button.setToolTip(LAYERS_FIRST_TOOLTIP)
             button.clicked.connect(lambda _checked=False, k=key: switch_step9_tab(page, k))
             row.addWidget(button)
-        page.layout.addLayout(row)
+        dock.sticky_layout.addWidget(row_box)
+        dock.sticky.show()
         panel = QFrame()
         set_role(panel, "panel")
         panel_layout = QVBoxLayout(panel)
@@ -3214,6 +3667,7 @@ def _create_dock(plugin):
     def rebuild_last_step(page):
         page.build()
         make_texts_selectable(page.widget)
+        dock.scroll.verticalScrollBar().setValue(0)
         QTimer.singleShot(0, dock.fit_wrapped_labels)
 
     def remember_accessibility(page):
@@ -3231,7 +3685,7 @@ def _create_dock(plugin):
         area.layout.addWidget(label)
 
     def area_button(area, page, text, action, context):
-        """The own main button of an area (at its end)."""
+        """The own main button of an area."""
         button = PixelButton(text, "primary")
         button.setCursor(Qt.PointingHandCursor)
 
@@ -3244,19 +3698,18 @@ def _create_dock(plugin):
 
         button.clicked.connect(clicked)
         row = QHBoxLayout()
-        row.setContentsMargins(0, 8, 0, 0)
+        row.setContentsMargins(0, 8, 0, 4)
         row.addStretch()
         row.addWidget(button)
         area.layout.addLayout(row)
         return button
 
-    # Ausgabe: map style, data source, 'Layer erzeugen'
+    # Ausgabe: map style, data source, 'Layer erzeugen' (button at the top)
     def build_layers_area(area):
         flow = workflow()
         names = readable_names()
         draft = output_draft()
         group = result_group()
-        area_hint(area, LAYERS_INTRO)
         area.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
@@ -3264,25 +3717,29 @@ def _create_dock(plugin):
         source = QLineEdit(draft["source"])
         source.textChanged.connect(lambda text: draft.__setitem__("source", text))
         source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
+        source.setToolTip(DATA_SOURCE_HINT)
         area.layout.addWidget(source)
-        area_hint(area, DATA_SOURCE_HINT)
-        if dock.last_reports is not None and group is not None:
-            area_hint(area, DONE_TITLE, "status")
-            area.layout.addWidget(summary_card(
-                "Angelegte Ergebnis-Layer",
-                result_rows(dock.last_reports,
-                            {d.layer_id: d.category for d in flow.result.layers})))
-            area_hint(area, done_hint_text(group.name()))
-        else:
-            area.layout.addWidget(summary_card(
-                "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
-            area.layout.addWidget(summary_card(
-                "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
         area_button(area, area_page(area), LAYERS_AGAIN_ACTION if group is not None else LAYERS_ACTION,
                     create_layers_clicked, LAYERS_ACTION)
+        if dock.last_reports is not None and group is not None:
+            area_hint(area, DONE_TITLE + " " + done_hint_text(group.name()), "status")
+            details = collapsible(area, "layers_done",
+                                  f"Angelegte Ergebnis-Layer ({len(dock.last_reports)})")
+            details.addWidget(summary_card("Angelegte Ergebnis-Layer", result_rows(
+                dock.last_reports, {d.layer_id: d.category for d in flow.result.layers})))
+            return
+        area_hint(area, LAYERS_INTRO)
+        planned = planned_layer_rows(flow, names)
+        details = collapsible(area, "layers_planned",
+                              f"Diese Ergebnis-Layer werden angelegt ({len(planned)})")
+        details.addWidget(summary_card("Diese Ergebnis-Layer werden angelegt", planned))
+        basics = collapsible(area, "layers_basics", "Grundlagen (Gebiet, CRS, Quelle)")
+        basics.addWidget(summary_card(
+            "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
 
     def area_page(area):
-        return dock.pages[dock.current]
+        # the last step (dock.current is still the previous page while it is built)
+        return dock.pages[-1]
 
     def create_layers_clicked(page):
         if make_layers(ask_same=True) is None:
@@ -3290,13 +3747,21 @@ def _create_dock(plugin):
         rebuild_last_step(page)
         dock.show_message(result_layers_text(dock.last_reports) + "\n" + LAYERS_NEXT_HINT, kind="info")
 
+    def geometry_kind(layer):
+        """'point', 'line' or 'polygon' of a QGIS layer."""
+        kind = layer.geometryType()
+        if kind == Qgis.GeometryType.Point:
+            return "point"
+        if kind == Qgis.GeometryType.Line:
+            return "line"
+        return "polygon"
+
     def ensure_layers():
-        """The result group; created first if there is none yet, so every
-        area works on its own.  None if that failed (message shown)."""
+        """The result group of 'Layer erzeugen', or None with a message."""
         group = result_group()
-        if group is not None:
-            return group
-        return make_layers(ask_same=False)
+        if group is None:
+            reject(NEEDS_LAYERS_MESSAGE)
+        return group
 
     def make_layers(ask_same):
         """Build the result layers and add them to QGIS as a new group."""
@@ -3349,9 +3814,11 @@ def _create_dock(plugin):
             style = draft.get("map_style", DEFAULT_MAP_STYLE)
             for layer_id, layer in layer_objects.items():
                 apply_style(layer, categories.get(layer_id), style)
+            # points on top, then lines, then areas; inside each the usual rank
             layer_objects = dict(sorted(
                 layer_objects.items(),
-                key=lambda item: -draw_rank(categories.get(item[0]))))
+                key=lambda item: layer_order_key(
+                    geometry_kind(item[1]), draw_rank(categories.get(item[0])))))
             group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
         finally:
             QApplication.restoreOverrideCursor()
@@ -3370,20 +3837,15 @@ def _create_dock(plugin):
         if dock.last_access_lines:
             area.layout.addWidget(summary_card("Ergebnis der letzten Analyse",
                                                [(None, line) for line in dock.last_access_lines]))
-        if result_group() is None:
-            area_hint(area, LAYERS_FIRST_HINT)
         area_button(area, area_page(area), ACCESS_ACTION, run_accessibility, ACCESS_ACTION)
 
     def run_accessibility(page):
         """'Analyse starten': distances into the buildings of the map, targets
         (copies with attribute table) and dashed radii as sub-groups."""
         flow = workflow()
-        if not page.widgets.get("access_available"):
-            return reject(ACCESS_NO_TARGETS)
-        try:
-            choice = accessibility_from(page)
-        except RadiusError as error:
-            return reject(str(error))
+        choice = accessibility_from(page)
+        if not page.widgets.get("access_available") and not choice.own_targets:
+            return reject(ACCESS_NO_TARGETS + " " + OWN_TARGETS_HINT)
         problem = choice_problem(choice)
         if problem:
             return reject(problem)
@@ -3467,13 +3929,22 @@ def _create_dock(plugin):
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
         if dock.last_saved:
             area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
-        if result_group() is None:
-            area_hint(area, LAYERS_FIRST_HINT)
         area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
+
+    def current_used_sources(flow):
+        """The sources that really delivered objects (E28), [] if unknown."""
+        if not dock.sources:
+            return []
+        from .data_pipeline import used_sources
+
+        return used_sources(dock.sources, flow.result.harmonized_records)
 
     def write_map_pdf(flow, path, layers):
         """PDF map with the settings of 'Speichern'."""
         draft = dock.output_draft
+        used = current_used_sources(flow)
+        source = (data_source_text(used, flow.result.output.data_source) if used
+                  else flow.result.output.data_source)
         return export_map_pdf(
             path, layers=layers,
             grey_outside=draft.get("grey_outside", True),
@@ -3482,7 +3953,7 @@ def _create_dock(plugin):
             crs_authid=flow.result.project_crs,
             title=draft.get("pdf_title") or flow.result.selected_topic or "Siedlungsstruktur",
             subtitle=draft.get("pdf_subtitle", ""),
-            data_source=flow.result.output.data_source,
+            data_source=source,
             page=draft.get("pdf_page", "A3"),
             orientation=draft.get("pdf_orientation", "auto"),
             scale=draft.get("pdf_scale") or None,
@@ -3514,7 +3985,8 @@ def _create_dock(plugin):
         visible = [node.layer() for node in nodes if node.isVisible()]
         jobs = []
         if geopackage:
-            jobs.append(("geopackage", lambda path: write_result_geopackage(path, all_layers)))
+            used = current_used_sources(flow)
+            jobs.append(("geopackage", lambda path: write_result_geopackage(path, all_layers, used)))
         if pdf:
             if not visible:
                 return reject(REMAKE_NO_LAYERS_MESSAGE)
