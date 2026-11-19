@@ -458,7 +458,7 @@ die Rechnung aus F7 bleibt) → F4 (Dubletten-Text aus F3 genügt) → F6/F7.
 #### F0. G11 – Vertrag für Spalten, Hinweise und Dubletten *(gemeinsam)*
 
 - **Absicht:** Ein Vertrag für alles, was Schritt 4–6 und die
-  Attributtabelle brauchen. Liskas Vorschlag (G6, oben) plus E29–E31.
+  Attributtabelle brauchen. Der Vorschlag von Person Windows (G6, oben) plus E29–E31.
 - **Ziel:** Eigener PR nur für `contracts.py`, `tests/test_contracts.py` und
   `PLAN.md` §3.4 (Kernfelder statt 11 Pflichtfelder). Neu, alles optional
   mit leerem Standardwert: `ValidationIssue.details`, `.action`,
