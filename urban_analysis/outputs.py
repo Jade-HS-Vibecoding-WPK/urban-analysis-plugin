@@ -50,6 +50,59 @@ def extra_field_names(records) -> Dict[str, str]:
     return names
 
 
+# Vertretung Mac (19.11.2026, QGIS-Test): order and choice of the columns of
+# a result layer.  Objekt-ID first, then what it is, where it is, its
+# properties, the other source columns, and where the data come from last.
+# Target fields outside ALWAYS_FIELDS and source columns appear only if at
+# least one object of the layer has a value.
+ALWAYS_FIELDS = ("object_id", "object_type", "category", "source")
+NAME_COLUMNS = ("Name",)  # readable name of the source column 'name'
+COLUMN_ORDER_FRONT = ("object_id",)
+COLUMN_ORDER_WHAT = ("object_type", "category", "object_detail")
+COLUMN_ORDER_WHERE = ("address",)
+COLUMN_ORDER_PROPERTIES = ("floors", "area_m2", "year", "status")
+COLUMN_ORDER_ORIGIN = ("source", "source_name")
+
+
+def result_columns(records) -> List[Tuple[str, str, str, str]]:
+    """Columns of one result layer in their order: ``(where, key, field
+    name, kind)`` with ``where`` = "target" (``record.attributes``) or
+    "extra" (``record.extra_attributes``); kind is text/double/int."""
+    records = list(records)
+    kinds = dict(result_field_specs())
+    extras = extra_field_names(records)
+
+    def filled_target(name):
+        return name in ALWAYS_FIELDS or any(
+            (record.attributes or {}).get(name) not in (None, "") for record in records)
+
+    def filled_extra(key):
+        return any((getattr(record, "extra_attributes", None) or {}).get(key) not in (None, "")
+                   for record in records)
+
+    def targets(names):
+        return [("target", name, name, kinds[name]) for name in names if filled_target(name)]
+
+    named = [key for key in extras if extras[key] in NAME_COLUMNS and filled_extra(key)]
+    others = [key for key in extras if key not in named and filled_extra(key)]
+    return (
+        targets(COLUMN_ORDER_FRONT)
+        + [("extra", key, extras[key], "text") for key in named]
+        + targets(COLUMN_ORDER_WHAT)
+        + targets(COLUMN_ORDER_WHERE)
+        + targets(COLUMN_ORDER_PROPERTIES)
+        + [("extra", key, extras[key], "text") for key in others]
+        + targets(COLUMN_ORDER_ORIGIN)
+    )
+
+
+def column_value(column, record):
+    """Value of one ``result_columns`` entry for one record."""
+    where, key, _field_name, kind = column
+    values = record.attributes if where == "target" else getattr(record, "extra_attributes", None)
+    return field_value(kind, (values or {}).get(key))
+
+
 def field_value(kind: str, value):
     """Value for a result field; empty values stay NULL instead of ''."""
     if value in (None, ""):
@@ -220,7 +273,6 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
 
     meta = getattr(QMetaType, "Type", QMetaType)
     field_types = {"text": meta.QString, "double": meta.Double, "int": meta.Int}
-    specs = result_field_specs()
     crs = QgsCoordinateReferenceSystem(result.project_crs)
 
     records_by_layer: Dict[str, List[object]] = {}
@@ -265,14 +317,15 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
         layer.setCrs(crs)
         provider = layer.dataProvider()
         # W14/E29: source columns kept in step 5 follow the target fields
-        extra_names = extra_field_names(
-            record for record, _geometry in geometries)
+        # Objekt-ID first, then what/where/properties, origin last; empty
+        # columns are left out (result_columns, Vertretung Mac)
+        columns = result_columns(record for record, _geometry in geometries)
         provider.addAttributes(
-            [QgsField(field_name, field_types[kind]) for field_name, kind in specs]
-            + [QgsField(column, field_types["text"]) for column in extra_names.values()])
+            [QgsField(field_name, field_types[kind]) for _where, _key, field_name, kind in columns])
         layer.updateFields()
         if readable is not None:
-            _set_field_aliases(layer, specs)
+            _set_field_aliases(layer, [(key, kind) for where, key, _name, kind in columns
+                                       if where == "target"])
 
         features = []
         for record, geometry in geometries:
@@ -281,11 +334,7 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
                 continue
             feature = QgsFeature(layer.fields())
             feature.setGeometry(geometry)
-            extra = getattr(record, "extra_attributes", None) or {}
-            feature.setAttributes(
-                [field_value(kind, record.attributes.get(field_name)) for field_name, kind in specs]
-                + [field_value("text", extra.get(key)) for key in extra_names]
-            )
+            feature.setAttributes([column_value(column, record) for column in columns])
             features.append(feature)
         ok, _added = provider.addFeatures(features)
         if not ok:
@@ -304,7 +353,10 @@ def _set_field_aliases(layer, specs) -> None:
         from .mapping import readable_target_field
     except ImportError:
         return
-    for index, (field_name, _kind) in enumerate(specs):
+    for field_name, _kind in specs:
+        index = layer.fields().indexOf(field_name)
+        if index < 0:
+            continue
         try:
             layer.setFieldAlias(index, readable_target_field(field_name))
         except Exception:  # an alias is only cosmetic
