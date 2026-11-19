@@ -4652,6 +4652,9 @@ def _create_dock(plugin):
             grey,
         )
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
+        if dock.last_saved:
+            area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
+        area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
 
     def pdf_extent_size(draft):
         """(width, height) in m of what the PDF map shows, or None."""
@@ -4775,10 +4778,6 @@ def _create_dock(plugin):
         combo.currentIndexChanged.connect(chosen)
         refresh()
         return box, refresh
-
-        if dock.last_saved:
-            area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
-        area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
 
     def current_used_sources(flow):
         """The sources that really delivered objects (E28), [] if unknown."""
