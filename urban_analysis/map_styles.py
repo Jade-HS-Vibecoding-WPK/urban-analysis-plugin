@@ -18,12 +18,12 @@ BUILDINGS = ("Gebäude", "Gebäudeteile", "Bauwerke und Überdachungen")
 # Plan colours per category: (fill, outline).  Lines use the fill colour.
 # Soft plan colours (19.11.: gentler tones, same colour families).
 NUTZUNG_COLORS = {
-    "Gebäude": ("#c97f70", "#a5645a"),
-    "Gebäudeteile": ("#dcaa9e", "#bb8a7f"),
+    "Gebäude": ("#bf8f86", "#9e7770"),
+    "Gebäudeteile": ("#d6b7b0", "#b89a93"),
     "Bauwerke und Überdachungen": ("#bdb6b0", "#99928c"),
     "Straßen": ("#f8f7f4", "#b8bcc0"),
-    "Fuß- und Radwege": ("#e6cfa6", "#c7ab7e"),
-    "Plätze": ("#efe7d8", "#cfc2a9"),
+    "Fuß- und Radwege": ("#e2d4bc", "#c4b395"),
+    "Plätze": ("#ede8df", "#cdc4b4"),
     "Grünflächen": ("#c2e0b6", "#93bf88"),
     "Hecken und Baumreihen": ("#89b281", "#6e9466"),
     "Wasserflächen": ("#c7e0f3", "#93b9da"),
@@ -31,7 +31,7 @@ NUTZUNG_COLORS = {
     "Schiffsverkehrsflächen": ("#accbe6", "#86abcd"),
     "Bahnflächen": ("#a9adb1", "#868a8f"),
     "Bahnstrecken": ("#6e7378", "#585c61"),
-    "Nutzungsflächen": ("#f5ead5", "#dccdae"),
+    "Nutzungsflächen": ("#f3eee5", "#d8d0c2"),
     "Zäune und Mauern": ("#ab8f78", "#8e745f"),
     "Sonstige OSM-Linien": ("#b7bbbf", "#9ca1a6"),
     "Sonstige OSM-Flächen": ("#ecedef", "#c7cbcf"),
