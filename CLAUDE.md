@@ -112,8 +112,9 @@ Siehe `PLAN.md` §6. Getroffene Entscheidungen hier kurz nachtragen.
     schon in Schritt 2 sichtbar (E13 geändert am 18.11.2026, E17).
   - Umprojektion (z. B. OSM aus EPSG:4326) passiert in QGIS vor der Pipeline;
     die Pipeline selbst projiziert weiterhin nicht um.
-- **Feature Freeze (2026-11-19):** E29–E35 in `ARBEITSPLAN_DEUTSCHLANDWEIT.md`
-  §2. Kurz:
+- **Beschlüsse vom 2026-11-19 (Etappe F):** E29–E35 in
+  `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §2. Zuerst testen wir alles in QGIS; ob
+  und wann ein Feature Freeze gilt, entscheiden wir danach. Kurz:
   - Ergebnis-Layer haben wenige Kernfelder plus alle bekannten
     Originalspalten mit lesbarem Namen; unbekannte Spalten sind zuschaltbar
     und werden in einem Hinweis genannt (E29, E30, G11).

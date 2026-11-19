@@ -312,7 +312,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | F7 | M20 Erreichbarkeit Stufe 1: Luftlinie ✓ (PR offen) | Mac | F6 |
 | F8 | W16 Erreichbarkeit in der Benutzerführung | Windows | F7 |
 | F8b | W11b Niedersachsen-Cache in QGIS, wenn Overpass scheitert (E35; `osm_cache.py` ✓, PR offen) | Windows | – |
-| F9 | G12 Plan nachziehen, gemeinsamer QGIS-Test, Feature Freeze | gemeinsam | F0–F8b |
+| F9 | G12 Plan nachziehen, alles in QGIS testen; Feature Freeze erst danach entscheiden | gemeinsam | F0–F8b |
 | | **Etappe A – jetzt starten** | | |
 | 1 | G6 Vertrag erweitern (→ in F0 aufgegangen) | gemeinsam | – |
 | 2 | M9 Recherche ALKIS-Dienste der Länder ✓ | Mac | – |
@@ -350,6 +350,11 @@ der Beschluss (5) laufen schon in Etappe A, damit Etappe D danach ohne
 Wartezeit starten kann.
 
 ### Etappe F – Feature Freeze (19.11.2026)
+
+> **Geändert am 19.11.2026 nachmittags (Wunsch Person Mac):** Der Feature
+> Freeze kommt **nicht** automatisch nach Etappe F. Zuerst testen wir
+> **alles in QGIS** (F9); ob und wann der Feature Freeze gilt, entscheiden
+> wir danach gemeinsam. Ein Datum steht noch nicht fest.
 
 Nach dem Feature Freeze kommen keine neuen Funktionen mehr dazu, nur noch
 Fehlerbehebung und Test. **Kern** (muss heute fertig werden): F0, F1, F2,
@@ -429,10 +434,11 @@ die Rechnung aus F7 bleibt) → F4 (Dubletten-Text aus F3 genügt) → F6/F7.
   wählbar: Radien um die Startpunkte (QGIS-Puffer) und/oder Gebäude
   eingefärbt nach Abstand (Werte aus F7).
 
-#### F9. G12 – Plan nachziehen, Feature Freeze *(gemeinsam)*
+#### F9. G12 – Plan nachziehen, alles in QGIS testen *(gemeinsam)*
 
 - **Ziel:** §5 Erledigt und §6 aktualisieren, `PLAN.md`/`CLAUDE.md`
-  anpassen, gemeinsamer Test in QGIS, danach nur noch Fehlerbehebung.
+  anpassen, dann **alles in QGIS testen** (beide, auf dem gemeinsamen Stand).
+  Erst danach entscheiden wir, ob und wann der Feature Freeze gilt.
 
 ### Etappe A – jetzt starten
 
