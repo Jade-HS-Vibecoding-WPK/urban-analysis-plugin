@@ -73,6 +73,23 @@ def test_label_click_cycles_and_preview_order():
     assert counts_text(COLUMNS, values) == "1 Kernfelder · 1 behalten · 1 ignoriert"
 
 
+def test_better_preselection_id_and_empty_columns():
+    from urban_analysis.guided_dialog import decision_from_value, preselect
+
+    columns = [
+        ColumnInfo("points", "osm_id", "OSM-ID", True, ("1",)),
+        ColumnInfo("points", "barrier", "Absperrung (OSM)", True, ("bollard",)),
+        ColumnInfo("points", "name", "Name", False, ("Haaren",)),
+    ]
+    decisions = {(c.layer_id, c.source_field): decision_from_value(c, "keep") for c in columns[:2]}
+    decisions[("points", "name")] = decision_from_value(columns[2], "drop")
+    rates = {("points", "osm_id"): 1.0, ("points", "barrier"): 0.02, ("points", "name"): 0.05}
+    result = preselect(columns, decisions, rates)
+    assert decision_value(result[("points", "osm_id")]) == "target:object_id"
+    assert decision_value(result[("points", "barrier")]) == "drop"  # nearly empty
+    assert decision_value(result[("points", "name")]) == "keep"  # always kept
+
+
 def test_choice_values_round_trip():
     for value in ("target:address", "keep", "drop"):
         assert decision_value(decision_from_value(COLUMNS[1], value)) == value

@@ -317,6 +317,34 @@ STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5")
                 "drop": ("#f1f2f4", "#b5bcc4")}
 
 
+STEP5_QUESTION = (
+    "Deine Daten haben viele Spalten. Sollen sie automatisch zugeordnet werden? "
+    "Danach siehst du das Ergebnis als Tabelle und kannst bei Bedarf noch ändern."
+)
+AUTO_COLUMNS_HINT = ("Wichtige Spalten werden übernommen, technische und fast leere "
+                     "weggelassen. Die Tabellen sind zugeklappt – meist reicht „bestätigen“.")
+MANUAL_COLUMNS_HINT = ("Gleiche Vorauswahl, aber alle Tabellen sind aufgeklappt, damit du "
+                       "jede Spalte prüfen kannst.")
+STEP5_TABLE_GUIDE = (
+    "So sieht deine Attributtabelle am Ende aus. Farbig = wird übernommen, weiß = "
+    "bleibt draußen. Zum Ändern auf eine Spaltenüberschrift klicken."
+)
+
+
+def ordered_columns(columns, values):
+    """Table order: core fields, then kept, then left-out columns."""
+    rank = {"target": 0, "keep": 1, "drop": 2}
+    return sorted(columns, key=lambda c: rank[state_of(values.get((c.layer_id, c.source_field)))])
+
+
+def column_title(column, value):
+    """Header of a column: core field name for core fields, else the readable name."""
+    name = column.readable_name or column.source_field
+    if state_of(value) == "target":
+        return core_field_name(value.split(":", 1)[1])
+    return name
+
+
 def state_of(value):
     """'target:address' -> 'target'; 'keep' / 'drop' unchanged."""
     return "target" if (value or "").startswith("target:") else (value or "drop")
@@ -404,25 +432,61 @@ def decision_from_value(column, value):
     return ColumnDecision(column.layer_id, column.source_field, COLUMN_DROP)
 
 
-AUTO_COLUMNS_LABEL = "Automatisch zuordnen (empfohlen)"
-MANUAL_COLUMNS_LABEL = "Selbst wählen"
+AUTO_COLUMNS_LABEL = "Ja, automatisch zuordnen (empfohlen)"
+MANUAL_COLUMNS_LABEL = "Nein, selbst wählen"
 # Kept by default whenever the data have them (user wish 19.11.)
-ALWAYS_KEEP = ("Geschosszahl", "Baujahr")
+ALWAYS_KEEP = ("Geschosszahl", "Baujahr", "Name")
+# Columns that identify an object; the first one becomes the core field Objekt-ID
+OBJECT_ID_FIELDS = ("oid", "osm_id", "objid", "gml_id")
+MIN_FILL_RATE = 0.15  # kept columns must be filled in at least 15 % of the objects
+FILL_SAMPLE = 400
+
+
+def fill_rates(records):
+    """{(layer, source field): share of objects with a value} from a sample."""
+    seen, filled = {}, {}
+    for record in records:
+        table = record.source_layer or record.layer_id
+        if seen.get(table, 0) >= FILL_SAMPLE:
+            continue
+        seen[table] = seen.get(table, 0) + 1
+        for field_name, value in (getattr(record, "source_attributes", None) or {}).items():
+            if value not in (None, ""):
+                filled[(table, field_name)] = filled.get((table, field_name), 0) + 1
+    return {key: count / seen[key[0]] for key, count in filled.items()}
+
+
+def preselect(columns, decisions, rates):
+    """Improve the pipeline's preselection (W14): an ID column becomes the
+    core field Objekt-ID, nearly empty columns stay out, Geschosszahl,
+    Baujahr and Name are kept whenever they exist."""
+    result = {}
+    has_id = {d.layer_id for d in decisions.values()
+              if d.action == COLUMN_TARGET and d.target_field == "object_id"}
+    for column in columns:
+        key = (column.layer_id, column.source_field)
+        decision = decisions[key]
+        if (column.layer_id not in has_id and decision.action != COLUMN_TARGET
+                and column.source_field.lower() in OBJECT_ID_FIELDS):
+            decision = decision_from_value(column, "target:object_id")
+            has_id.add(column.layer_id)
+        elif decision.action == COLUMN_KEEP and column.readable_name not in ALWAYS_KEEP \
+                and rates.get(key, 0.0) < MIN_FILL_RATE:
+            decision = decision_from_value(column, "drop")  # (nearly) empty
+        elif decision.action == COLUMN_DROP and column.readable_name in ALWAYS_KEEP:
+            decision = decision_from_value(column, "keep")
+        result[key] = decision
+    return result
 
 
 def column_decisions_of(flow):
-    """Choices made earlier in step 5, else the pipeline's preselection
-    (plus ALWAYS_KEEP columns if they exist)."""
+    """Choices made earlier in step 5, else the improved preselection."""
     decisions = getattr(flow, "column_decisions", None)
-    if not decisions:
-        columns = {(c.layer_id, c.source_field): c for c in flow.result.columns}
-        decisions = []
-        for decision in default_column_decisions(flow.result.columns):
-            column = columns[(decision.layer_id, decision.source_field)]
-            if decision.action == COLUMN_DROP and column.readable_name in ALWAYS_KEEP:
-                decision = decision_from_value(column, "keep")
-            decisions.append(decision)
-    return {(d.layer_id, d.source_field): d for d in decisions}
+    if decisions:
+        return {(d.layer_id, d.source_field): d for d in decisions}
+    defaults = {(d.layer_id, d.source_field): d
+                for d in default_column_decisions(flow.result.columns)}
+    return preselect(flow.result.columns, defaults, fill_rates(flow.result.harmonized_records))
 
 
 def column_summary(columns, decisions):
@@ -1022,7 +1086,7 @@ def _create_dock(plugin):
     from .ui.widgets.icons import (
         TITLE_ICON_PX, icon_size, layer_icon, palette_icon, title_icon, with_icon,
     )
-    from qgis.PyQt.QtCore import QSize
+    from qgis.PyQt.QtCore import QPoint, QSize
     from qgis.PyQt.QtGui import QColor, QIcon, QPixmap
     from .ui import style as ui_style
     from qgis.PyQt.QtWidgets import QMenu
@@ -2315,41 +2379,10 @@ def _create_dock(plugin):
         if not flow.result.columns:
             return build_mapping_legacy(page)  # older pipeline result: old view
         page.widgets["columns_view"] = True
-        guide = QLabel(STEP5_SHORT_GUIDE)
-        guide.setWordWrap(True)
-        set_role(guide, "info")
-        guide.setToolTip("\n".join(STEP5_GUIDE))
-        page.layout.addWidget(guide)
         names = readable_names()
-        decisions = column_decisions_of(flow)
         by_layer = {}
         for column in flow.result.columns:
             by_layer.setdefault(column.layer_id, []).append(column)
-
-        # 1: automatic (overview only) or own choice (full list)
-        mode = getattr(flow, "column_mode", "auto")
-        auto = QRadioButton(AUTO_COLUMNS_LABEL)
-        manual = QRadioButton(MANUAL_COLUMNS_LABEL)
-        (auto if mode == "auto" else manual).setChecked(True)
-        mode_group = QButtonGroup(page.widget)
-        mode_group.addButton(auto)
-        mode_group.addButton(manual)
-        page.layout.addWidget(auto)
-        page.layout.addWidget(manual)
-        page.widgets["mode_group"] = mode_group
-
-        def switch(to_manual, open_layer=None):
-            flow.column_mode = "manual" if to_manual else "auto"
-            flow.column_open_layer = open_layer
-            dock._rebuild_current_page()
-
-        auto.toggled.connect(lambda on: on and mode != "auto" and switch(False))
-        manual.toggled.connect(lambda on: on and mode != "manual" and switch(True))
-        # Current choice per column as value: 'target:<field>', 'keep', 'drop'
-        values = {key: decision_value(d) for key, d in decisions.items()}
-        page.widgets["values"] = values
-        page.widgets["columns_by_layer"] = by_layer
-        page.widgets["previews"] = {}
         records_by_layer = {}
         for record in flow.result.harmonized_records:
             table = record.source_layer or record.layer_id
@@ -2357,70 +2390,74 @@ def _create_dock(plugin):
             if len(rows) < PREVIEW_ROWS:
                 rows.append(record)
 
+        # Part 1: one question first – automatic or own choice
+        if getattr(flow, "column_phase", "ask") == "ask":
+            question = QLabel(STEP5_QUESTION)
+            question.setWordWrap(True)
+            page.layout.addWidget(question)
+            auto = QRadioButton(AUTO_COLUMNS_LABEL)
+            manual = QRadioButton(MANUAL_COLUMNS_LABEL)
+            (manual if getattr(flow, "column_mode", "auto") == "manual" else auto).setChecked(True)
+            group = QButtonGroup(page.widget)
+            group.addButton(auto)
+            group.addButton(manual)
+            for button, hint in ((auto, AUTO_COLUMNS_HINT), (manual, MANUAL_COLUMNS_HINT)):
+                page.layout.addWidget(button)
+                text = QLabel(hint)
+                text.setWordWrap(True)
+                set_role(text, "hint")
+                page.layout.addWidget(indented(text))
+            page.widgets.update(ask_auto=auto, ask_group=group,
+                                action_text=lambda: "Weiter")
+            return
+
+        # Part 2: one coloured table per layer; click a column header to change
+        if getattr(flow, "column_values", None) is None:  # survives rebuilds of the page
+            flow.column_values = {key: decision_value(d) for key, d in column_decisions_of(flow).items()}
+        values = flow.column_values
+        page.widgets["values"] = values
+        page.widgets["action_text"] = lambda: PAGE_ACTIONS[4]
+        guide = QLabel(STEP5_TABLE_GUIDE)
+        guide.setWordWrap(True)
+        set_role(guide, "info")
+        page.layout.addWidget(guide)
+        page.layout.addWidget(state_legend())
+        back = link_button("◂ Zurück zur Frage (automatisch / selbst wählen)")
+
+        def back_to_question():
+            flow.column_phase = "ask"
+            dock._rebuild_current_page()
+
+        back.clicked.connect(back_to_question)
+        page.layout.addWidget(back)
+        manual = getattr(flow, "column_mode", "auto") == "manual"
         for number, (layer_id, columns) in enumerate(by_layer.items()):
-            preview = QTableWidget()
-            page.widgets["previews"][layer_id] = preview
-            fill_preview(preview, columns, values, records_by_layer.get(layer_id, []))
-            if mode == "auto":
-                # 2: compact card: name, preview, "Ändern"
-                card = QFrame()
-                set_role(card, "issue-info")
-                card_layout = QVBoxLayout(card)
-                card_layout.setContentsMargins(10, 6, 8, 6)
-                title = QLabel(f"<b>{names.layer(layer_id)}</b>  "
-                               f"<span style='color:gray'>{counts_text(columns, values)}</span>")
-                title.setWordWrap(True)
-                card_layout.addWidget(with_icon(layer_icon_key(flow, layer_id), title))
-                card_layout.addWidget(preview)
-                change = link_button("Ändern ▸")
-                change.clicked.connect(lambda _c=False, n=number: switch(True, n))
-                card_layout.addWidget(change)
-                page.layout.addWidget(card)
-                continue
-            panel = collapsible(page, f"cols_{number}", f"{names.layer(layer_id)} ({len(columns)} Spalten)",
-                                layer_icon_key(flow, layer_id))
+            panel = collapsible(page, f"cols_{number}",
+                                f"{names.layer(layer_id)} ({len(columns)} Spalten)",
+                                layer_icon_key(flow, layer_id),
+                                opened=manual or number == 0)
             counts = QLabel(counts_text(columns, values))
             set_role(counts, "hint")
             panel.addWidget(counts)
-            page.widgets[f"counts_{layer_id}"] = counts
-            heading = QLabel(PREVIEW_HEADING)
-            set_role(heading, "hint")
-            panel.addWidget(heading)
-            panel.addWidget(preview)
-            columns_heading = QLabel(COLUMNS_HEADING)
-            columns_heading.setWordWrap(True)
-            set_role(columns_heading, "hint")
-            panel.addWidget(columns_heading)
-            shown = [c for c in columns if c.known or c.suggested_target]
-            hidden = [c for c in columns if not (c.known or c.suggested_target)]
-            for column in shown:
-                label_row(page, panel, column, records_by_layer.get(layer_id, []))
-            if hidden:
-                more = QWidget()
-                more_layout = QVBoxLayout(more)
-                more_layout.setContentsMargins(0, 0, 0, 0)
-                more.hide()
-                toggle = link_button(f"{len(hidden)} weitere ignorierte Spalten anzeigen ▸")
-
-                def flip(_c=False, box=more, button=toggle, count=len(hidden)):
-                    box.setVisible(not box.isVisible())
-                    button.setText(f"{count} weitere ignorierte Spalten "
-                                   f"{'ausblenden ▾' if box.isVisible() else 'anzeigen ▸'}")
-                    QTimer.singleShot(0, dock.fit_wrapped_labels)
-
-                toggle.clicked.connect(flip)
-                panel.addWidget(toggle)
-                for column in hidden:
-                    label_row(page, more_layout, column, records_by_layer.get(layer_id, []))
-                panel.addWidget(more)
-            legend = QLabel(STATE_LEGEND)
-            legend.setWordWrap(True)
-            set_role(legend, "hint")
-            panel.addWidget(legend)
-        opened = getattr(flow, "column_open_layer", None)
-        if opened is not None and mode != "auto":
-            open_sections(page, [f"cols_{opened}"])
+            table = QTableWidget()
+            panel.addWidget(table)
+            fill_table(table, ordered_columns(columns, values), values,
+                       records_by_layer.get(layer_id, []), counts)
         guard_wheel(page.widget)
+
+    def state_legend():
+        """Small colour key above the tables."""
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 2, 0, 2)
+        for state in ("target", "keep", "drop"):
+            chip = QLabel(STATE_LABELS[state])
+            fill, border = STATE_COLORS[state]
+            chip.setStyleSheet(f"background: {fill}; border: 1px solid {border}; "
+                               "border-radius: 9px; padding: 1px 8px;")
+            row.addWidget(chip)
+        row.addStretch()
+        return box
 
     def link_button(text):
         button = QPushButton(text)
@@ -2430,102 +2467,84 @@ def _create_dock(plugin):
                              "background: transparent; text-decoration: underline;")
         return button
 
-    def fill_preview(table, columns, values, records):
-        """Small attribute table like in QGIS: result columns as headers
-        (coloured mark = core field / kept), up to three real rows;
-        scrolls sideways when there are many columns."""
-        shown = preview_columns(columns, values)
+    def fill_table(table, columns, values, records, counts):
+        """All columns of a layer like the QGIS attribute table: coloured =
+        taken over (green core field, blue kept), white = left out.  A click on
+        a column header opens a small menu to change it."""
         table.clear()
-        table.setColumnCount(len(shown))
+        table.setColumnCount(len(columns))
         table.setRowCount(len(records))
-        for index, (header, state, source_field) in enumerate(shown):
-            item = QTableWidgetItem(header)
-            item.setIcon(state_icon(state))
-            table.setHorizontalHeaderItem(index, item)
+        for index, column in enumerate(columns):
+            value = values[(column.layer_id, column.source_field)]
+            state = state_of(value)
+            header = QTableWidgetItem(column_title(column, value))
+            header.setIcon(state_icon(state))
+            header.setToolTip(f"Spalte in den Daten: {column.source_field}\n"
+                              f"{choice_help(value) or ''}\nKlick: ändern")
+            table.setHorizontalHeaderItem(index, header)
+            fill = QColor(STATE_COLORS[state][0] if state != "drop" else "#ffffff")
             for row, record in enumerate(records):
-                value = (getattr(record, "source_attributes", None) or {}).get(source_field)
-                cell = QTableWidgetItem("–" if value in (None, "") else str(value))
+                raw = (getattr(record, "source_attributes", None) or {}).get(column.source_field)
+                cell = QTableWidgetItem("–" if raw in (None, "") else str(raw))
+                cell.setBackground(fill)
+                if state == "drop":
+                    cell.setForeground(QColor("#9aa3ae"))
                 table.setItem(row, index, cell)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.NoSelection)
         table.verticalHeader().setVisible(False)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.horizontalHeader().setSectionsClickable(True)
+        table.horizontalHeader().setCursor(Qt.PointingHandCursor)
         table.resizeColumnsToContents()
-        height = (table.horizontalHeader().sizeHint().height()
-                  + sum(table.rowHeight(r) for r in range(table.rowCount()))
-                  + table.horizontalScrollBar().sizeHint().height() + 6)
-        table.setFixedHeight(height)
+        table.setFixedHeight(table.horizontalHeader().sizeHint().height()
+                             + sum(table.rowHeight(r) for r in range(table.rowCount()))
+                             + table.horizontalScrollBar().sizeHint().height() + 6)
         table.viewport().installEventFilter(wheel_guard)  # wheel scrolls the panel
+        try:
+            table.horizontalHeader().sectionClicked.disconnect()
+        except TypeError:
+            pass
+
+        def clicked(index):
+            column = columns[index]
+            key = (column.layer_id, column.source_field)
+            menu = QMenu(table)
+            core = menu.addMenu("● Kernfeld …")
+            for field_name in CORE_FIELDS:
+                action = core.addAction(core_field_name(field_name))
+                action.setToolTip(choice_help(f"target:{field_name}") or "")
+                action.triggered.connect(lambda _c=False, f=field_name: choose(key, f"target:{f}"))
+            menu.addAction("● Behalten (eigene Spalte)").triggered.connect(
+                lambda _c=False: choose(key, "keep"))
+            menu.addAction("○ Nicht übernehmen").triggered.connect(
+                lambda _c=False: choose(key, "drop"))
+            header = table.horizontalHeader()
+            x = header.sectionViewportPosition(index)
+            menu.exec_(header.mapToGlobal(header.rect().topLeft()) + QPoint(x, header.height()))
+
+        def choose(key, value):
+            values[key] = value
+            fill_table(table, columns, values, records, counts)
+            counts.setText(counts_text(columns, values))
+            dock.clear_message()
+
+        table.horizontalHeader().sectionClicked.connect(clicked)
 
     def state_icon(state):
         pixmap = QPixmap(10, 10)
-        pixmap.fill(QColor(STATE_COLORS[state][0]))
+        pixmap.fill(QColor(STATE_COLORS[state][1] if state != "drop" else "#ffffff"))
         return QIcon(pixmap)
-
-    def label_row(page, layout, column, records):
-        """One column: coloured label (click: Kernfeld → Behalten → Ignoriert),
-        readable name, core-field choice (only for Kernfeld) and an example."""
-        key = (column.layer_id, column.source_field)
-        values = page.widgets["values"]
-        pill = QPushButton()
-        pill.setCursor(Qt.PointingHandCursor)
-        pill.setFixedWidth(PILL_WIDTH)
-        name = QLabel(f"<b>{column.readable_name or column.source_field}</b>")
-        name.setToolTip(f"Spalte in den Daten: {column.source_field}")
-        name.setWordWrap(True)
-        target = QComboBox()
-        for field_name in CORE_FIELDS:
-            target.addItem(core_field_name(field_name), field_name)
-            target.setItemData(target.count() - 1, choice_help(f"target:{field_name}"), Qt.ToolTipRole)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 2, 0, 0)
-        row.addWidget(pill)
-        row.addWidget(name, 1)
-        row.addWidget(target)
-        layout.addLayout(row)
-        if column.examples:
-            example = QLabel("z. B. " + ", ".join(str(e) for e in column.examples[:3]))
-            example.setWordWrap(True)
-            set_role(example, "hint")
-            layout.addWidget(indented(example))
-
-        def show():
-            state = state_of(values[key])
-            text, colour, border = STATE_LABELS[state], *STATE_COLORS[state]
-            pill.setText(text)
-            pill.setStyleSheet(
-                f"QPushButton {{ background: {colour}; border: 1px solid {border}; "
-                f"border-radius: 10px; padding: 2px 6px; color: #1f2328; }}")
-            pill.setToolTip(choice_help(values[key]) or "")
-            target.setVisible(state == "target")
-            if state == "target":
-                target.setCurrentIndex(max(target.findData(values[key].split(":", 1)[1]), 0))
-
-        def changed():
-            fill_preview(page.widgets["previews"][column.layer_id],
-                         page.widgets["columns_by_layer"][column.layer_id], values, records)
-            counts = page.widgets.get(f"counts_{column.layer_id}")
-            if counts is not None:
-                counts.setText(counts_text(page.widgets["columns_by_layer"][column.layer_id], values))
-            dock.clear_message()
-
-        def cycle():
-            values[key] = next_value(values[key], column)
-            show()
-            changed()
-
-        def pick(_index):
-            if state_of(values[key]) == "target":
-                values[key] = f"target:{target.currentData()}"
-                changed()
-
-        pill.clicked.connect(cycle)
-        target.currentIndexChanged.connect(pick)
-        show()
 
     def validate_columns(page):
         flow = workflow()
+        if "ask_auto" in page.widgets:  # part 1: remember the answer, show the tables
+            flow.column_mode = "auto" if page.widgets["ask_auto"].isChecked() else "manual"
+            flow.column_phase = "table"
+            dock._rebuild_current_page()
+            dock.primary_button.setText(PAGE_ACTIONS[4])
+            return False
         values = page.widgets["values"]
         by_key = {(c.layer_id, c.source_field): c for c in flow.result.columns}
         decisions = [decision_from_value(by_key[key], value) for key, value in values.items()]
@@ -2867,10 +2886,6 @@ def _create_dock(plugin):
         page.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
-        grey = QCheckBox("Im PDF: Umgebung außerhalb des Gebiets in Graustufen")
-        grey.setChecked(draft.setdefault("grey_outside", True))
-        grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
-        page.layout.addWidget(grey)
 
         output_choice(page, "geopackage", "Bereinigtes GeoPackage speichern",
                       draft["geopackage"])
@@ -2878,6 +2893,10 @@ def _create_dock(plugin):
         north = QCheckBox("Nordpfeil anzeigen")
         north.setChecked(draft.setdefault("pdf_north", True))
         north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
+        # a PDF setting only: shown inside the PDF options
+        grey = QCheckBox("Umgebung außerhalb des Gebiets in Graustufen")
+        grey.setChecked(draft.setdefault("grey_outside", True))
+        grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
         pdf_extra = (
             labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
             labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
@@ -2887,6 +2906,7 @@ def _create_dock(plugin):
                            "pdf_orientation", "auto"),
             labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
             north,
+            grey,
         )
         output_choice(page, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
         title = QLabel(UI_LABELS["data_source"])
