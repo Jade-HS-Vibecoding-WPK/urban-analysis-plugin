@@ -33,23 +33,6 @@ def result_field_specs() -> Tuple[Tuple[str, str], ...]:
     return tuple(specs)
 
 
-def extra_field_names(records) -> Dict[str, str]:
-    """Kept source columns of a layer: {name in the records: field name}.
-
-    Order of first appearance; a name that clashes with a target field gets
-    the prefix 'Quelle: ' so nothing is overwritten."""
-    names: Dict[str, str] = {}
-    used = {name.casefold() for name in TARGET_FIELDS}
-    for record in records:
-        for key in (getattr(record, "extra_attributes", None) or {}):
-            if key in names:
-                continue
-            field_name = key if key.casefold() not in used else f"Quelle: {key}"
-            used.add(field_name.casefold())
-            names[key] = field_name
-    return names
-
-
 def field_value(kind: str, value):
     """Value for a result field; empty values stay NULL instead of ''."""
     if value in (None, ""):
@@ -208,12 +191,7 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
         layer = QgsVectorLayer(f"{type_name}?crs={crs.authid()}", name, "memory")
         layer.setCrs(crs)
         provider = layer.dataProvider()
-        # W14/E29: source columns kept in step 5 follow the target fields
-        extra_names = extra_field_names(
-            record for record, _geometry in geometries)
-        provider.addAttributes(
-            [QgsField(field_name, field_types[kind]) for field_name, kind in specs]
-            + [QgsField(column, field_types["text"]) for column in extra_names.values()])
+        provider.addAttributes([QgsField(field_name, field_types[kind]) for field_name, kind in specs])
         layer.updateFields()
         if readable is not None:
             _set_field_aliases(layer, specs)
@@ -225,10 +203,8 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
                 continue
             feature = QgsFeature(layer.fields())
             feature.setGeometry(geometry)
-            extra = getattr(record, "extra_attributes", None) or {}
             feature.setAttributes(
                 [field_value(kind, record.attributes.get(field_name)) for field_name, kind in specs]
-                + [field_value("text", extra.get(key)) for key in extra_names]
             )
             features.append(feature)
         ok, _added = provider.addFeatures(features)
@@ -289,11 +265,9 @@ def add_result_layers(layer_objects: Mapping[str, object], group_name: str, proj
     group_name = run_group_name(group_name, existing, time_text())
     group = root.insertGroup(0, group_name)
     group.setCustomProperty(RESULT_GROUP_PROPERTY, True)
-    from .map_styles import fix_legend
-
     for layer in layer_objects.values():
         project.addMapLayer(layer, False)
-        fix_legend(group.addLayer(layer))  # clean symbol in the layer panel
+        group.addLayer(layer)
     return group
 
 
@@ -419,7 +393,7 @@ def sources_text(data_source, day):
 
 def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
                    title, subtitle="", data_source="", page="A4", orientation="quer",
-                   scale=None, north_arrow=True, project=None, day=None, grey_outside=False):
+                   scale=None, north_arrow=True, project=None, day=None):
     """Write the analysis map as PDF (QGIS print layout).
 
     ``layers`` are the result layers, top-most first (as in the layer list).
@@ -455,9 +429,8 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
         layer.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple(style)))
         return layer
 
-    from .study_area import AREA_OUTLINE_STYLE
-
-    area_layer = outline_layer(area, "Untersuchungsgebiet", dict(AREA_OUTLINE_STYLE))
+    area_layer = outline_layer(area, "Untersuchungsgebiet", {
+        "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.6"})
     buffer_geometry = area.buffer(float(buffer_meters or 0), 16)
     buffer_layer = outline_layer(buffer_geometry, f"Puffer {format_count(int(buffer_meters or 0))} m", {
         "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.3",
@@ -510,10 +483,8 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend.setTitle("Legende")
     legend.setAutoUpdateModel(False)
     root = QgsLayerTree()
-    from .map_styles import fix_legend
-
     for layer in [area_layer, buffer_layer] + list(layers):
-        fix_legend(root.addLayer(layer))  # cut layers: plain colour patch
+        root.addLayer(layer)
     legend.model().setRootGroup(root)
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)
@@ -548,26 +519,7 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Grey border only in the PDF: cut style for the export, then back
-    restore = []
-    if grey_outside:
-        from .map_styles import CATEGORY_PROPERTY, STYLE_PROPERTY, apply_style, fix_legend
-
-        for layer in layers:
-            restore.append((layer, layer.renderer().clone()))
-            apply_style(layer, layer.customProperty(CATEGORY_PROPERTY) or None,
-                        layer.customProperty(STYLE_PROPERTY) or "nutzung", study_area_wkt)
-        for node in root.findLayers():
-            fix_legend(node)
-    try:
-        result = QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
-    finally:
-        from .map_styles import CUT_PROPERTY
-
-        for layer, renderer in restore:
-            layer.setRenderer(renderer)
-            layer.setCustomProperty(CUT_PROPERTY, False)
-            layer.triggerRepaint()
+    result = QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
     if result != QgsLayoutExporter.Success:
         raise RuntimeError(
             "Das PDF konnte nicht geschrieben werden. Ist die Datei noch in einem "
