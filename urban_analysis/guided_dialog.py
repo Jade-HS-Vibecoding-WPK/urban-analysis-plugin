@@ -78,7 +78,10 @@ from .outputs import (
     COLUMN_ORDER_WHERE,
     GEOMETRY_KINDS,
     GEOMETRY_WORDS,
+    LAYER_GROUPS,
+    OTHER_LAYER_GROUP,
     add_result_layers,
+    layer_group_name,
     geometry_counts,
     with_geometry_kinds,
     PAGE_SIZES_MM,
@@ -743,6 +746,42 @@ def planned_layer_rows(flow, names, kinds=GEOMETRY_KINDS):
         rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}",
                      icon_key(descriptor.layer_id, descriptor.category)))
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
+
+
+TOPIC_LAYERS_TITLE = "Layer für die Karte"
+TOPIC_LAYERS_HINT = ("Nach Wichtigkeit sortiert: Bebauung zuerst, Kleinkram zuletzt. "
+                     "Häkchen weg = der Layer kommt nicht in die Karte.")
+# Step 7: groups by importance (same groups as the layer tree, #66)
+IMPORTANCE_ORDER = ("Bebauung", "Verkehr", "Grün & Wasser", "Nutzung", "Einrichtungen",
+                    OTHER_LAYER_GROUP, "Sonstiges")
+DEFAULT_TOPIC = "Bebauung & Stadtstruktur"
+
+
+def categories_by_importance(categories):
+    """``[(group, [categories])]``: Bebauung → Verkehr → Grün & Wasser →
+    Nutzung → Einrichtungen → Weitere Layer → Sonstiges; inside a group in the
+    order of ``LAYER_GROUPS``, unknown ones by name."""
+    position = {category: index for _name, members in LAYER_GROUPS
+                for index, category in enumerate(members)}
+    groups = {}
+    for category in categories:
+        groups.setdefault(layer_group_name(category), []).append(category)
+    return [(group, sorted(groups[group], key=lambda c: (position.get(c, 99), c)))
+            for group in IMPORTANCE_ORDER if group in groups]
+
+
+def topic_entries():
+    """``[(name, description)]`` of the map themes for the choice list in
+    step 7: from the topic catalogue (M25), else only the names."""
+    try:
+        from .topics import topic_catalog
+        entries = [(topic.name, topic.description or "") for topic in topic_catalog()]
+    except Exception:  # catalogue missing or broken: names from the contract
+        entries = []
+    if not entries:
+        from .ui_contract import TOPIC_NAMES
+        entries = [(name, "") for name in TOPIC_NAMES.values()]
+    return entries
 
 
 def layer_icon_key(flow, layer_id):
@@ -3434,25 +3473,68 @@ def _create_dock(plugin):
 
     # 7 Kartenthema
     def build_topic(page):
-        topic_input = QLineEdit(workflow().result.selected_topic or "Siedlungsstruktur")
+        flow = workflow()
+        # Kartenthema: one of the seven themes (E36); details from the catalogue
+        topics = topic_entries()
+        topic_box = QComboBox()
+        for name, _description in topics:
+            topic_box.addItem(name, name)
+        current = flow.result.selected_topic
+        index = topic_box.findData(current) if current else -1
+        topic_box.setCurrentIndex(index if index >= 0 else 0)
+        description = QLabel()
+        description.setWordWrap(True)
+        set_role(description, "hint")
+
+        def show_description(_index=None):
+            text = dict(topics).get(topic_box.currentData(), "")
+            description.setText(text)
+            description.setVisible(bool(text))
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        topic_box.currentIndexChanged.connect(show_description)
+        show_description()
+        topic_panel = collapsible(page, "topic_choice", UI_LABELS["topic"], opened=True)
+        topic_panel.addWidget(topic_box)
+        topic_panel.addWidget(description)
+
+        # layers by importance: buildings first, small stuff last (group titles)
         category_list = QListWidget()
         category_list.setIconSize(icon_size())
-        for category in workflow().recognized_categories():
-            item = QListWidgetItem(layer_icon(icon_key(category=category)), category)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked)
-            category_list.addItem(item)
+        for group, categories in categories_by_importance(flow.recognized_categories()):
+            title = QListWidgetItem(group)
+            title.setFlags(Qt.ItemIsEnabled)  # a heading, not a choice
+            font = title.font()
+            font.setBold(True)
+            title.setFont(font)
+            title.setForeground(QColor(accent_color()))
+            category_list.addItem(title)
+            for category in categories:
+                item = QListWidgetItem(layer_icon(icon_key(category=category)), category)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)
+                item.setData(Qt.UserRole, category)
+                category_list.addItem(item)
         # show all categories at once (no inner scrolling)
         rows = max(category_list.count(), 1)
         category_list.setMinimumHeight(rows * (icon_size().height() + 4) + 8)
+        layers_panel = collapsible(page, "topic_layers", TOPIC_LAYERS_TITLE, opened=True)
+        hint = QLabel(TOPIC_LAYERS_HINT)
+        hint.setWordWrap(True)
+        set_role(hint, "hint")
+        layers_panel.addWidget(hint)
+        layers_panel.addWidget(category_list)
         confirm_missing = QCheckBox(UI_LABELS["continue_incomplete"])
-        page.layout.addWidget(QLabel(UI_LABELS["topic"]))
-        page.layout.addWidget(topic_input)
-        page.layout.addWidget(category_list)
         page.layout.addWidget(confirm_missing)
         page.widgets.update(
-            topic=topic_input, categories=category_list, confirm_missing=confirm_missing
+            topic=topic_box, categories=category_list, confirm_missing=confirm_missing
         )
+
+    def accent_color():
+        from .theme import CLASSIC_COLORS, COLORS
+        from .ui import style as ui_style
+
+        return (CLASSIC_COLORS if ui_style.current() == "classic" else COLORS)["accent_dark"]
 
     # 9 'Erreichbarkeitsanalyse' (W16): targets, radii per target, display
     def build_accessibility(page):
@@ -3877,13 +3959,14 @@ def _create_dock(plugin):
     def validate_topic(page):
         category_list = page.widgets["categories"]
         selected = tuple(
-            category_list.item(index).text()
+            category_list.item(index).data(Qt.UserRole)
             for index in range(category_list.count())
-            if category_list.item(index).checkState() == Qt.Checked
+            if category_list.item(index).data(Qt.UserRole)
+            and category_list.item(index).checkState() == Qt.Checked
         )
         try:
             workflow().select_topic(
-                page.widgets["topic"].text(),
+                page.widgets["topic"].currentData() or page.widgets["topic"].currentText(),
                 selected,
                 confirm_missing=page.widgets["confirm_missing"].isChecked(),
             )
@@ -4394,7 +4477,7 @@ def _create_dock(plugin):
         draft = output_draft()
         area_hint(area, SAVE_INTRO)
         output_choice(area, "geopackage", "Bereinigtes GeoPackage speichern", draft["geopackage"])
-        topic = workflow().result.selected_topic or "Siedlungsstruktur"
+        topic = workflow().result.selected_topic or DEFAULT_TOPIC
         north = QCheckBox("Nordpfeil anzeigen")
         north.setChecked(draft.setdefault("pdf_north", True))
         north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
@@ -4438,7 +4521,7 @@ def _create_dock(plugin):
             study_area_wkt=flow.result.study_area_wkt,
             buffer_meters=flow.result.buffer_meters,
             crs_authid=flow.result.project_crs,
-            title=draft.get("pdf_title") or flow.result.selected_topic or "Siedlungsstruktur",
+            title=draft.get("pdf_title") or flow.result.selected_topic or DEFAULT_TOPIC,
             subtitle=draft.get("pdf_subtitle", ""),
             data_source=source,
             page=draft.get("pdf_page", "A3"),
