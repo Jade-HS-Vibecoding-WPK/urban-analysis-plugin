@@ -662,6 +662,56 @@ def licence_lines(used_sources):
     return lines
 
 
+def source_key(source) -> str:
+    """Key of a loaded source (``SourceFile``): the file it came from, the
+    same value the records carry in ``source_file``."""
+    return str(source.path)
+
+
+def default_source_texts(sources) -> Dict[str, str]:
+    """Quellenangabe je Datenquelle, pre-filled from the download
+    (attribution); own files start empty – the user must name them."""
+    return {source_key(source): (source.attribution or "").strip() for source in sources}
+
+
+def missing_source_texts(sources, texts) -> List[str]:
+    """Labels of the loaded sources that still have no Quellenangabe."""
+    return [source.label for source in sources if not (texts.get(source_key(source)) or "").strip()]
+
+
+def combined_source_text(sources, texts) -> str:
+    """All Quellenangaben in one line, e.g. for the PDF and the check."""
+    parts = []
+    for source in sources:
+        text = (texts.get(source_key(source)) or "").strip()
+        if text and text not in parts:
+            parts.append(text)
+    return "; ".join(parts)
+
+
+def apply_source_texts(records, texts):
+    """Every object gets the Quellenangabe of ITS source in ``source``
+    (also an own file next to OSM/ALKIS).  Records of sources without a
+    text stay unchanged; the input list is not changed."""
+    from dataclasses import replace
+
+    updated = []
+    for record in records:
+        text = (texts.get(getattr(record, "source_file", "") or "") or "").strip()
+        if text and (record.attributes or {}).get("source") != text:
+            record = replace(record, attributes={**(record.attributes or {}), "source": text})
+        updated.append(record)
+    return updated
+
+
+def with_source_texts(used, sources, texts):
+    """Used sources (licence block) with the Quellenangabe the user typed."""
+    from dataclasses import replace
+
+    by_label = {source.label: (texts.get(source_key(source)) or "").strip() for source in sources}
+    return [replace(item, attribution=by_label.get(item.name) or item.attribution) for item in used]
+
+
 def data_source_text(used_sources, typed=""):
     """Text for 'Datenquellen und Lizenzen': the used sources with licence,
     plus what the user typed if it says something else."""

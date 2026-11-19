@@ -81,7 +81,13 @@ from .outputs import (
     LAYER_GROUPS,
     OTHER_LAYER_GROUP,
     add_result_layers,
+    apply_source_texts,
+    combined_source_text,
+    default_source_texts,
     layer_group_name,
+    missing_source_texts,
+    source_key,
+    with_source_texts,
     geometry_counts,
     with_geometry_kinds,
     PAGE_SIZES_MM,
@@ -748,6 +754,7 @@ def planned_layer_rows(flow, names, kinds=GEOMETRY_KINDS):
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
 
 
+SOURCE_FIELDS_HINT = "Je Datenquelle eine Angabe – sie steht bei jedem Objekt in der Spalte „Quelle“."
 TOPIC_LAYERS_TITLE = "Layer für die Karte"
 TOPIC_LAYERS_HINT = ("Nach Wichtigkeit sortiert: Bebauung zuerst, Kleinkram zuletzt. "
                      "Häkchen weg = der Layer kommt nicht in die Karte.")
@@ -4140,7 +4147,7 @@ def _create_dock(plugin):
             button.setCheckable(True)
             button.setChecked(key == tab)
             button.setCursor(Qt.PointingHandCursor)
-            set_role(button, "choice")
+            set_role(button, "tab")
             if key != "output" and not has_layers:
                 button.setEnabled(False)
                 button.setToolTip(LAYERS_FIRST_TOOLTIP)
@@ -4215,12 +4222,7 @@ def _create_dock(plugin):
         area.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
-        area.layout.addWidget(QLabel(UI_LABELS["data_source"]))
-        source = QLineEdit(draft["source"])
-        source.textChanged.connect(lambda text: draft.__setitem__("source", text))
-        source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
-        source.setToolTip(DATA_SOURCE_HINT)
-        area.layout.addWidget(source)
+        source_fields(area, draft)
         geometry_ticks(area, flow, draft)
         area_button(area, area_page(area), LAYERS_AGAIN_ACTION if group is not None else LAYERS_ACTION,
                     create_layers_clicked, LAYERS_ACTION)
@@ -4234,11 +4236,63 @@ def _create_dock(plugin):
         area_hint(area, LAYERS_INTRO)
         planned = planned_layer_rows(flow, names, draft["geometry_kinds"])
         details = collapsible(area, "layers_planned",
-                              f"Diese Ergebnis-Layer werden angelegt ({len(planned)})")
+                              f"Geplante Layer ({len(planned)})")
         details.addWidget(summary_card("Diese Ergebnis-Layer werden angelegt", planned))
-        basics = collapsible(area, "layers_basics", "Grundlagen (Gebiet, CRS, Quelle)")
+        basics = collapsible(area, "layers_basics", "Grundlagen")
         basics.addWidget(summary_card(
             "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
+
+    def source_texts(draft):
+        """Quellenangabe je geladener Datenquelle (kept in the draft)."""
+        texts = draft.setdefault("source_texts", {})
+        for key, text in default_source_texts(dock.sources or []).items():
+            texts.setdefault(key, text)
+        return texts
+
+    def source_fields(area, draft):
+        """One Quellenangabe per loaded source: OSM/ALKIS pre-filled, own files
+        empty and required.  Without known sources: one field as before."""
+        title = QLabel(UI_LABELS["data_source"])
+        area.layout.addWidget(title)
+        if not dock.sources:
+            source = QLineEdit(draft["source"])
+            source.textChanged.connect(lambda text: draft.__setitem__("source", text))
+            source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
+            source.setToolTip(DATA_SOURCE_HINT)
+            area.layout.addWidget(source)
+            return
+        hint = QLabel(SOURCE_FIELDS_HINT)
+        hint.setWordWrap(True)
+        set_role(hint, "hint")
+        area.layout.addWidget(hint)
+        texts = source_texts(draft)
+        draft["source"] = combined_source_text(dock.sources, texts)
+        for source in dock.sources:
+            key = source_key(source)
+            label = QLabel(source.label + ("" if source.attribution else " – bitte eintragen"))
+            label.setWordWrap(True)
+            label.setToolTip("Auch im Lizenzblock von GeoPackage und PDF. Bei eigenen Dateien "
+                             "bitte selbst eintragen, woher die Daten stammen.")
+            if not texts.get(key):
+                set_role(label, "key")
+            field = QLineEdit(texts.get(key, ""))
+            field.setPlaceholderText("z. B. Kartierung Studio, 2026" if not source.attribution
+                                     else DATA_SOURCE_PLACEHOLDER)
+            field.setToolTip(f"Steht bei jedem Objekt aus „{source.label}“ in der Spalte „Quelle“.")
+
+            def changed(text, key=key, label=label):
+                texts[key] = text
+                draft["source"] = combined_source_text(dock.sources, texts)
+                set_role(label, None if text.strip() else "key")
+
+            field.textChanged.connect(changed)
+            box = QWidget()
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(INDENT_PX, 0, 0, 2)
+            box_layout.setSpacing(1)
+            box_layout.addWidget(label)
+            box_layout.addWidget(field)
+            area.layout.addWidget(box)
 
     def geometry_ticks(area, flow, draft):
         """'Diese Layer erzeugen': Punkte · Linien · Flächen, each with the
@@ -4324,6 +4378,15 @@ def _create_dock(plugin):
             reject("Bei „Diese Layer erzeugen“ ist nichts angekreuzt. Bitte Punkte, Linien "
                    "oder Flächen ankreuzen (Bereich „Ausgabe“).")
             return None
+        texts = source_texts(draft) if dock.sources else {}
+        missing = missing_source_texts(dock.sources or [], texts)
+        if missing:
+            reject("Bitte eine Quellenangabe eintragen für: " + ", ".join(missing)
+                   + " (Bereich „Ausgabe“, Datenquelle). Sie steht bei jedem Objekt dieser "
+                   "Quelle in der Spalte „Quelle“.")
+            return None
+        if dock.sources:
+            draft["source"] = combined_source_text(dock.sources, texts)
         source = draft.get("source", "")
         problem = output_choice_problem(geopackage=False, pdf=False, paths={}, data_source=source)
         if problem:
@@ -4351,6 +4414,9 @@ def _create_dock(plugin):
                     getattr(flow, "column_decisions", None))
             flow.result.harmonized_records = apply_data_source(
                 flow.result.harmonized_records, source)
+            # each object gets the Quellenangabe of its own source (own files too)
+            flow.result.harmonized_records = apply_source_texts(
+                flow.result.harmonized_records, texts)
         except ValueError as error:
             reject(error_text(error))
             return None
@@ -4507,7 +4573,9 @@ def _create_dock(plugin):
             return []
         from .data_pipeline import used_sources
 
-        return used_sources(dock.sources, flow.result.harmonized_records)
+        used = used_sources(dock.sources, flow.result.harmonized_records)
+        texts = dock.output_draft.get("source_texts") or {}
+        return with_source_texts(used, dock.sources, texts)
 
     def write_map_pdf(flow, path, layers):
         """PDF map with the settings of 'Speichern'."""

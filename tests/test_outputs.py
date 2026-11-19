@@ -60,3 +60,42 @@ def test_alkis_layers_with_generic_geometry_are_counted_by_their_table():
     layers = [_descriptor("gebaeude", "GEOMETRY"), _descriptor("nutzung_strassen", "GEOMETRY"),
               _descriptor("bauwerke_l", "GEOMETRY"), _descriptor("grenzpunkte", "GEOMETRY")]
     assert geometry_counts(layers) == {"point": 1, "line": 1, "polygon": 2}
+
+
+# --- Schritt 8: Quellenangabe je Datenquelle ----------------------------------
+
+def _sources():
+    from urban_analysis.data_pipeline import SourceFile
+
+    return [SourceFile("osm.gpkg", "OSM", "OpenStreetMap", attribution="© OpenStreetMap-Mitwirkende"),
+            SourceFile("eigene.gpkg", "Eigene Datei", "eigene.gpkg")]
+
+
+def test_own_files_must_get_their_own_source_text():
+    from urban_analysis.outputs import (
+        combined_source_text, default_source_texts, missing_source_texts)
+
+    sources = _sources()
+    texts = default_source_texts(sources)
+    assert texts == {"osm.gpkg": "© OpenStreetMap-Mitwirkende", "eigene.gpkg": ""}
+    assert missing_source_texts(sources, texts) == ["eigene.gpkg"]
+    texts["eigene.gpkg"] = "Kartierung Studio, 2026"
+    assert missing_source_texts(sources, texts) == []
+    assert combined_source_text(sources, texts) == "© OpenStreetMap-Mitwirkende; Kartierung Studio, 2026"
+
+
+def test_every_object_gets_the_source_text_of_its_own_source():
+    from types import SimpleNamespace
+
+    from urban_analysis.outputs import apply_source_texts, with_source_texts
+    from urban_analysis.data_pipeline import HarmonizedRecord, UsedSource
+
+    records = [HarmonizedRecord("a", 1, {"source": "© OpenStreetMap-Mitwirkende"}, source_file="osm.gpkg"),
+               HarmonizedRecord("b", 2, {"source": "Eigene Datei: eigene.gpkg"}, source_file="eigene.gpkg")]
+    texts = {"osm.gpkg": "© OpenStreetMap-Mitwirkende", "eigene.gpkg": "Kartierung Studio, 2026"}
+    updated = apply_source_texts(records, texts)
+    assert [r.attributes["source"] for r in updated] == ["© OpenStreetMap-Mitwirkende",
+                                                         "Kartierung Studio, 2026"]
+    assert records[1].attributes["source"] == "Eigene Datei: eigene.gpkg"  # input unchanged
+    used = [UsedSource("Eigene Datei", "eigene.gpkg", "", "", "", 1)]
+    assert with_source_texts(used, _sources(), texts)[0].attribution == "Kartierung Studio, 2026"
