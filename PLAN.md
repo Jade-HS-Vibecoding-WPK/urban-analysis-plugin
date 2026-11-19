@@ -179,6 +179,31 @@ die Erklärung erst bei Bedarf.
 erwartet dann 11 statt 8 Felder und wird im selben Zug angepasst. W14 baut
 Schritt 5 nach Punkt 2 und 3.
 
+#### G11 (19.11.2026): Kernfelder plus Originalspalten – ersetzt Punkt 1 teilweise
+
+Nach dem Live-Test gingen zu viele Informationen verloren, weil die
+Ergebnis-Layer nur die festen Zielfelder enthielten (E29, E30 in
+`ARBEITSPLAN_DEUTSCHLANDWEIT.md`). Künftig gilt:
+
+- **Kernfelder** (`CORE_FIELDS` in `contracts.py`) hat jeder Ergebnis-Layer,
+  weil Karte und Legende sie brauchen: `object_id`, `address`,
+  `object_type`, `category`, `source`, `source_name`. Nur diese können in
+  Schritt 5 als Ziel gewählt werden (`ColumnDecision` mit `"target"`).
+- **Originalspalten** werden mit lesbarem Namen übernommen, wenn sie in der
+  Namensliste der Quelle (`mapping_rules.json`) stehen (`ColumnInfo.known`).
+  Unbekannte Spalten sind in Schritt 5 eingeklappt unter „Nicht geladen
+  (nicht lesbar)“ und können dazugeholt werden; ein Info-Hinweis nennt sie.
+  Den Namen jeder übernommenen Spalte kann die Nutzerin ändern
+  (`ColumnDecision` mit `"keep"` und `name`).
+- `floors`, `object_detail`, `status`, `area_m2` und `year` sind keine
+  Pflichtfelder mehr, sondern normale Spalten mit lesbarem Namen
+  („Geschosszahl“, „Nutzungsdetail“ …), wenn die Quelle sie hat. Die
+  Erklärungssätze aus Punkt 1 bleiben als ⓘ-Text erhalten.
+- Unsichere Dubletten bekommen eine lesbare Erklärung
+  (`DuplicateGroupInfo` mit Beispielsatz und abweichenden Werten, E31);
+  Hinweise bekommen „was tun“ (`ValidationIssue.action`) und „Mehr erfahren“
+  (`ValidationIssue.details`).
+
 ### 3.5 Dopplungen und Konsistenz prüfen
 
 IDs sowie Geometrien und Attribute werden auf Dopplungen, Widersprüche und
