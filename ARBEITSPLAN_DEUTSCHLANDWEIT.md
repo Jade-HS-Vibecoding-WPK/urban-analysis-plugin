@@ -315,6 +315,31 @@ Wartezeit starten kann.
 - **Wartet auf:** nichts. Der wichtigste gemeinsame Schritt: 4 (Teil 2),
   12, 13 und 14 warten darauf.
 
+##### Vorschlag Person Windows (19.11.2026) – zur Abstimmung im PR
+
+**Anlass:** Im Live-Test (OSM und ALKIS) waren Schritt 4, 5 und 6 nicht
+verständlich: Man sieht Informationen, weiß aber nicht, was sie bedeuten,
+was man entscheiden soll und was ein Klick bewirkt. Jeder der drei Schritte
+bekommt deshalb oben drei feste Zeilen – **„Was siehst du?“, „Was
+entscheidest du?“, „Was passiert dann?“** – und nur noch Bedienelemente, die
+etwas bewirken. Dafür braucht die Oberfläche von der Pipeline:
+
+| Schritt | Was die Nutzerin sehen soll | Was die Pipeline dafür liefert (neu) |
+| --- | --- | --- |
+| **4 Layer prüfen** | Je Hinweis **ein Satz** „was ist los“ und **ein Satz** „was tun“ (oder „nichts zu tun“); Rest unter „Mehr erfahren“. Hinweise ohne Handlungsbedarf zusammengefasst („12 Infos, nichts zu tun“). | `ValidationIssue.details` (langer Text), `ValidationIssue.action` (kurzer Satz „was tun“, leer = nichts zu tun), `ValidationIssue.layer_id` (statt Layername aus dem Text zu lesen). |
+| **5 Attributzuordnung** | Je Layer ein Ausklappmenü; im Kopf „4 zugeordnet, 12 weitere“. **Alle** Spalten mit 2–3 Beispielwerten; je Spalte „→ Zielfeld“ / „als Originalspalte behalten“ / „weglassen“; ⓘ-Erklärung je Zielfeld (aus M15). | Neue Struktur `ColumnInfo` je Layer und Spalte: `layer_id`, `source_field`, `examples` (2–3), `suggested_target` (leer = kein Vorschlag), `confidence`. Rückweg: Entscheidung je Spalte `"target:<feld>"`, `"keep"` oder `"drop"`. |
+| **6 Harmonisierung** | Je Layer **ein Satz**, was „Zusammenführen“ konkret bewirkt („645 Gruppen → 645 Gebäude statt 1 675 Zeilen“), dazu ein **Beispiel in Alltagssprache** („Eckhaus Hauptstraße 2 / Nebenweg 1 erscheint zweimal mit gleicher Form“) statt technischer Werte. | Je Dubletten-Gruppe ein lesbares Beispiel (`example_text`) und der Grund (`reason`: gleiche Form / gleiche ID / nur Adresse anders). Texte inhaltlich: Person Mac (M15). |
+
+Außerdem `source_kind` je Datensatz (S11, wie oben). Alle neuen Felder sind
+**optional mit leerem Standardwert**, damit bestehende Tests und Daten
+weiterlaufen. Die Oberfläche (W13, W14, Schritt 6) nutzt sie, sobald sie da
+sind; bis dahin bleibt der heutige Stand.
+
+**Offene Fragen an Person Mac:** (1) Passen Namen und Form der Felder?
+(2) Kann die Pipeline Beispielwerte für *alle* Spalten liefern, ohne bei
+großen Layern langsam zu werden (z. B. nur die ersten 200 Zeilen ansehen)?
+(3) Gibt es Hinweise, für die „was tun“ schwer zu formulieren ist?
+
 #### 2. M9 – Recherche: ALKIS-Dienste der 16 Bundesländer *(Mac)*
 
 - **Absicht:** Bevor wir Code schreiben, müssen wir wissen, welches Land was
