@@ -69,7 +69,11 @@ from .osm_download import (
 )
 from .sources import plan_osm_download
 from .outputs import (
+    GEOMETRY_KINDS,
+    GEOMETRY_WORDS,
     add_result_layers,
+    geometry_counts,
+    with_geometry_kinds,
     PAGE_SIZES_MM,
     SCALES,
     build_result_layers,
@@ -377,6 +381,8 @@ OWN_OBJECT_INSTRUCTIONS = ("Linksklick auf ein Objekt (z. B. ein Gebäude) nimmt
                            "Ziel. Rechtsklick oder Esc beendet.")
 ACCESS_TARGETS_HINT = ("Ganze Kategorien ankreuzen (z. B. „ÖPNV-Haltestellen“) oder aufklappen "
                        "und einzelne Arten wählen (z. B. nur „Supermarkt“). Mehrere Ziele sind möglich.")
+ACCESS_PICK_SOURCE = ("Bitte unter ① „Ziele aus den geladenen Daten“ oder „Eigene Punkte“ "
+                      "ankreuzen und dort mindestens ein Ziel wählen.")
 ACCESS_NO_TARGETS = ("In den geladenen Daten gibt es keine Ziele wie Haltestellen, Supermärkte "
                      "oder Arztpraxen. Diese kommen aus OpenStreetMap – bitte in Schritt 3 "
                      "„OpenStreetMap“ laden.")
@@ -667,14 +673,14 @@ def overview_rows(flow, area_ha, names):
     )
 
 
-def planned_layer_rows(flow, names):
+def planned_layer_rows(flow, names, kinds=GEOMETRY_KINDS):
     """One row per result layer that will be created, with its object count
-    and its icon key as third element."""
+    and its icon key as third element.  ``kinds``: ticked geometry kinds."""
     counts = {}
     for record in flow.result.harmonized_records:
         counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
     rows = []
-    selected = flow.result.selected_layers()
+    selected = with_geometry_kinds(flow.result.selected_layers(), kinds)
     unique = result_layer_names(selected, names.layer)
     for descriptor in selected:
         name = unique[descriptor.layer_id]
@@ -1228,7 +1234,7 @@ def _create_dock(plugin):
                     getattr(view, name)(*args, **kwargs)
             return call
     from .ui.widgets.icons import (
-        TITLE_ICON_PX, icon_size, layer_icon, palette_icon, title_icon, with_icon,
+        TITLE_ICON_PX, icon_size, layer_icon, layer_pixmap, palette_icon, title_icon, with_icon,
     )
     from qgis.PyQt.QtCore import QPoint, QSize
     from qgis.PyQt.QtGui import QColor, QIcon, QPixmap
@@ -1347,6 +1353,7 @@ def _create_dock(plugin):
             self.own_markers = None  # own accessibility targets in the map
             self.download_feedback = None  # QgsFeedback of a running OSM download
             self.osm_feedback = None       # only the Overpass request (cache button)
+            self.new_own_target = None     # index of the own target that just came in
             self.use_cache_requested = False
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -3296,18 +3303,46 @@ def _create_dock(plugin):
             label.setWordWrap(True)
             details_layout.addWidget(label)
 
-        # ① targets from the data: whole categories or single kinds (subtypes)
-        step_heading("① Ziele aus den Daten")
+        # ① where the targets come from: tick, then the matching part opens
+        step_heading("① Woher kommen die Ziele?")
+        use = getattr(flow, "access_use", None)
+        if use is None:
+            use = flow.access_use = {"data": bool(choice.targets), "own": bool(flow.own_targets)}
+        use_data = QCheckBox("Ziele aus den geladenen Daten")
+        use_data.setChecked(use["data"])
+        details_layout.addWidget(use_data)
+        data_box = QWidget()
+        data_layout = QVBoxLayout(data_box)
+        data_layout.setContentsMargins(INDENT_PX, 0, 0, 6)
+        details_layout.addWidget(data_box)
+        use_own = QCheckBox("Eigene Punkte")
+        use_own.setChecked(use["own"])
+        details_layout.addWidget(use_own)
+        own_box = QWidget()
+        own_layout = QVBoxLayout(own_box)
+        own_layout.setContentsMargins(INDENT_PX, 0, 0, 6)
+        details_layout.addWidget(own_box)
+
+        def fold(*_args):
+            use["data"], use["own"] = use_data.isChecked(), use_own.isChecked()
+            data_box.setVisible(use["data"])
+            own_box.setVisible(use["own"])
+            show_own_markers()
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        # targets from the data: whole categories or single kinds (subtypes)
         tree = QTreeWidget()
         tree.setHeaderHidden(True)
+        tree.setIconSize(icon_size())
         if available:
             hint = QLabel(ACCESS_TARGETS_HINT)
             hint.setWordWrap(True)
             set_role(hint, "hint")
-            details_layout.addWidget(hint)
+            data_layout.addWidget(hint)
             for category, kinds in available.items():
                 total = sum(count for _kind, count in kinds)
                 parent = QTreeWidgetItem([f"{category} ({total})"])
+                parent.setIcon(0, layer_icon(icon_key(category=category)))
                 parent.setData(0, Qt.UserRole, category)
                 parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
                 chosen = choice.targets.get(category)
@@ -3324,40 +3359,47 @@ def _create_dock(plugin):
                        (tree.topLevelItem(i) for i in range(tree.topLevelItemCount())))
             tree.setMinimumHeight(min(rows, 12) * 22 + 8)
             tree.setMaximumHeight(max(tree.topLevelItemCount(), 3) * 26 + 120)
-            details_layout.addWidget(tree)
+            data_layout.addWidget(tree)
         else:
             none = QLabel(ACCESS_NO_TARGETS)
             none.setWordWrap(True)
             set_role(none, "warning")
-            details_layout.addWidget(none)
+            data_layout.addWidget(none)
 
-        # ② own targets: set points or pick objects in the map
-        step_heading("② Eigene Ziele (optional)")
+        # own targets: set points or pick objects in the map (accent = click here)
         own_hint = QLabel(OWN_TARGETS_HINT)
         own_hint.setWordWrap(True)
         set_role(own_hint, "hint")
-        details_layout.addWidget(own_hint)
-        own_buttons = QWidget()
-        own_row = QHBoxLayout(own_buttons)
-        own_row.setContentsMargins(0, 0, 0, 0)
+        own_layout.addWidget(own_hint)
+        # one button per line: side by side the bold texts get cut in the pixel style
         point_button = QPushButton("Punkt setzen")
+        point_button.setIcon(layer_icon("eigene_ziele"))
         object_button = QPushButton("Objekt anklicken")
+        object_button.setIcon(layer_icon("gebaeude"))
         for button, mode in ((point_button, "point"), (object_button, "object")):
-            set_role(button, "secondary")
+            set_role(button, "accent")
+            button.setIconSize(icon_size())
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(lambda _c=False, m=mode: start_target_pick(page, m))
-            own_row.addWidget(button)
-        own_row.addStretch()
-        details_layout.addWidget(own_buttons)
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(button)
+            line.addStretch()
+            own_layout.addLayout(line)
         own_list = QWidget()
         own_list_layout = QVBoxLayout(own_list)
-        own_list_layout.setContentsMargins(0, 0, 0, 0)
-        details_layout.addWidget(own_list)
+        own_list_layout.setContentsMargins(0, 4, 0, 0)
+        own_list_layout.setSpacing(4)
+        own_layout.addWidget(own_list)
         page.widgets["access_own_list"] = own_list_layout
         refresh_own_targets(page)
+        use_data.toggled.connect(fold)
+        use_own.toggled.connect(fold)
+        data_box.setVisible(use["data"])
+        own_box.setVisible(use["own"])
 
-        # ③ rings: tick how many, set each radius and colour
-        step_heading("③ Ringe (Radius in Metern, Luftlinie)")
+        # ② rings: tick how many, set each radius and colour
+        step_heading("② Ringe (Radius in Metern, Luftlinie)")
         rings_box = QWidget()
         rings_layout = QVBoxLayout(rings_box)
         rings_layout.setContentsMargins(0, 0, 0, 0)
@@ -3430,7 +3472,8 @@ def _create_dock(plugin):
 
         def refresh_guides(*_args):
             _clear_layout(guide_layout)
-            for category, subtypes in tree_targets(tree).items():
+            chosen = tree_targets(tree) if use_data.isChecked() else {}
+            for category, subtypes in chosen.items():
                 guide_radii, guide_text = guide_value(category, subtypes)
                 line = QWidget()
                 line_layout = QHBoxLayout(line)
@@ -3440,7 +3483,7 @@ def _create_dock(plugin):
                 text.setWordWrap(True)
                 set_role(text, "hint")
                 take = QPushButton("übernehmen")
-                set_role(take, "secondary")
+                set_role(take, "accent")
                 take.setCursor(Qt.PointingHandCursor)
                 take.setToolTip("Die Ringe auf diesen Richtwert setzen")
                 take.clicked.connect(lambda _c=False, r=guide_radii: apply_guide(r))
@@ -3449,8 +3492,8 @@ def _create_dock(plugin):
                 guide_layout.addWidget(line)
             QTimer.singleShot(0, dock.fit_wrapped_labels)
 
-        # ④ display: fill between the rings with a chosen opacity
-        step_heading("④ Darstellung")
+        # ③ display: fill between the rings with a chosen opacity
+        step_heading("③ Darstellung")
         fill_row_box = QWidget()
         fill_row = QHBoxLayout(fill_row_box)
         fill_row.setContentsMargins(0, 0, 0, 0)
@@ -3480,9 +3523,11 @@ def _create_dock(plugin):
 
         if available:
             tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
+        use_data.toggled.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
         refresh_guides()
         page.widgets.update(access_tree=tree, access_fill=fill, access_opacity=opacity,
-                            access_available=bool(available))
+                            access_available=bool(available), access_use_data=use_data,
+                            access_use_own=use_own)
         show_own_markers()
 
     def stepper(spin):
@@ -3521,25 +3566,63 @@ def _create_dock(plugin):
             return
         _clear_layout(layout)
         targets = workflow().own_targets
+        new_index, dock.new_own_target = dock.new_own_target, None
+        if targets:
+            count = QLabel(f"Eigene Ziele: {len(targets)}")
+            set_role(count, "key")
+            layout.addWidget(count)
         for index, target in enumerate(targets):
-            line = QWidget()
-            line_layout = QHBoxLayout(line)
-            line_layout.setContentsMargins(0, 0, 0, 0)
-            text = QLabel(f"• {target.label}")
+            card = QFrame()
+            set_role(card, "own-target")
+            line_layout = QHBoxLayout(card)
+            line_layout.setContentsMargins(6, 4, 4, 4)
+            pin = QLabel()
+            pin.setPixmap(layer_pixmap("eigene_ziele"))
+            text = QLabel(f"<b>{index + 1}</b> · {target.label}")
             text.setWordWrap(True)
-            remove = QPushButton("entfernen")
-            set_role(remove, "secondary")
+            remove = QToolButton()
+            remove.setText("✕")
+            remove.setToolTip("Dieses Ziel entfernen")
             remove.setCursor(Qt.PointingHandCursor)
             remove.clicked.connect(lambda _c=False, i=index: remove_own_target(page, i))
+            line_layout.addWidget(pin, 0, Qt.AlignmentFlag.AlignTop)
             line_layout.addWidget(text, 1)
-            line_layout.addWidget(remove)
-            layout.addWidget(line)
+            line_layout.addWidget(remove, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(card)
+            if index == new_index:
+                light_up(card)
         if not targets:
             none = QLabel("Noch keine eigenen Ziele.")
             set_role(none, "hint")
             layout.addWidget(none)
         show_own_markers()
         QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+    def light_up(card):
+        """A new own target lights up in the accent colour: it blinks twice
+        (pixel style) or fades back once (classic); with reduced animations
+        it only stays highlighted for a moment."""
+        from .ui import style as ui_style
+
+        if not ui_style.animations_enabled():
+            steps = ("own-target-new", "own-target")
+            pause = 900
+        elif ui_style.current() == "classic":
+            steps = ("own-target-new", "own-target")
+            pause = 700
+        else:
+            steps = ("own-target-new", "own-target", "own-target-new", "own-target")
+            pause = 220
+
+        def show(number):
+            try:
+                set_role(card, steps[number])
+            except RuntimeError:
+                return  # list was rebuilt in between
+            if number + 1 < len(steps):
+                QTimer.singleShot(pause, lambda: show(number + 1))
+
+        show(0)
 
     def remove_own_target(page, index):
         targets = workflow().own_targets
@@ -3548,7 +3631,8 @@ def _create_dock(plugin):
         refresh_own_targets(page)
 
     def show_own_markers():
-        if dock.step9_tab != "access" or dock.current != len(dock.pages) - 1:
+        own_ticked = (getattr(workflow(), "access_use", None) or {}).get("own", True)
+        if dock.step9_tab != "access" or dock.current != len(dock.pages) - 1 or not own_ticked:
             dock.hide_own_markers()
             return
         geometries = [QgsGeometry.fromWkt(target.wkt) for target in workflow().own_targets]
@@ -3564,6 +3648,7 @@ def _create_dock(plugin):
             targets = workflow().own_targets
             label = own_target_label(len(targets) + 1, attributes)
             targets.append(OwnTarget(geometry.asWkt(), label, attributes))
+            dock.new_own_target = len(targets) - 1  # lights up in the list
             refresh_own_targets(page)
             dock.show_message(f"Eigenes Ziel hinzugefügt: {label}. Weitere setzen oder mit "
                               "Rechtsklick/Esc beenden.", kind="info")
@@ -3592,12 +3677,14 @@ def _create_dock(plugin):
     def accessibility_from(page):
         """Read the accessibility settings of the last step."""
         widgets = page.widgets
+        use_data = widgets.get("access_use_data")
+        use_own = widgets.get("access_use_own")
         return AccessibilityChoice(
-            targets=tree_targets(widgets["access_tree"]),
+            targets=tree_targets(widgets["access_tree"]) if use_data is None or use_data.isChecked() else {},
             rings=ring_values(page),
             fill=widgets["access_fill"].isChecked(),
             opacity=widgets["access_opacity"].value() / 100,
-            own_targets=list(workflow().own_targets),
+            own_targets=list(workflow().own_targets) if use_own is None or use_own.isChecked() else [],
         )
 
     def validate_topic(page):
@@ -3692,6 +3779,7 @@ def _create_dock(plugin):
         draft.setdefault("geopackage", output.save_cleaned_geopackage)
         draft.setdefault("pdf", output.create_pdf)
         draft.setdefault("source", output.data_source)
+        draft.setdefault("geometry_kinds", GEOMETRY_KINDS)
         return draft
 
     def labelled_combo(label, items, key, default):
@@ -3863,6 +3951,7 @@ def _create_dock(plugin):
         source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
         source.setToolTip(DATA_SOURCE_HINT)
         area.layout.addWidget(source)
+        geometry_ticks(area, flow, draft)
         area_button(area, area_page(area), LAYERS_AGAIN_ACTION if group is not None else LAYERS_ACTION,
                     create_layers_clicked, LAYERS_ACTION)
         if dock.last_reports is not None and group is not None:
@@ -3873,13 +3962,55 @@ def _create_dock(plugin):
                 dock.last_reports, {d.layer_id: d.category for d in flow.result.layers})))
             return
         area_hint(area, LAYERS_INTRO)
-        planned = planned_layer_rows(flow, names)
+        planned = planned_layer_rows(flow, names, draft["geometry_kinds"])
         details = collapsible(area, "layers_planned",
                               f"Diese Ergebnis-Layer werden angelegt ({len(planned)})")
         details.addWidget(summary_card("Diese Ergebnis-Layer werden angelegt", planned))
         basics = collapsible(area, "layers_basics", "Grundlagen (Gebiet, CRS, Quelle)")
         basics.addWidget(summary_card(
             "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
+
+    def geometry_ticks(area, flow, draft):
+        """'Diese Layer erzeugen': Punkte · Linien · Flächen, each with the
+        number of layers; the list of planned layers follows the ticks."""
+        counts = geometry_counts(flow.result.selected_layers())
+        title = QLabel("Diese Layer erzeugen")
+        title.setContentsMargins(0, 6, 0, 0)
+        area.layout.addWidget(title)
+        # two columns: in the narrow pixel style one row would cut the texts
+        row_box = QWidget()
+        row = QGridLayout(row_box)
+        row.setContentsMargins(0, 0, 0, 0)
+        ticks = {}
+        for number, kind in enumerate(GEOMETRY_KINDS):
+            tick = QCheckBox(f"{GEOMETRY_WORDS[kind]} ({counts[kind]})")
+            tick.setChecked(kind in draft["geometry_kinds"])
+            tick.setEnabled(counts[kind] > 0)
+            ticks[kind] = tick
+            row.addWidget(tick, number // 2, number % 2)
+        row.setColumnStretch(2, 1)
+        area.layout.addWidget(row_box)
+        planned = len(with_geometry_kinds(flow.result.selected_layers(), draft["geometry_kinds"]))
+        total = QLabel(f"→ {planned} Ergebnis-Layer werden erzeugt")
+        set_role(total, "key")
+        area.layout.addWidget(total)
+        no_areas = QLabel("Ohne Flächen gibt es keine Gebäude: die Erreichbarkeit kann dann "
+                          "keine Abstände eintragen.")
+        no_areas.setWordWrap(True)
+        set_role(no_areas, "hint")
+        area.layout.addWidget(no_areas)
+
+        def changed(_checked=False):
+            draft["geometry_kinds"] = tuple(kind for kind in GEOMETRY_KINDS if ticks[kind].isChecked())
+            planned_now = len(with_geometry_kinds(flow.result.selected_layers(), draft["geometry_kinds"]))
+            total.setText(f"→ {planned_now} Ergebnis-Layer werden erzeugt")
+            no_areas.setVisible(counts["polygon"] > 0 and "polygon" not in draft["geometry_kinds"])
+            if dock.last_reports is None or result_group() is None:
+                QTimer.singleShot(0, lambda: rebuild_last_step(area_page(area)))  # list follows
+
+        no_areas.setVisible(counts["polygon"] > 0 and "polygon" not in draft["geometry_kinds"])
+        for tick in ticks.values():
+            tick.toggled.connect(changed)
 
     def area_page(area):
         # the last step (dock.current is still the previous page while it is built)
@@ -3916,6 +4047,11 @@ def _create_dock(plugin):
                    "mindestens eine Kategorie ankreuzen.")
             return None
         draft = output_draft()
+        selected = with_geometry_kinds(selected, draft["geometry_kinds"])
+        if not selected:
+            reject("Bei „Diese Layer erzeugen“ ist nichts angekreuzt. Bitte Punkte, Linien "
+                   "oder Flächen ankreuzen (Bereich „Ausgabe“).")
+            return None
         source = draft.get("source", "")
         problem = output_choice_problem(geopackage=False, pdf=False, paths={}, data_source=source)
         if problem:
@@ -3993,8 +4129,10 @@ def _create_dock(plugin):
         (copies with attribute table) and dashed radii as sub-groups."""
         flow = workflow()
         choice = accessibility_from(page)
-        if not page.widgets.get("access_available") and not choice.own_targets:
-            return reject(ACCESS_NO_TARGETS + " " + OWN_TARGETS_HINT)
+        if not choice.targets and not choice.own_targets:
+            if not page.widgets.get("access_available"):
+                return reject(ACCESS_NO_TARGETS + " " + OWN_TARGETS_HINT)
+            return reject(ACCESS_PICK_SOURCE)
         problem = choice_problem(choice)
         if problem:
             return reject(problem)

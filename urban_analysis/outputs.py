@@ -89,6 +89,32 @@ def geometry_word(descriptor: LayerDescriptor) -> str:
     return ""
 
 
+GEOMETRY_KINDS = ("point", "line", "polygon")  # order of the ticks in 'Ausgabe'
+
+
+def geometry_kind_of(descriptor: LayerDescriptor) -> str:
+    """'point', 'line', 'polygon' or '' (unknown) of a result layer."""
+    word = geometry_word(descriptor)
+    return next((kind for kind, name in GEOMETRY_WORDS.items() if name == word), "")
+
+
+def geometry_counts(descriptors: Iterable[LayerDescriptor]) -> Dict[str, int]:
+    """Number of layers per geometry kind (for the ticks 'Punkte (3)' …)."""
+    counts = {kind: 0 for kind in GEOMETRY_KINDS}
+    for descriptor in descriptors:
+        kind = geometry_kind_of(descriptor)
+        if kind:
+            counts[kind] += 1
+    return counts
+
+
+def with_geometry_kinds(descriptors: Iterable[LayerDescriptor], kinds) -> List[LayerDescriptor]:
+    """Only the layers of the ticked geometry kinds; layers of unknown
+    geometry always stay (nothing disappears unseen)."""
+    wanted = set(kinds)
+    return [d for d in descriptors if geometry_kind_of(d) in wanted or not geometry_kind_of(d)]
+
+
 def result_layer_names(descriptors: Iterable[LayerDescriptor], readable=None) -> Dict[str, str]:
     """Readable, unique names for the result layers (layer_id -> name).
 
