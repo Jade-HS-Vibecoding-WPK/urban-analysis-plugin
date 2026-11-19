@@ -436,8 +436,6 @@ AUTO_COLUMNS_LABEL = "Ja, automatisch zuordnen (empfohlen)"
 MANUAL_COLUMNS_LABEL = "Nein, selbst wählen"
 # Kept by default whenever the data have them (user wish 19.11.)
 ALWAYS_KEEP = ("Geschosszahl", "Baujahr", "Name")
-# Columns that identify an object; the first one becomes the core field Objekt-ID
-OBJECT_ID_FIELDS = ("oid", "osm_id", "objid", "gml_id")
 MIN_FILL_RATE = 0.15  # kept columns must be filled in at least 15 % of the objects
 FILL_SAMPLE = 400
 
@@ -456,24 +454,28 @@ def fill_rates(records):
     return {key: count / seen[key[0]] for key, count in filled.items()}
 
 
+def always_kept(column):
+    """Geschosszahl, Baujahr, Name – also 'Geschosszahl (OSM)' or 'Baujahr oder
+    Entstehung' (names start with these words)."""
+    name = column.readable_name or ""
+    return any(name.startswith(word) for word in ALWAYS_KEEP)
+
+
 def preselect(columns, decisions, rates):
-    """Improve the pipeline's preselection (W14): an ID column becomes the
-    core field Objekt-ID, nearly empty columns stay out, Geschosszahl,
-    Baujahr and Name are kept whenever they exist."""
+    """Improve the pipeline's preselection (W14): nearly empty columns stay
+    out; Geschosszahl, Baujahr and Name are kept whenever they exist.
+
+    Core fields (above all the Objekt-ID) stay exactly as the pipeline
+    suggests them: the pipeline knows which ID column a profile uses
+    (e.g. OSM ``osm_way_id`` for areas, see #52)."""
     result = {}
-    has_id = {d.layer_id for d in decisions.values()
-              if d.action == COLUMN_TARGET and d.target_field == "object_id"}
     for column in columns:
         key = (column.layer_id, column.source_field)
         decision = decisions[key]
-        if (column.layer_id not in has_id and decision.action != COLUMN_TARGET
-                and column.source_field.lower() in OBJECT_ID_FIELDS):
-            decision = decision_from_value(column, "target:object_id")
-            has_id.add(column.layer_id)
-        elif decision.action == COLUMN_KEEP and column.readable_name not in ALWAYS_KEEP \
+        if decision.action == COLUMN_KEEP and not always_kept(column) \
                 and rates.get(key, 0.0) < MIN_FILL_RATE:
             decision = decision_from_value(column, "drop")  # (nearly) empty
-        elif decision.action == COLUMN_DROP and column.readable_name in ALWAYS_KEEP:
+        elif decision.action == COLUMN_DROP and always_kept(column):
             decision = decision_from_value(column, "keep")
         result[key] = decision
     return result
