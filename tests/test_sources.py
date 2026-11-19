@@ -103,11 +103,23 @@ def test_overpass_query_asks_for_all_profile_keys_in_the_box():
 
 
 def test_query_keys_match_the_osm_profile():
-    """Everything the OSM profile sorts by is downloaded (except boundary)."""
+    """Everything the OSM profile sorts by is downloaded (except boundary),
+    plus the keys only the map topics need (M25)."""
     settings = load_catalog()["osm"]["abfrage"]
     rules = json.loads(RULES_PATH.read_text(encoding="utf-8"))
     (osm,) = [profile for profile in rules["profiles"] if profile["name"] == "OSM"]
     profile_keys = set()
     for layer in osm["layers"].values():
         profile_keys |= set(layer.get("tag_fields", []))
-    assert profile_keys - set(settings["ohne_schluessel"]) == set(settings["schluessel"])
+    topic_keys = set(settings["nur_fuer_themen"])
+    assert not topic_keys & profile_keys
+    assert (profile_keys - set(settings["ohne_schluessel"])) | topic_keys == set(settings["schluessel"])
+
+
+def test_topic_keys_are_read_as_columns():
+    """The topic keys from other_tags become own columns of the OSM layers."""
+    settings = load_catalog()["osm"]["abfrage"]
+    rules = json.loads(RULES_PATH.read_text(encoding="utf-8"))
+    (osm,) = [profile for profile in rules["profiles"] if profile["name"] == "OSM"]
+    assert {"craft", "heritage", "historic", "office", "tourism"} <= set(settings["nur_fuer_themen"])
+    assert set(settings["nur_fuer_themen"]) <= set(osm["tag_columns"])

@@ -21,8 +21,11 @@
       "schluessel": [
         "amenity", "barrier", "building", "building:part", "healthcare", "highway", "landuse", "leisure",
         "man_made", "natural", "place", "power", "public_transport", "railway", "shop",
-        "water", "waterway"
+        "water", "waterway",
+        "craft", "heritage", "historic", "office", "tourism"
       ],
+      "_hinweis_themen": "M25 (S16): Diese Schlüssel holt die Abfrage nur für die Kartenthemen (topics_catalog.json), das OSM-Profil ordnet nicht nach ihnen ein. Der Download holt immer die Merkmale aller Themen, weil das Thema erst in Schritt 7 gewählt wird.",
+      "nur_fuer_themen": ["craft", "heritage", "historic", "office", "tourism"],
       "ohne_schluessel": ["boundary"],
       "rohdatei": "osm_{datum}.osm",
       "geopackage": "osm_{datum}.gpkg"
@@ -67,7 +70,12 @@
       "public_transport": "ÖPNV-Anlagen",
       "healthcare": "Gesundheitseinrichtungen",
       "man_made": "Bauwerke",
-      "place": "Plätze"
+      "place": "Plätze",
+      "craft": "Handwerksbetriebe",
+      "heritage": "Denkmalschutz",
+      "historic": "Historische Orte",
+      "office": "Büros",
+      "tourism": "Tourismus und Aussichtspunkte"
     }
   },
 
