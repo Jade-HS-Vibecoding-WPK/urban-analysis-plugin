@@ -9,11 +9,11 @@ visible.  Qt enums in full form (Qt5 and Qt6).
 """
 
 from qgis.PyQt.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from qgis.PyQt.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from qgis.PyQt.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from qgis.PyQt.QtWidgets import QSizePolicy, QWidget
 
 from ...theme import CLASSIC_COLORS
-from ..classic_motion import FRAME_MS, ClassicHeaderState
+from ..classic_motion import BEAM_WIDTH, FRAME_MS, ClassicHeaderState
 
 HEIGHT = 92
 SIDE = 22                  # left/right margin of the step row
@@ -166,6 +166,24 @@ class ClassicHeader(QWidget):
                 p.setBrush(c["surface"])
                 p.drawEllipse(QPointF(x, STEP_Y), 5, 5)
 
+    def _paint_beam(self, p, fill):
+        """A soft light runs through the filled part (only while loading)."""
+        position = self.state.beam_position()
+        if position is None or fill.width() < BEAM_WIDTH / 2:
+            return
+        x = fill.left() - BEAM_WIDTH + (fill.width() + BEAM_WIDTH) * position
+        gradient = QLinearGradient(x, 0, x + BEAM_WIDTH, 0)
+        clear, light = QColor(255, 255, 255, 0), QColor(255, 255, 255, 150)
+        gradient.setColorAt(0.0, clear)
+        gradient.setColorAt(0.5, light)
+        gradient.setColorAt(1.0, clear)
+        clip = QPainterPath()
+        clip.addRoundedRect(fill, BAR_H / 2, BAR_H / 2)
+        p.save()
+        p.setClipPath(clip)
+        p.fillRect(QRectF(x, fill.top(), BEAM_WIDTH, fill.height()), gradient)
+        p.restore()
+
     def _check(self, p, x, y, size, color):
         path = QPainterPath()
         path.moveTo(x - size, y)
@@ -193,6 +211,7 @@ class ClassicHeader(QWidget):
         fill = QRectF(left, BAR_Y, max(width * shown / 100, BAR_H), BAR_H)
         p.setBrush(color)
         p.drawRoundedRect(fill, BAR_H / 2, BAR_H / 2)
+        self._paint_beam(p, fill)
         label_x = left + width + 6
         if state.bar == "done":
             p.setBrush(c["success"])

@@ -229,3 +229,28 @@ def test_resting_scene_needs_no_event_animation():
     scene = FishingScene()
     run(scene, 5)
     assert not scene.busy()
+
+
+def test_float_bobs_up_and_down_while_qgis_works():
+    from urban_analysis.ui.scene_motion import LOADING_BOB
+
+    scene = FishingScene()
+    scene.start_loading()
+    for _ in range(len(CAST_FRAMES)):
+        scene.tick()
+    assert scene.phase == "loading"
+    heights = set()
+    for _ in range(len(LOADING_BOB) * 2):
+        scene.tick()
+        heights.add(scene.float_state()[1])
+    assert min(heights) < 0 < max(heights)
+
+
+def test_float_stays_still_while_loading_with_reduced_animations():
+    scene = FishingScene(animations=False)
+    scene.start_loading()
+    heights = set()
+    for _ in range(20):
+        scene.tick()
+        heights.add(scene.float_state()[1])
+    assert heights == {0}

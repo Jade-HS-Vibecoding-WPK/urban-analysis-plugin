@@ -46,6 +46,9 @@ SPLASH_FRAMES = 3          # ripples after the float lands
 TWITCH = (2, -1, 1)        # float twitches (px) when something fails
 BUBBLE_FRAMES = 30         # "…" bubble stays about 3 s
 IDLE_BOB_EVERY = 30        # float bobs 1 px every ~3 s
+# While QGIS works the float bobs up and down steadily (px per 2 frames).
+LOADING_BOB = (0, 1, 2, 1, 0, -1)
+LOADING_BOB_FRAMES = 2
 CLOUD_STEP_EVERY = 8       # clouds move 1 px every 0.8 s
 FISH_SPEED = 3             # px per frame when the step fish swims
 FISH_TAIL_EVERY = 4        # tail flaps every 0.4 s
@@ -306,6 +309,8 @@ class FishingScene:
         dy = 0
         if self.twitch > 0:
             dy = TWITCH[len(TWITCH) - self.twitch]
+        elif self.phase == "loading" and self.animations:
+            dy = LOADING_BOB[(self.ticks // LOADING_BOB_FRAMES) % len(LOADING_BOB)]
         elif self.phase == "idle" and self.animations and self.ticks % IDLE_BOB_EVERY in (1, 2):
             dy = 1
         return x, dy, True, 0

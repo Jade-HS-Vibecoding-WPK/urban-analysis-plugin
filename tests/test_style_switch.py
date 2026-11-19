@@ -153,3 +153,30 @@ def test_classic_release_ring_grows_and_fades_out():
     assert grows == sorted(grows) and opacities == sorted(opacities, reverse=True)
     assert pm.ring_state(0) is None
     assert max(grows) <= pm.CLASSIC_MARGIN_PX  # stays inside the button area
+
+
+def test_beam_runs_through_the_bar_while_loading_and_pauses():
+    from urban_analysis.ui.classic_motion import ClassicHeaderState
+
+    state = ClassicHeaderState()
+    state.start_loading()
+    state.set_progress(60)
+    seen = []
+    for _ in range(120):
+        state.tick()
+        seen.append(state.beam_position())
+    shown = [value for value in seen if value is not None]
+    assert shown and min(shown) < 0.2 and max(shown) > 0.8
+    assert None in seen  # short pause between two runs
+    state.finish()
+    assert state.beam_position() is None
+
+
+def test_no_beam_with_reduced_animations():
+    from urban_analysis.ui.classic_motion import ClassicHeaderState
+
+    state = ClassicHeaderState(animations=False)
+    state.start_loading()
+    for _ in range(30):
+        state.tick()
+        assert state.beam_position() is None

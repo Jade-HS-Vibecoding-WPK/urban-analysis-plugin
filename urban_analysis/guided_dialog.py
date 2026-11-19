@@ -1194,7 +1194,9 @@ def _create_dock(plugin):
         QgsMapLayerComboBox,
         QgsProjectionSelectionWidget,
     )
-    from qgis.PyQt.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer
+    from qgis.PyQt.QtCore import (
+        QEasingCurve, QEvent, QEventLoop, QObject, QPropertyAnimation, Qt, QTimer,
+    )
 
     from .ui.widgets.pixel_button import PixelButton
     from .ui.widgets.pixel_scene import PixelScene
@@ -1736,6 +1738,33 @@ def _create_dock(plugin):
                 if running is not None:
                     running.cancel()  # stops a running request at once
             self.import_task.cancel()
+
+        def start_work(self, text):
+            """Longer work in the last step (layers, accessibility, saving):
+            the same loading bar as 'Daten laden', without 'Laden abbrechen'.
+            The work runs in QGIS itself, so the bar moves in stages."""
+            self.set_busy(text)
+            self.cancel_button.hide()
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            self.pump()
+
+        def work_step(self, percent, text=None):
+            if text:
+                self.busy_text = text
+            self.set_busy_progress(percent)
+            self.pump()
+
+        def end_work(self, ok):
+            QApplication.restoreOverrideCursor()
+            self.clear_busy("done" if ok else "error")
+
+        def pump(self):
+            """Let the bar and the scene draw between two stages of the work
+            (clicks wait until the work is done)."""
+            flags = getattr(QEventLoop, "ExcludeUserInputEvents", None)
+            if flags is None:
+                flags = QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+            QApplication.processEvents(flags)
 
         def show_cache_button(self, visible):
             if self.cache_button.isVisible() != bool(visible):
@@ -3908,22 +3937,27 @@ def _create_dock(plugin):
             from .mapping import readable_layer
         except ImportError:
             readable_layer = None
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        dock.start_work("Ergebnis-Layer werden erzeugt …")
+        ok = False
         try:
             layer_objects, reports = build_result_layers(flow.result, selected, readable_layer)
+            dock.work_step(50, "Kartenstil wird angewendet …")
             # E33: map colours per category; buildings and lines on top of areas
             categories = {d.layer_id: d.category for d in selected}
             style = draft.get("map_style", DEFAULT_MAP_STYLE)
-            for layer_id, layer in layer_objects.items():
+            for number, (layer_id, layer) in enumerate(layer_objects.items(), start=1):
                 apply_style(layer, categories.get(layer_id), style)
+                dock.work_step(50 + 40 * number / max(len(layer_objects), 1))
             # points on top, then lines, then areas; inside each the usual rank
             layer_objects = dict(sorted(
                 layer_objects.items(),
                 key=lambda item: layer_order_key(
                     geometry_kind(item[1]), draw_rank(categories.get(item[0])))))
+            dock.work_step(95, "Layer werden in die Karte gelegt …")
             group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
+            ok = True
         finally:
-            QApplication.restoreOverrideCursor()
+            dock.end_work(ok)
         dock.last_group_name = group.name()
         dock.last_run_signature = signature
         plugin.result_layers = layer_objects
@@ -3959,9 +3993,11 @@ def _create_dock(plugin):
             from .mapping import readable_layer
         except ImportError:
             readable_layer = None
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        dock.start_work("Erreichbarkeit wird berechnet …")
+        ok = False
         try:
             records, issues, targets = calculate_accessibility(flow.result.harmonized_records, choice)
+            dock.work_step(50, "Abstände werden in die Gebäude eingetragen …")
             flow.result.harmonized_records = records
             # distance columns into the buildings that are already in the map
             values = distance_columns(records, list(targets))
@@ -3978,6 +4014,7 @@ def _create_dock(plugin):
                 done, not_found = add_columns_to_layer(layer, values)
                 filled += done
                 missing += not_found
+            dock.work_step(75, "Ziel-Punkte und Ringe werden in die Karte gelegt …")
             descriptors = {d.layer_id: d for d in flow.result.layers}
             for label, layers in build_accessibility_layers(
                     targets, choice, flow.result.project_crs, descriptors, readable_layer):
@@ -3989,8 +4026,9 @@ def _create_dock(plugin):
                 for layer in layers:
                     QgsProject.instance().addMapLayer(layer, False)
                     sub.addLayer(layer)
+            ok = True
         finally:
-            QApplication.restoreOverrideCursor()
+            dock.end_work(ok)
         lines = [issue.message for issue in issues]
         if filled:
             lines.append(f"Abstände in {format_count(filled)} Gebäude eingetragen "
@@ -4094,16 +4132,19 @@ def _create_dock(plugin):
                 return reject(REMAKE_NO_LAYERS_MESSAGE)
             jobs.append(("pdf", lambda path: write_map_pdf(flow, path, visible)))
         saved, failures = [], []
-        for kind, write in jobs:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                saved.append((kind, Path(write(dock.output_paths[kind]))))
-                dock.output_confirmed.add(kind)  # saving again may replace our own file
-            except (OSError, RuntimeError, ValueError) as error:
-                failures.append(SAVE_FAILED_MESSAGE.format(
-                    kind=OUTPUT_KIND_LABELS[kind], reason=error_text(error)))
-            finally:
-                QApplication.restoreOverrideCursor()
+        working = {"geopackage": "GeoPackage wird gespeichert …", "pdf": "PDF wird erstellt …"}
+        dock.start_work(working[jobs[0][0]] if jobs else "Wird gespeichert …")
+        try:
+            for number, (kind, write) in enumerate(jobs):
+                dock.work_step(5 + 90 * number / len(jobs), working[kind])
+                try:
+                    saved.append((kind, Path(write(dock.output_paths[kind]))))
+                    dock.output_confirmed.add(kind)  # saving again may replace our own file
+                except (OSError, RuntimeError, ValueError) as error:
+                    failures.append(SAVE_FAILED_MESSAGE.format(
+                        kind=OUTPUT_KIND_LABELS[kind], reason=error_text(error)))
+        finally:
+            dock.end_work(not failures)
         dock.last_saved = saved
         rebuild_last_step(page)
         text = ("Gespeichert: " + ", ".join(path.name for _kind, path in saved) + ".") if saved else ""

@@ -16,6 +16,10 @@ DONE_FRAMES = 30            # green bar with check mark (~1.2 s)
 ERROR_FRAMES = 30           # red bar (~1.2 s)
 SHAKE = (3, -3, 2, -2, 1, -1)
 POP = (1.0, 1.25, 1.45, 1.3, 1.1, 1.0)   # scale of the last point when all is done
+# 'Beam': a soft light runs through the filled part of the bar while loading
+BEAM_STEP = 0.025           # share of the filled part per frame (~1.6 s per run)
+BEAM_PAUSE = 0.6            # pause after each run (in the same units)
+BEAM_WIDTH = 36             # px
 
 
 class ClassicHeaderState:
@@ -33,6 +37,7 @@ class ClassicHeaderState:
         self.frames_left = 0
         self.shake_frame = None
         self.pop_frame = None
+        self.beam = 0.0            # 0..1 runs through the fill, above 1 = pause
 
     # --- commands from the panel -------------------------------------------
 
@@ -46,6 +51,7 @@ class ClassicHeaderState:
         self.bar = "loading"
         self.target = self.shown = 0.0
         self.shake_frame = None
+        self.beam = 0.0
 
     def set_progress(self, percent):
         self.target = min(max(float(percent), 0.0), 100.0)
@@ -85,6 +91,10 @@ class ClassicHeaderState:
         if self.bar == "loading":
             gap = self.target - self.shown
             self.shown = self.target if abs(gap) < 0.5 else self.shown + gap * BAR_EASE
+            if self.animations:
+                self.beam += BEAM_STEP
+                if self.beam > 1.0 + BEAM_PAUSE:
+                    self.beam = 0.0
         elif self.bar in ("done", "error"):
             self.frames_left -= 1
             if self.frames_left <= 0:
@@ -105,6 +115,12 @@ class ClassicHeaderState:
         if self.all_done or index < self.step:
             return "done"
         return "current" if index == self.step else "open"
+
+    def beam_position(self):
+        """None (no beam) or 0..1: where the light is in the filled part."""
+        if self.bar != "loading" or not self.animations or self.beam > 1.0:
+            return None
+        return self.beam
 
     def shake_offset(self):
         return SHAKE[self.shake_frame] if self.shake_frame is not None else 0
