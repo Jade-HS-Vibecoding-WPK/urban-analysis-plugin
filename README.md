@@ -6,8 +6,9 @@ sauberen Datengrundlage führt: Es lädt Daten für ein selbst gewähltes Gebiet
 sie, prüft auf Dopplungen und erzeugt daraus geordnete Karten-Layer, eine
 Erreichbarkeitsanalyse und ein PDF.
 
-Entstanden im Wahlpflichtkurs „KI / Vibecoding“ an der Jade Hochschule, Fachbereich
-Architektur, Studiengang Urban Design (Wintersemester 2026/27).
+Entstanden im Wahlpflichtkurs „Thinking Architecture through Software Design —
+Vibecoding KI Werkstatt“ an der Jade Hochschule, Fachbereich Architektur, Studiengang
+Urban Design (Wintersemester 2026/27).
 
 > **Stand:** experimentell (Version 0.1). Das Plugin funktioniert für ganz Deutschland,
 > getestet wurde vor allem in Oldenburg (Niedersachsen).
