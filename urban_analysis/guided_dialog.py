@@ -199,7 +199,11 @@ ONE_SOURCE_MESSAGE = (
     "vorerst nur eine Quelle ankreuzen: „OpenStreetMap“ oder „Eigene Datei“."
 )
 LAST_DOWNLOAD_FOLDER_SETTING = "urban_analysis/last_download_folder"
-DOWNLOAD_FOLDER_TITLE = "Ordner für die heruntergeladenen OSM-Daten wählen"
+DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die OSM-Daten wählen"
+DOWNLOAD_FOLDER_HINT = (
+    "Bei „Daten laden“ fragt das Plugin, in welchem Ordner die OSM-Daten "
+    "gespeichert werden sollen (z. B. dein Projektordner)."
+)
 DOWNLOAD_NO_FOLDER_MESSAGE = "Kein Ordner gewählt – es wurde nichts heruntergeladen."
 DOWNLOAD_TOO_LARGE_MESSAGE = (
     "Das Gebiet ist mit Puffer {size} km² groß. OSM- und ALKIS-Daten können nur "
@@ -1816,7 +1820,8 @@ def _create_dock(plugin):
         question.setWordWrap(True)
         page.layout.addWidget(question)
 
-        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT))
+        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT),
+                      hint_label(DOWNLOAD_FOLDER_HINT))
 
         state = QComboBox()
         state.addItem(CHOOSE_STATE_ITEM)
