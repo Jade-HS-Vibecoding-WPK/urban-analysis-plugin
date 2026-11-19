@@ -225,13 +225,38 @@ Setzt E31 mit dem Vertrag aus G11 um. Baut auf F1 auf (Branch
   nach Entscheidungen neu aufgerufen werden.
 - Tests: `tests/test_duplicate_groups.py` (6).
 
+## F6 / M17 Teil 1 – Ziel-Punkte für die Erreichbarkeit (19.11.2026)
+
+Setzt E22/E34 um. Branch `feature/pipeline-ziel-punkte` liegt auf
+`feature/pipeline-dubletten-beispiel` (F3) und damit auf F1.
+
+- **OSM-Punkte** (`points`) haben jetzt Kategorien und eigene
+  Ergebnis-Layer: **Gesundheit** (Krankenhaus, Klinik, Arztpraxis,
+  Zahnarztpraxis, Apotheke, weitere `healthcare=*`), **Nahversorgung**
+  (Supermarkt, Lebensmittelladen, Bäckerei, Metzgerei, Obst- und
+  Gemüseladen, Drogerie, Wochenmarkt), **Bildung und Betreuung** (Schule,
+  Kita, Kinderbetreuung, Hochschule), **Freizeit und Grün** (Spielplatz,
+  Sportplatz, Sportanlage, Park, Bibliothek), **ÖPNV-Haltestellen**
+  (Bus-, Straßenbahnhaltestelle, Haltestelle, Haltepunkt, Bahnhof,
+  Bahnhaltepunkt). Alles andere: „Sonstige OSM-Punkte“.
+- **Unterart** = Objektart (`object_type`), z. B. „Arztpraxis“. Damit
+  wählt W16 „Kategorie + Unterart“ (E34).
+- Layer können eigene Namen für Merkmale haben (`tag_labels` je Layer):
+  Punkt „Krankenhaus“, Fläche weiter „Krankenhausgelände“.
+- **Overpass-Abfrage** holt zusätzlich `healthcare`; alle anderen Merkmale
+  wurden schon geladen.
+- **Für Person Windows:** sechs neue Kategorien → Icons (W11-Icons) und
+  Auswahl beim Kartenthema.
+- Noch nicht mit echten OSM-Punkten geprüft (lokale `OSM.gpkg` hat keine).
+- Tests: `tests/test_ziel_punkte.py` (5).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 303 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 308 grün.
 
 ## Als Nächstes (Person Mac)
 
 Feature Freeze (`ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6, Etappe F):
-F6 M17 Teil 1 Startpunkte · F7 M20 Luftlinie.
+F7 M20 Luftlinie.
 Danach: M10b, M18, M6, M12 Teil 2.

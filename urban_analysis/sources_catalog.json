@@ -19,7 +19,7 @@
       "_hinweis": "Was die Overpass-Abfrage holt (M10a). 'schluessel' = alle Merkmale, nach denen das OSM-Profil in mapping_rules.json einordnet, außer 'boundary' (Grenz-Relationen reichen weit über das Gebiet hinaus und machen den Download riesig). Relationen nur als Flächen (type=multipolygon). Ein Test hält die Liste mit dem Profil in Einklang.",
       "zeitlimit_s": 300,
       "schluessel": [
-        "amenity", "barrier", "building", "building:part", "highway", "landuse", "leisure",
+        "amenity", "barrier", "building", "building:part", "healthcare", "highway", "landuse", "leisure",
         "man_made", "natural", "place", "power", "public_transport", "railway", "shop",
         "water", "waterway"
       ],
