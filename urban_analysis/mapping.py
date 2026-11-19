@@ -241,6 +241,10 @@ class MappingRules:
         """Readable field name only, e.g. ``Hausnummer``; unknown fields stay as they are."""
         return self.field_labels.get(field, field)
 
+    def knows_field(self, field: str) -> bool:
+        """True if ``field`` is in the name list (E30) and is taken over."""
+        return field in self.field_labels and not field.startswith("_")
+
     def layer_name(self, table_name: str) -> str:
         """Readable layer name, e.g. ``Gebäude`` for ``gebaeude``."""
         return self.layer_labels.get(table_name, table_name)
