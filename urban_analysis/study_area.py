@@ -14,13 +14,6 @@ DRAW_INSTRUCTIONS = (
 )
 
 
-# The study area is drawn as a simple line (no fill), in map and PDF.
-AREA_OUTLINE_STYLE = {
-    "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.6",
-    "outline_style": "solid",
-}
-
-
 class StudyAreaError(ValueError):
     """The chosen study area cannot be used; the message says how to fix it."""
 
@@ -203,14 +196,10 @@ def study_area_from_layer(layer, target_crs, *, selected_only):
 
 def add_drawn_area_layer(geometry, crs):
     """Store a drawn polygon as a new temporary layer in the QGIS project."""
-    from qgis.core import (
-        QgsFeature, QgsFillSymbol, QgsProject, QgsSingleSymbolRenderer, QgsVectorLayer,
-    )
+    from qgis.core import QgsFeature, QgsProject, QgsVectorLayer
 
     layer = QgsVectorLayer("Polygon", DRAWN_LAYER_NAME, "memory")
     layer.setCrs(crs)
-    # only the outline, so the map below stays visible
-    layer.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple(AREA_OUTLINE_STYLE)))
     feature = QgsFeature()
     feature.setGeometry(geometry)
     if not layer.dataProvider().addFeatures([feature])[0]:

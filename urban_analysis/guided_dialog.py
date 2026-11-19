@@ -14,22 +14,12 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-from .contracts import (
-    COLUMN_DROP,
-    COLUMN_KEEP,
-    COLUMN_TARGET,
-    CORE_FIELDS,
-    MVP_DEFAULT_BUFFER_METERS,
-    MVP_UI_STEPS,
-    ColumnDecision,
-)
+from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
 from .data_pipeline import (
     TARGET_FIELDS,
     GeoPackageImporter,
     GeoPackageImportError,
-    apply_column_decisions,
     apply_data_source,
-    default_column_decisions,
 )
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import (
@@ -38,7 +28,6 @@ from .osm_download import (
     ensure_project_crs,
     lonlat_box,
     run_download,
-    unique_path,
 )
 from .sources import plan_osm_download
 from .outputs import (
@@ -49,7 +38,6 @@ from .outputs import (
     export_map_pdf,
     format_count,
     scale_label,
-    time_text,
     write_result_geopackage,
     result_group_name,
     result_layer_name,
@@ -201,18 +189,7 @@ ONE_SOURCE_MESSAGE = (
     "vorerst nur eine Quelle ankreuzen: „OpenStreetMap“ oder „Eigene Datei“."
 )
 LAST_DOWNLOAD_FOLDER_SETTING = "urban_analysis/last_download_folder"
-DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die OSM-Daten wählen"
-CHOOSE_FOLDER_ACTION = "Speicherort wählen"
-
-
-def folder_chosen_text(folder):
-    """Info after choosing the download folder (button now 'Daten laden')."""
-    return (f"Speicherort gewählt: {short_folder(folder)}. "
-            "Jetzt auf „Daten laden“ klicken, um die OSM-Daten herunterzuladen.")
-DOWNLOAD_FOLDER_HINT = (
-    "Zuerst unten „Speicherort wählen“: In diesem Ordner werden die OSM-Daten "
-    "gespeichert (z. B. dein Projektordner). Danach „Daten laden“."
-)
+DOWNLOAD_FOLDER_TITLE = "Ordner für die heruntergeladenen OSM-Daten wählen"
 DOWNLOAD_NO_FOLDER_MESSAGE = "Kein Ordner gewählt – es wurde nichts heruntergeladen."
 DOWNLOAD_TOO_LARGE_MESSAGE = (
     "Das Gebiet ist mit Puffer {size} km² groß. OSM- und ALKIS-Daten können nur "
@@ -266,266 +243,10 @@ SUMMARY_INTRO = (
 )
 DONE_TITLE = "Fertig ✓ – die Ergebnis-Layer sind in QGIS angelegt."
 RERUN_ACTION = "Erneut verarbeiten"
-REMAKE_PDF_LABEL = "PDF neu erzeugen"
-REMAKE_PDF_TOOLTIP = (
-    "Erzeugt das PDF mit dem aktuellen Stand in QGIS: nur sichtbare Layer der "
-    "Ergebnis-Gruppe, in ihrer Reihenfolge. Titel und Format stellst du in Schritt 8 ein."
-)
-REMAKE_QUESTION = (
-    "Das PDF wird mit den gerade sichtbaren Ergebnis-Layern neu erzeugt.\n\n"
-    "Soll die bisherige PDF-Datei überschrieben oder eine neue Datei angelegt werden?"
-)
-REMAKE_NO_GROUP_MESSAGE = (
-    "Die Ergebnis-Gruppe wurde in QGIS nicht gefunden. Bitte „Erneut verarbeiten“ klicken."
-)
-REMAKE_NO_LAYERS_MESSAGE = (
-    "In der Ergebnis-Gruppe ist kein Layer sichtbar. Bitte mindestens einen Layer einschalten."
-)
 SAME_RUN_QUESTION = (
     "Seit der letzten Verarbeitung hat sich nichts geändert – das Ergebnis wäre "
     "gleich.\n\nTrotzdem eine neue Gruppe mit denselben Ergebnis-Layern erzeugen?"
 )
-
-
-# Step 5 (W14, E29/E30): columns of the input layers
-STEP5_GUIDE = (
-    "Was siehst du? Alle Spalten deiner Daten, je Layer, mit lesbarem Namen und Beispielen.",
-    "Was entscheidest du? Je Spalte: in ein Kernfeld übernehmen (z. B. Adresse), "
-    "als eigene Spalte behalten oder weglassen.",
-    "Was passiert dann? Die Ergebnis-Layer enthalten genau diese Spalten. Die "
-    "Vorauswahl passt meistens – du musst nur ändern, was du anders willst.",
-)
-STEP5_SHORT_GUIDE = (
-    "So sieht deine Attributtabelle am Ende aus. Klick auf ein Etikett: "
-    "Kernfeld → Behalten → Ignoriert. Die Vorauswahl passt meistens."
-)
-MORE_COLUMNS_LABEL ="Nicht geladen (nicht lesbar)"
-COLUMN_KEEP_HELP = "Die Spalte kommt unter ihrem lesbaren Namen in die Ergebnis-Layer."
-COLUMN_DROP_HELP = "Die Spalte kommt nicht in die Ergebnis-Layer."
-COLUMNS_SAVED_TEXT = "Spaltenauswahl übernommen. Sie gilt bei „Verarbeitung starten“."
-
-
-PREVIEW_ROWS = 3
-PILL_WIDTH = 92
-PREVIEW_HEADING = "Vorschau Ergebnis-Tabelle"
-COLUMNS_HEADING = "Spalten – Klick auf das Etikett wechselt: Kernfeld → Behalten → Ignoriert"
-STATE_LEGEND = ("ⓘ Kernfeld = Pflichtfeld für Karte und Legende · Behalten = eigene "
-                "Spalte · Ignoriert = wird nicht übernommen")
-STATE_LABELS = {"target": "● Kernfeld", "keep": "● Behalten", "drop": "○ Ignoriert"}
-# (fill, border) per state – green core field, blue kept, grey ignored
-STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5"),
-                "drop": ("#f1f2f4", "#b5bcc4")}
-
-
-STEP5_QUESTION = (
-    "Deine Daten haben viele Spalten. Sollen sie automatisch zugeordnet werden? "
-    "Danach siehst du das Ergebnis als Tabelle und kannst bei Bedarf noch ändern."
-)
-AUTO_COLUMNS_HINT = ("Wichtige Spalten werden übernommen, technische und fast leere "
-                     "weggelassen. Die Tabellen sind zugeklappt – meist reicht „bestätigen“.")
-MANUAL_COLUMNS_HINT = ("Gleiche Vorauswahl, aber alle Tabellen sind aufgeklappt, damit du "
-                       "jede Spalte prüfen kannst.")
-STEP5_TABLE_GUIDE = (
-    "So sieht deine Attributtabelle am Ende aus. Farbig = wird übernommen, weiß = "
-    "bleibt draußen. Zum Ändern auf eine Spaltenüberschrift klicken."
-)
-
-
-def ordered_columns(columns, values):
-    """Table order: core fields, then kept, then left-out columns."""
-    rank = {"target": 0, "keep": 1, "drop": 2}
-    return sorted(columns, key=lambda c: rank[state_of(values.get((c.layer_id, c.source_field)))])
-
-
-def column_title(column, value):
-    """Header of a column: core field name for core fields, else the readable name."""
-    name = column.readable_name or column.source_field
-    if state_of(value) == "target":
-        return core_field_name(value.split(":", 1)[1])
-    return name
-
-
-def state_of(value):
-    """'target:address' -> 'target'; 'keep' / 'drop' unchanged."""
-    return "target" if (value or "").startswith("target:") else (value or "drop")
-
-
-def next_value(value, column):
-    """Click on the label: Kernfeld → Behalten → Ignoriert → Kernfeld."""
-    state = state_of(value)
-    if state == "target":
-        return "keep"
-    if state == "keep":
-        return "drop"
-    return f"target:{column.suggested_target or CORE_FIELDS[0]}"
-
-
-def core_field_name(field_name):
-    try:
-        from .mapping import readable_target_field
-    except ImportError:  # pragma: no cover
-        return field_name
-    return readable_target_field(field_name)
-
-
-def preview_columns(columns, values):
-    """Headers of the result table preview: (header, state, source field);
-    core fields first (in their fixed order), then kept columns."""
-    core, kept = [], []
-    for column in columns:
-        value = values.get((column.layer_id, column.source_field), "drop")
-        state = state_of(value)
-        if state == "target":
-            field_name = value.split(":", 1)[1]
-            core.append((CORE_FIELDS.index(field_name) if field_name in CORE_FIELDS else 99,
-                         (core_field_name(field_name), state, column.source_field)))
-        elif state == "keep":
-            kept.append((column.readable_name or column.source_field, state, column.source_field))
-    return [entry for _order, entry in sorted(core, key=lambda item: item[0])] + kept
-
-
-def counts_text(columns, values):
-    """'4 Kernfelder · 3 behalten · 8 ignoriert'."""
-    counts = {"target": 0, "keep": 0, "drop": 0}
-    for column in columns:
-        counts[state_of(values.get((column.layer_id, column.source_field), "drop"))] += 1
-    return f"{counts['target']} Kernfelder · {counts['keep']} behalten · {counts['drop']} ignoriert"
-
-
-def column_choices():
-    """(value, text, help) for the choice list of a column."""
-    try:
-        from .mapping import readable_target_field, target_field_explanation
-    except ImportError:  # pragma: no cover
-        readable_target_field, target_field_explanation = (lambda f: f), (lambda f: None)
-    choices = [(f"target:{f}", f"→ {readable_target_field(f)}", target_field_explanation(f))
-               for f in CORE_FIELDS]
-    choices.append(("keep", "Als eigene Spalte behalten", COLUMN_KEEP_HELP))
-    choices.append(("drop", "Weglassen", COLUMN_DROP_HELP))
-    return choices
-
-
-def choice_help(value):
-    for choice_value, _text, help_text in column_choices():
-        if choice_value == value:
-            return help_text
-    return None
-
-
-def decision_value(decision):
-    """ColumnDecision -> value of the choice list ('target:address', 'keep', 'drop')."""
-    if decision is None:
-        return "drop"
-    if decision.action == COLUMN_TARGET:
-        return f"target:{decision.target_field}"
-    return decision.action
-
-
-def decision_from_value(column, value):
-    """Value of the choice list -> ColumnDecision for the pipeline."""
-    if value and value.startswith("target:"):
-        return ColumnDecision(column.layer_id, column.source_field, COLUMN_TARGET,
-                              target_field=value.split(":", 1)[1])
-    if value == "keep":
-        return ColumnDecision(column.layer_id, column.source_field, COLUMN_KEEP,
-                              name=column.readable_name or column.source_field)
-    return ColumnDecision(column.layer_id, column.source_field, COLUMN_DROP)
-
-
-AUTO_COLUMNS_LABEL = "Ja, automatisch zuordnen (empfohlen)"
-MANUAL_COLUMNS_LABEL = "Nein, selbst wählen"
-# Kept by default whenever the data have them (user wish 19.11.)
-ALWAYS_KEEP = ("Geschosszahl", "Baujahr", "Name")
-# Columns that identify an object; the first one becomes the core field Objekt-ID
-OBJECT_ID_FIELDS = ("oid", "osm_id", "objid", "gml_id")
-MIN_FILL_RATE = 0.15  # kept columns must be filled in at least 15 % of the objects
-FILL_SAMPLE = 400
-
-
-def fill_rates(records):
-    """{(layer, source field): share of objects with a value} from a sample."""
-    seen, filled = {}, {}
-    for record in records:
-        table = record.source_layer or record.layer_id
-        if seen.get(table, 0) >= FILL_SAMPLE:
-            continue
-        seen[table] = seen.get(table, 0) + 1
-        for field_name, value in (getattr(record, "source_attributes", None) or {}).items():
-            if value not in (None, ""):
-                filled[(table, field_name)] = filled.get((table, field_name), 0) + 1
-    return {key: count / seen[key[0]] for key, count in filled.items()}
-
-
-def preselect(columns, decisions, rates):
-    """Improve the pipeline's preselection (W14): an ID column becomes the
-    core field Objekt-ID, nearly empty columns stay out, Geschosszahl,
-    Baujahr and Name are kept whenever they exist."""
-    result = {}
-    has_id = {d.layer_id for d in decisions.values()
-              if d.action == COLUMN_TARGET and d.target_field == "object_id"}
-    for column in columns:
-        key = (column.layer_id, column.source_field)
-        decision = decisions[key]
-        if (column.layer_id not in has_id and decision.action != COLUMN_TARGET
-                and column.source_field.lower() in OBJECT_ID_FIELDS):
-            decision = decision_from_value(column, "target:object_id")
-            has_id.add(column.layer_id)
-        elif decision.action == COLUMN_KEEP and column.readable_name not in ALWAYS_KEEP \
-                and rates.get(key, 0.0) < MIN_FILL_RATE:
-            decision = decision_from_value(column, "drop")  # (nearly) empty
-        elif decision.action == COLUMN_DROP and column.readable_name in ALWAYS_KEEP:
-            decision = decision_from_value(column, "keep")
-        result[key] = decision
-    return result
-
-
-def column_decisions_of(flow):
-    """Choices made earlier in step 5, else the improved preselection."""
-    decisions = getattr(flow, "column_decisions", None)
-    if decisions:
-        return {(d.layer_id, d.source_field): d for d in decisions}
-    defaults = {(d.layer_id, d.source_field): d
-                for d in default_column_decisions(flow.result.columns)}
-    return preselect(flow.result.columns, defaults, fill_rates(flow.result.harmonized_records))
-
-
-def column_summary(columns, decisions):
-    """{'target': [...names], 'keep': [...], 'drop': [...]} for the overview."""
-    summary = {"target": [], "keep": [], "drop": []}
-    for column in columns:
-        decision = decisions.get((column.layer_id, column.source_field))
-        action = decision.action if decision else "drop"
-        if action == COLUMN_TARGET:
-            try:
-                from .mapping import readable_target_field
-                name = readable_target_field(decision.target_field)
-            except ImportError:  # pragma: no cover
-                name = decision.target_field
-        else:
-            name = column.readable_name or column.source_field
-        summary[action].append(name)
-    return summary
-
-
-def summary_lines(summary):
-    """Overview lines of one layer in step 5 (automatic mode)."""
-    lines = [
-        "Kernfelder: " + (", ".join(summary["target"]) or "–"),
-        "Behalten: " + (", ".join(summary["keep"]) or "–"),
-    ]
-    count = len(summary["drop"])
-    lines.append(f"Ignoriert: {count} technische {'Spalte' if count == 1 else 'Spalten'}")
-    return lines
-
-
-def column_header_text(layer_name, columns, decisions):
-    """'Gebäude – 4 Kernfelder, 6 behalten, 12 nicht geladen'."""
-    counts = {"target": 0, "keep": 0, "drop": 0}
-    for column in columns:
-        decision = decisions.get((column.layer_id, column.source_field))
-        counts[decision.action if decision else "drop"] += 1
-    return (f"{layer_name} – {counts['target']} Kernfelder, {counts['keep']} behalten, "
-            f"{counts['drop']} nicht geladen")
 
 
 def crs_mismatch_text(qgis_crs, plugin_crs):
@@ -1086,8 +807,7 @@ def _create_dock(plugin):
     from .ui.widgets.icons import (
         TITLE_ICON_PX, icon_size, layer_icon, palette_icon, title_icon, with_icon,
     )
-    from qgis.PyQt.QtCore import QPoint, QSize
-    from qgis.PyQt.QtGui import QColor, QIcon, QPixmap
+    from qgis.PyQt.QtCore import QSize
     from .ui import style as ui_style
     from qgis.PyQt.QtWidgets import QMenu
 
@@ -1097,10 +817,7 @@ def _create_dock(plugin):
         from qgis.PyQt.QtWidgets import QAction, QActionGroup
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
-        QAbstractItemView,
         QAbstractSpinBox,
-        QTableWidget,
-        QTableWidgetItem,
         QApplication,
         QButtonGroup,
         QCheckBox,
@@ -1449,9 +1166,7 @@ def _create_dock(plugin):
             self.step_label.setToolTip(progress_text(index))
             self.scene.setToolTip(progress_text(index))
             self.update_progress()
-            # a page may name its main action itself (step 3: folder first)
-            action_text = page.widgets.get("action_text")
-            self.primary_button.setText(action_text() if action_text else PAGE_ACTIONS[index])
+            self.primary_button.setText(PAGE_ACTIONS[index])
             self.back_button.setEnabled(index > 0)
             self.clear_message()
             if self.next_message:
@@ -2021,8 +1736,7 @@ def _create_dock(plugin):
         question.setWordWrap(True)
         page.layout.addWidget(question)
 
-        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT),
-                      hint_label(DOWNLOAD_FOLDER_HINT))
+        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT))
 
         state = QComboBox()
         state.addItem(CHOOSE_STATE_ITEM)
@@ -2037,23 +1751,9 @@ def _create_dock(plugin):
                       choose_button, file_info)
 
         page.widgets.update(
-            state=state, choose_button=choose_button, file_info=file_info, path=None,
-            download_folder=None,
+            state=state, choose_button=choose_button, file_info=file_info, path=None
         )
         choose_button.clicked.connect(lambda: choose_file(page))
-
-        def action_text():
-            """'Speicherort wählen' first for downloads, then 'Daten laden'."""
-            if page.widgets["osm"].isChecked() and page.widgets.get("download_folder") is None:
-                return CHOOSE_FOLDER_ACTION
-            return UI_LABELS["load_data"]
-
-        def refresh_action(*_args):
-            if dock.pages and dock.pages[dock.current] is page:
-                dock.primary_button.setText(action_text())
-
-        page.widgets["action_text"] = action_text
-        page.widgets["osm"].toggled.connect(refresh_action)
 
     def choose_file(page):
         """Open the system file dialog and remember the chosen GeoPackage."""
@@ -2093,19 +1793,7 @@ def _create_dock(plugin):
             if widgets["osm"].isChecked() or widgets["own"].isChecked():
                 return reject(MISSING_AREA_MESSAGE)
         if widgets["osm"].isChecked():
-            if widgets.get("download_folder") is None:
-                # first click: only choose the folder, the button then says "Daten laden"
-                folder = QFileDialog.getExistingDirectory(
-                    dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
-                if not folder:
-                    dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
-                    return False
-                QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
-                widgets["download_folder"] = folder
-                dock.primary_button.setText(UI_LABELS["load_data"])
-                dock.show_message(folder_chosen_text(folder), kind="info")
-                return False
-            start_osm_download(widgets["download_folder"])
+            start_osm_download()
             return False  # the page changes when download and import are done
         if not widgets["own"].isChecked() or widgets["path"] is None:
             return True  # data already loaded (earlier run or Python console)
@@ -2121,8 +1809,8 @@ def _create_dock(plugin):
         home = QgsProject.instance().homePath()
         return Path(home) if home and Path(home).is_dir() else Path.home()
 
-    def start_osm_download(folder):
-        """W11: plan with sources.py, download into ``folder`` in the
+    def start_osm_download():
+        """W11: plan with sources.py, ask for the folder, download in the
         background, then load the GeoPackage like an own file."""
         settings = dict(dock.settings)
         project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
@@ -2139,6 +1827,12 @@ def _create_dock(plugin):
             dock.show_message("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
             return
         request = plan.requests[0]
+        folder = QFileDialog.getExistingDirectory(
+            dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
+        if not folder:
+            dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
+            return
+        QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
         feedback = QgsFeedback()
         dock.download_feedback = feedback
         status = {"text": None}  # hint from the worker thread (retry countdown)
@@ -2372,192 +2066,8 @@ def _create_dock(plugin):
             if button is not None and not button.isChecked():
                 button.setChecked(True)
 
-    # 5 Attributzuordnung (W14): every column of every layer, with readable
-    # name, examples and one choice: core field / keep / leave out.
+    # 5 Attributzuordnung: one fold-out per layer, "column -> target field"
     def build_mapping(page):
-        flow = workflow()
-        if not flow.result.columns:
-            return build_mapping_legacy(page)  # older pipeline result: old view
-        page.widgets["columns_view"] = True
-        names = readable_names()
-        by_layer = {}
-        for column in flow.result.columns:
-            by_layer.setdefault(column.layer_id, []).append(column)
-        records_by_layer = {}
-        for record in flow.result.harmonized_records:
-            table = record.source_layer or record.layer_id
-            rows = records_by_layer.setdefault(table, [])
-            if len(rows) < PREVIEW_ROWS:
-                rows.append(record)
-
-        # Part 1: one question first – automatic or own choice
-        if getattr(flow, "column_phase", "ask") == "ask":
-            question = QLabel(STEP5_QUESTION)
-            question.setWordWrap(True)
-            page.layout.addWidget(question)
-            auto = QRadioButton(AUTO_COLUMNS_LABEL)
-            manual = QRadioButton(MANUAL_COLUMNS_LABEL)
-            (manual if getattr(flow, "column_mode", "auto") == "manual" else auto).setChecked(True)
-            group = QButtonGroup(page.widget)
-            group.addButton(auto)
-            group.addButton(manual)
-            for button, hint in ((auto, AUTO_COLUMNS_HINT), (manual, MANUAL_COLUMNS_HINT)):
-                page.layout.addWidget(button)
-                text = QLabel(hint)
-                text.setWordWrap(True)
-                set_role(text, "hint")
-                page.layout.addWidget(indented(text))
-            page.widgets.update(ask_auto=auto, ask_group=group,
-                                action_text=lambda: "Weiter")
-            return
-
-        # Part 2: one coloured table per layer; click a column header to change
-        if getattr(flow, "column_values", None) is None:  # survives rebuilds of the page
-            flow.column_values = {key: decision_value(d) for key, d in column_decisions_of(flow).items()}
-        values = flow.column_values
-        page.widgets["values"] = values
-        page.widgets["action_text"] = lambda: PAGE_ACTIONS[4]
-        guide = QLabel(STEP5_TABLE_GUIDE)
-        guide.setWordWrap(True)
-        set_role(guide, "info")
-        page.layout.addWidget(guide)
-        page.layout.addWidget(state_legend())
-        back = link_button("◂ Zurück zur Frage (automatisch / selbst wählen)")
-
-        def back_to_question():
-            flow.column_phase = "ask"
-            dock._rebuild_current_page()
-
-        back.clicked.connect(back_to_question)
-        page.layout.addWidget(back)
-        manual = getattr(flow, "column_mode", "auto") == "manual"
-        for number, (layer_id, columns) in enumerate(by_layer.items()):
-            panel = collapsible(page, f"cols_{number}",
-                                f"{names.layer(layer_id)} ({len(columns)} Spalten)",
-                                layer_icon_key(flow, layer_id),
-                                opened=manual or number == 0)
-            counts = QLabel(counts_text(columns, values))
-            set_role(counts, "hint")
-            panel.addWidget(counts)
-            table = QTableWidget()
-            panel.addWidget(table)
-            fill_table(table, ordered_columns(columns, values), values,
-                       records_by_layer.get(layer_id, []), counts)
-        guard_wheel(page.widget)
-
-    def state_legend():
-        """Small colour key above the tables."""
-        box = QWidget()
-        row = QHBoxLayout(box)
-        row.setContentsMargins(0, 2, 0, 2)
-        for state in ("target", "keep", "drop"):
-            chip = QLabel(STATE_LABELS[state])
-            fill, border = STATE_COLORS[state]
-            chip.setStyleSheet(f"background: {fill}; border: 1px solid {border}; "
-                               "border-radius: 9px; padding: 1px 8px;")
-            row.addWidget(chip)
-        row.addStretch()
-        return box
-
-    def link_button(text):
-        button = QPushButton(text)
-        button.setFlat(True)
-        button.setCursor(Qt.PointingHandCursor)
-        button.setStyleSheet("text-align: left; padding: 0; border: none; "
-                             "background: transparent; text-decoration: underline;")
-        return button
-
-    def fill_table(table, columns, values, records, counts):
-        """All columns of a layer like the QGIS attribute table: coloured =
-        taken over (green core field, blue kept), white = left out.  A click on
-        a column header opens a small menu to change it."""
-        table.clear()
-        table.setColumnCount(len(columns))
-        table.setRowCount(len(records))
-        for index, column in enumerate(columns):
-            value = values[(column.layer_id, column.source_field)]
-            state = state_of(value)
-            header = QTableWidgetItem(column_title(column, value))
-            header.setIcon(state_icon(state))
-            header.setToolTip(f"Spalte in den Daten: {column.source_field}\n"
-                              f"{choice_help(value) or ''}\nKlick: ändern")
-            table.setHorizontalHeaderItem(index, header)
-            fill = QColor(STATE_COLORS[state][0] if state != "drop" else "#ffffff")
-            for row, record in enumerate(records):
-                raw = (getattr(record, "source_attributes", None) or {}).get(column.source_field)
-                cell = QTableWidgetItem("–" if raw in (None, "") else str(raw))
-                cell.setBackground(fill)
-                if state == "drop":
-                    cell.setForeground(QColor("#9aa3ae"))
-                table.setItem(row, index, cell)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setSelectionMode(QAbstractItemView.NoSelection)
-        table.verticalHeader().setVisible(False)
-        table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        table.horizontalHeader().setSectionsClickable(True)
-        table.horizontalHeader().setCursor(Qt.PointingHandCursor)
-        table.resizeColumnsToContents()
-        table.setFixedHeight(table.horizontalHeader().sizeHint().height()
-                             + sum(table.rowHeight(r) for r in range(table.rowCount()))
-                             + table.horizontalScrollBar().sizeHint().height() + 6)
-        table.viewport().installEventFilter(wheel_guard)  # wheel scrolls the panel
-        try:
-            table.horizontalHeader().sectionClicked.disconnect()
-        except TypeError:
-            pass
-
-        def clicked(index):
-            column = columns[index]
-            key = (column.layer_id, column.source_field)
-            menu = QMenu(table)
-            core = menu.addMenu("● Kernfeld …")
-            for field_name in CORE_FIELDS:
-                action = core.addAction(core_field_name(field_name))
-                action.setToolTip(choice_help(f"target:{field_name}") or "")
-                action.triggered.connect(lambda _c=False, f=field_name: choose(key, f"target:{f}"))
-            menu.addAction("● Behalten (eigene Spalte)").triggered.connect(
-                lambda _c=False: choose(key, "keep"))
-            menu.addAction("○ Nicht übernehmen").triggered.connect(
-                lambda _c=False: choose(key, "drop"))
-            header = table.horizontalHeader()
-            x = header.sectionViewportPosition(index)
-            menu.exec_(header.mapToGlobal(header.rect().topLeft()) + QPoint(x, header.height()))
-
-        def choose(key, value):
-            values[key] = value
-            fill_table(table, columns, values, records, counts)
-            counts.setText(counts_text(columns, values))
-            dock.clear_message()
-
-        table.horizontalHeader().sectionClicked.connect(clicked)
-
-    def state_icon(state):
-        pixmap = QPixmap(10, 10)
-        pixmap.fill(QColor(STATE_COLORS[state][1] if state != "drop" else "#ffffff"))
-        return QIcon(pixmap)
-
-    def validate_columns(page):
-        flow = workflow()
-        if "ask_auto" in page.widgets:  # part 1: remember the answer, show the tables
-            flow.column_mode = "auto" if page.widgets["ask_auto"].isChecked() else "manual"
-            flow.column_phase = "table"
-            dock._rebuild_current_page()
-            dock.primary_button.setText(PAGE_ACTIONS[4])
-            return False
-        values = page.widgets["values"]
-        by_key = {(c.layer_id, c.source_field): c for c in flow.result.columns}
-        decisions = [decision_from_value(by_key[key], value) for key, value in values.items()]
-        try:
-            apply_column_decisions([], flow.result.columns, decisions)  # checks doubles
-        except ValueError as error:
-            open_sections(page)
-            return reject(error_text(error))
-        flow.column_decisions = decisions
-        dock.next_message = COLUMNS_SAVED_TEXT
-        return True
-
-    def build_mapping_legacy(page):
         flow = workflow()
         names = readable_names()
         intro = QLabel(MAPPING_INTRO)
@@ -2610,8 +2120,6 @@ def _create_dock(plugin):
         page.widgets["inputs"] = inputs
 
     def validate_mapping(page):
-        if page.widgets.get("columns_view"):
-            return validate_columns(page)
         flow = workflow()
         decisions = {}
         for suggestion, accepted, target in page.widgets["inputs"]:
@@ -2893,10 +2401,6 @@ def _create_dock(plugin):
         north = QCheckBox("Nordpfeil anzeigen")
         north.setChecked(draft.setdefault("pdf_north", True))
         north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
-        # a PDF setting only: shown inside the PDF options
-        grey = QCheckBox("Umgebung außerhalb des Gebiets in Graustufen")
-        grey.setChecked(draft.setdefault("grey_outside", True))
-        grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
         pdf_extra = (
             labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
             labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
@@ -2906,7 +2410,6 @@ def _create_dock(plugin):
                            "pdf_orientation", "auto"),
             labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
             north,
-            grey,
         )
         output_choice(page, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
         title = QLabel(UI_LABELS["data_source"])
@@ -2978,13 +2481,6 @@ def _create_dock(plugin):
                 "Angelegte Ergebnis-Layer",
                 result_rows(dock.last_reports,
                             {d.layer_id: d.category for d in flow.result.layers})))
-            if flow.result.output.create_pdf:
-                again = QPushButton(REMAKE_PDF_LABEL)
-                set_role(again, "secondary")
-                again.setCursor(Qt.PointingHandCursor)
-                again.setToolTip(REMAKE_PDF_TOOLTIP)
-                again.clicked.connect(remake_pdf)
-                page.layout.addWidget(again)
             if dock.last_saved:
                 # folded: the long file paths would take much room
                 files = collapsible(page, "saved_files", f"Gespeicherte Dateien ({len(dock.last_saved)})")
@@ -3032,10 +2528,6 @@ def _create_dock(plugin):
             # Current decisions of step 5 (and step 6) on the data (S5),
             # then the data source into empty 'source' fields (S8).
             flow.apply_attribute_decisions()
-            if flow.result.columns:  # W14: the column choices of step 5
-                flow.result.harmonized_records = apply_column_decisions(
-                    flow.result.harmonized_records, flow.result.columns,
-                    getattr(flow, "column_decisions", None))
             flow.result.harmonized_records = apply_data_source(
                 flow.result.harmonized_records, output.data_source)
         except ValueError as error:
@@ -3050,7 +2542,6 @@ def _create_dock(plugin):
             # E33: map colours per category; buildings and lines on top of areas
             categories = {d.layer_id: d.category for d in selected}
             style = dock.output_draft.get("map_style", DEFAULT_MAP_STYLE)
-            # QGIS layers stay fully coloured; the grey border is for the PDF only
             for layer_id, layer in layer_objects.items():
                 apply_style(layer, categories.get(layer_id), style)
             layer_objects = dict(sorted(
@@ -3080,60 +2571,6 @@ def _create_dock(plugin):
         dock.mark_all_done()
         return False  # last step: stay here
 
-    def write_map_pdf(flow, path, layers):
-        """PDF map with the settings of step 8 (also used by 'PDF neu erzeugen')."""
-        draft = dock.output_draft
-        return export_map_pdf(
-            path, layers=layers,
-            grey_outside=draft.get("grey_outside", True),
-            study_area_wkt=flow.result.study_area_wkt,
-            buffer_meters=flow.result.buffer_meters,
-            crs_authid=flow.result.project_crs,
-            title=draft.get("pdf_title") or flow.result.selected_topic or "Siedlungsstruktur",
-            subtitle=draft.get("pdf_subtitle", ""),
-            data_source=flow.result.output.data_source,
-            page=draft.get("pdf_page", "A3"),
-            orientation=draft.get("pdf_orientation", "auto"),
-            scale=draft.get("pdf_scale") or None,
-            north_arrow=draft.get("pdf_north", True))
-
-    def remake_pdf():
-        """'PDF neu erzeugen': current layers in QGIS (visible ones, in their
-        order); ask whether to replace the file or make a new one."""
-        flow = workflow()
-        group = QgsProject.instance().layerTreeRoot().findGroup(dock.last_group_name or "")
-        if group is None:
-            return reject(REMAKE_NO_GROUP_MESSAGE)
-        layers = [node.layer() for node in group.findLayers()
-                  if node.isVisible() and node.layer() is not None]
-        if not layers:
-            return reject(REMAKE_NO_LAYERS_MESSAGE)
-        box = QMessageBox(dock)
-        box.setWindowTitle("PDF neu erzeugen")
-        box.setText(REMAKE_QUESTION)
-        same = box.addButton("Gleiche Datei überschreiben", QMessageBox.AcceptRole)
-        new = box.addButton("Neue Datei anlegen", QMessageBox.AcceptRole)
-        box.addButton("Abbrechen", QMessageBox.RejectRole)
-        box.exec_() if hasattr(box, "exec_") else box.exec()
-        current = Path(dock.output_paths.get("pdf") or default_output_path(
-            output_folder(), flow.result.selected_topic, "pdf", date.today()))
-        if box.clickedButton() is same:
-            target = current
-        elif box.clickedButton() is new:
-            target = unique_path(current.parent, f"{current.stem}_{time_text().replace(':', '-')}.pdf")
-        else:
-            return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            written = Path(write_map_pdf(flow, target, layers))
-        except (OSError, RuntimeError, ValueError) as error:
-            dock.show_message(SAVE_FAILED_MESSAGE.format(kind="PDF", reason=error_text(error)))
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        dock.output_paths["pdf"] = written
-        dock.show_message(f"PDF erzeugt: {written.name} ({len(layers)} sichtbare Layer).", kind="info")
-
     def save_outputs(flow, selected, layer_objects):
         """Write the GeoPackage/PDF chosen in step 8.  Returns the written files
         and readable error texts; a failed file does not undo the QGIS layers."""
@@ -3144,7 +2581,24 @@ def _create_dock(plugin):
             layers = [layer_objects[d.layer_id] for d in selected if d.layer_id in layer_objects]
             jobs.append(("geopackage", lambda path: write_result_geopackage(path, layers)))
         if output.create_pdf:
-            jobs.append(("pdf", lambda path: write_map_pdf(flow, path, list(layer_objects.values()))))
+            draft = dock.output_draft
+            topic = flow.result.selected_topic or "Siedlungsstruktur"
+
+            def write_pdf(path):
+                return export_map_pdf(
+                    path, layers=list(layer_objects.values()),
+                    study_area_wkt=flow.result.study_area_wkt,
+                    buffer_meters=flow.result.buffer_meters,
+                    crs_authid=flow.result.project_crs,
+                    title=draft.get("pdf_title") or topic,
+                    subtitle=draft.get("pdf_subtitle", ""),
+                    data_source=output.data_source,
+                    page=draft.get("pdf_page", "A3"),
+                    orientation=draft.get("pdf_orientation", "auto"),
+                    scale=draft.get("pdf_scale") or None,
+                    north_arrow=draft.get("pdf_north", True))
+
+            jobs.append(("pdf", write_pdf))
         for kind, write in jobs:
             path = dock.output_paths[kind]
             QApplication.setOverrideCursor(Qt.WaitCursor)
