@@ -4121,7 +4121,9 @@ def _create_dock(plugin):
                 key=lambda item: layer_order_key(
                     geometry_kind(item[1]), draw_rank(categories.get(item[0])))))
             dock.work_step(95, "Layer werden in die Karte gelegt …")
-            group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
+            # sub-groups (Bebauung, Verkehr, …); „Sonstiges“ hidden (Vertretung Mac)
+            group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic),
+                                      categories=categories)
             ok = True
         finally:
             dock.end_work(ok)
