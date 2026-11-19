@@ -403,7 +403,7 @@ class GeoPackageImporter:
             layer_columns = self._column_infos(layer, profile, field_rules)
             columns.extend(layer_columns)
             if layer.rows:
-                self._report_columns_not_loaded(layer.table_name, layer_columns, issues)
+                self._report_columns_not_loaded(layer.table_name, layer_columns, issues, profile)
             layer_records = self._harmonize(layer, file_path, category, issues, profile, field_rules, self.mapping_rules)
             records.extend(layer_records)
             descriptors.extend(self._layer_descriptors(layer, file_path, category, profile, layer_records))
@@ -496,6 +496,13 @@ class GeoPackageImporter:
                 if id_field in layer.fields:
                     suggested.setdefault(id_field, MappingRule(id_field, "object_id", 1.0))
                     break
+        # The other ID columns of the profile (osm_id next to osm_way_id) are
+        # part of Objekt-ID too: not taken over by default, not reported.
+        id_twins = (
+            {field for field, _prefix in profile.object_id_fields} - set(suggested)
+            if profile is not None
+            else set()
+        )
         technical = {
             _normalized(name) for name in (layer.geometry_column, layer.primary_key) if name
         } | {"geom", "geometry", "thegeom", "wktgeom", "fid"}
@@ -506,6 +513,8 @@ class GeoPackageImporter:
             rule = suggested.get(source_field)
             if profile is None or rule is not None:
                 known = True
+            elif source_field in id_twins:
+                known = False  # its number is already in Objekt-ID ("relation/456")
             else:
                 known = self.mapping_rules.knows_field(source_field) and source_field != profile.tags_field
             infos.append(
@@ -519,13 +528,37 @@ class GeoPackageImporter:
                     confidence=rule.confidence if rule else 0.0,
                 )
             )
+        # Readable order (mapping_rules.json "spalten_reihenfolge"): what it
+        # is, where it is, properties; IDs and keys last.
+        first = {name: index for index, name in enumerate(self.mapping_rules.column_order)}
+        last = {name: index for index, name in enumerate(self.mapping_rules.column_order_last)}
+
+        def position(item: Tuple[int, ColumnInfo]) -> Tuple[int, int]:
+            index, column = item
+            if column.source_field in first:
+                return 0, first[column.source_field]
+            if column.source_field in last:
+                return 2, last[column.source_field]
+            return 1, index
+
+        infos = [column for _index, column in sorted(enumerate(infos), key=position)]
         return infos
 
     def _report_columns_not_loaded(
-        self, table_name: str, columns: Sequence[ColumnInfo], issues: List[ValidationIssue]
+        self,
+        table_name: str,
+        columns: Sequence[ColumnInfo],
+        issues: List[ValidationIssue],
+        profile: Optional[LayerProfile] = None,
     ) -> None:
-        """Info hint naming the columns that are not taken over (E30)."""
-        unknown = [column.source_field for column in columns if not column.known]
+        """Info hint naming the columns that are not taken over (E30).
+
+        ID columns of the profile are left out: their number is already in
+        Objekt-ID, nothing is lost."""
+        id_fields = {field for field, _prefix in profile.object_id_fields} if profile else set()
+        unknown = [
+            column.source_field for column in columns if not column.known and column.source_field not in id_fields
+        ]
         if not unknown:
             return
         shown = unknown[:8] + (["…"] if len(unknown) > 8 else [])
