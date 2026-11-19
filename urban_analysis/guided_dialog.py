@@ -111,14 +111,16 @@ from .theme import (
     set_role,
 )
 from .ui_contract import UI_LABELS
-from .ui.layer_icons import LAYER_ICONS, icon_key
+from .ui.layer_icons import CATEGORY_ICONS, LAYER_ICONS, icon_key
 from .user_guidance import (
     DECIDED_LATER,
     merge_same_hints,
     SEVERITY_LABELS,
     SEVERITY_ORDER,
     describe_group,
+    issue_category,
     issue_table_name,
+    issue_table_names,
 )
 
 
@@ -690,10 +692,21 @@ def layer_icon_key(flow, layer_id):
 
 
 def issue_icon_key(flow, issue):
-    """Icon key for a review hint, or None if it belongs to no single layer."""
+    """Icon key for a review hint, or None if it belongs to no single layer.
+
+    Several mentioned tables with the same icon (e.g. 'Flurstueck' and
+    'flurstuecke' for „Flurstücke“) still get it; hints about a category
+    („Grünflächen: …“) get the icon of the category."""
     candidates = set(LAYER_ICONS) | {d.layer_id for d in flow.result.layers}
-    table = issue_table_name(issue.message, sorted(candidates))
-    return layer_icon_key(flow, table) if table else None
+    found = issue_table_names(issue.message, sorted(candidates))
+    keys = {layer_icon_key(flow, table) for table in found}
+    if len(keys) == 1:
+        return keys.pop()
+    if not found:
+        category = issue_category(issue.message, CATEGORY_ICONS)
+        if category:
+            return CATEGORY_ICONS[category]
+    return None
 
 
 def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_data):

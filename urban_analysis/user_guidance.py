@@ -142,15 +142,34 @@ def issue_table_name(message: str, table_names: Iterable[str]) -> Optional[str]:
     readable name is looked up as a whole word in the text; ambiguous texts
     are not assigned.
     """
+    found = issue_table_names(message, table_names)
+    return found[0] if len(found) == 1 else None
+
+
+def _mentions(message: str, name: str) -> bool:
     import re
 
-    found = [
+    return re.search(rf"(?<![\w]){re.escape(name)}(?![\w])", message, re.IGNORECASE) is not None
+
+
+def issue_table_names(message: str, table_names: Iterable[str]) -> List[str]:
+    """All layers mentioned in a hint text (table name or readable name)."""
+    return [
         name for name in table_names
-        if any(
-            re.search(rf"(?<![\w]){re.escape(candidate)}(?![\w])", message, re.IGNORECASE)
-            for candidate in _layer_names(name)
-        )
+        if any(_mentions(message, candidate) for candidate in _layer_names(name))
     ]
+
+
+def issue_category(message: str, categories: Iterable[str]) -> Optional[str]:
+    """The category a hint is about, e.g. „Grünflächen: 7 Objekte …“.
+
+    A category at the start of the text wins; otherwise only a single
+    mentioned category counts (ambiguous texts are not assigned)."""
+    names = sorted(categories, key=len, reverse=True)
+    for name in names:
+        if message.lower().startswith(name.lower()) and _mentions(message[:len(name) + 1], name):
+            return name
+    found = [name for name in names if _mentions(message, name)]
     return found[0] if len(found) == 1 else None
 
 

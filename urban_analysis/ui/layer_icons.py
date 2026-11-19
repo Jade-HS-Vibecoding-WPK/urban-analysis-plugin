@@ -45,6 +45,14 @@ CATEGORY_ICONS = {
     "Zäune und Mauern": "zaun",
     "Sonstige OSM-Linien": "linien",
     "Sonstige OSM-Flächen": "flaechen",
+    # target points for accessibility (F6, F6b)
+    "Gesundheit": "gesundheit",
+    "Nahversorgung": "nahversorgung",
+    "Bildung und Betreuung": "bildung",
+    "Freizeit und Grün": "freizeit",
+    "ÖPNV-Haltestellen": "haltestellen",
+    "Sonstige OSM-Punkte": "punkte",
+    "Eigene Ziele": "eigene_ziele",
 }
 # Input layers (ALKIS table names) -> icon
 LAYER_ICONS = {
@@ -62,7 +70,7 @@ LAYER_ICONS = {
     "Nutzung": "nutzung",
     "Flurstueck": "flurstuecke",
     # OpenStreetMap download (layers as GDAL reads them)
-    "points": "grenzpunkte",
+    "points": "punkte",
     "lines": "linien",
     "multipolygons": "flaechen",
 }
@@ -71,6 +79,9 @@ SUFFIX_ICONS = {
     "fuss_radwege": "wege", "strassen": "strassen", "plaetze": "plaetze",
     "gruen": "gruen", "wasser": "wasser", "bahn": "bahn", "schiff": "schiff",
     "flaechen": "nutzung",
+    "gesundheit": "gesundheit", "nahversorgung": "nahversorgung", "bildung": "bildung",
+    "freizeit": "freizeit", "haltestellen": "haltestellen",
+    "hecken_baeume": "hecke", "zaeune_mauern": "zaun", "gebaeudeteile": "gebaeude",
 }
 UNKNOWN = "unbekannt"
 
@@ -347,6 +358,108 @@ def _flaechen():
     return i
 
 
+def _circle(tile, cx, cy, r, fill, outline="o"):
+    """Filled pixel circle with a 1 px outline."""
+    for y in range(int(cy - r - 1), int(cy + r + 2)):
+        for x in range(int(cx - r - 1), int(cx + r + 2)):
+            d = math.hypot(x - cx, y - cy)
+            if d <= r - 0.5:
+                tile.set(x, y, fill)
+            elif d <= r + 0.5:
+                tile.set(x, y, outline)
+
+
+def _gesundheit():
+    """Red cross on a light tile (doctors, pharmacy, hospital)."""
+    i = _Tile("w")
+    i.rect(6, 2, 4, 12, "o")
+    i.rect(2, 6, 12, 4, "o")
+    i.rect(7, 3, 2, 10, "r")
+    i.rect(3, 7, 10, 2, "r")
+    i.rect(7, 12, 2, 1, "d")
+    i.rect(12, 7, 1, 2, "d")
+    return i
+
+
+def _nahversorgung():
+    """Shopping bag with an apple (supermarket, bakery …)."""
+    i = _Tile("m")
+    i.art(5, 2, [".oooo.", "o....o", "o....o"])
+    i.rect(3, 5, 10, 9, "y")
+    i.rect(10, 6, 3, 8, "Y")
+    i.rect(2, 5, 1, 10, "o")
+    i.rect(13, 5, 1, 10, "o")
+    i.rect(2, 5, 12, 1, "o")
+    i.rect(2, 14, 12, 1, "o")
+    i.art(5, 7, ["..G.", ".rr.", "rrrr", "rrrd", ".dd."])
+    return i
+
+
+def _bildung():
+    """Open book (school, kindergarten, university)."""
+    i = _Tile("n")
+    i.art(1, 3, [
+        ".ooooo..ooooo.",
+        "owwwwwoowwwwwo",
+        "owKKKwoowKKKwo",
+        "owwwwwoowwwwwo",
+        "owKKKwoowKKwwo",
+        "owwwwwoowwwwwo",
+        "owKKwwoowKKKwo",
+        "oooooooooooooo",
+        "......oo......",
+    ])
+    i.set(7, 2, "r")
+    i.set(8, 2, "r")
+    return i
+
+
+def _freizeit():
+    """Ball on grass (playground, sports, park)."""
+    i = _Tile("m")
+    i.rect(1, 11, 14, 4, "g")
+    for x in (2, 6, 12):
+        i.set(x, 11, "G")
+    _circle(i, 7.5, 6.5, 4.8, "w")
+    i.art(6, 5, [".oo.", "oooo", ".oo."])
+    i.art(7, 2, ["oo"])
+    i.art(7, 10, ["oo"])
+    for x, y in ((4, 4), (11, 4), (4, 9), (11, 9)):
+        i.set(x, y, "o")
+    return i
+
+
+def _haltestellen():
+    """Stop sign: green ring, yellow disc with H, on a pole."""
+    i = _Tile("m")
+    i.rect(7, 12, 2, 2, "k")
+    i.rect(5, 14, 6, 1, "o")
+    _circle(i, 7.5, 6.5, 5.4, "y", "G")
+    i.art(5, 3, ["oo..oo", "oo..oo", "oo..oo", "oooooo", "oo..oo", "oo..oo", "oo..oo"])
+    return i
+
+
+def _punkte():
+    """Other OSM points: three map dots on a light map."""
+    i = _Tile("n")
+    i.rect(1, 8, 14, 1, "K")
+    for cx, cy in ((4.5, 4.5), (11.5, 4.5), (7.5, 10.5)):
+        _circle(i, cx, cy, 2.3, "r")
+    return i
+
+
+def _eigene_ziele():
+    """Own targets: a map pin."""
+    i = _Tile("n")
+    i.rect(1, 12, 14, 1, "K")
+    _circle(i, 8, 6, 3.8, "r")
+    i.art(5, 9, ["o.rr.o", ".orro.", "..oo.."])
+    i.rect(7, 5, 2, 2, "w")
+    i.set(6, 9, "r")
+    i.set(9, 9, "r")
+    return i
+
+
 def _unbekannt():
     i = _Tile("w")
     i.rect(1, 1, 4, 14, "A")
@@ -363,7 +476,10 @@ _MAKERS = {
     "gebaeude": _gebaeude, "gruen": _gruen, "wasser": _wasser, "strassen": _strassen,
     "wege": _wege, "plaetze": _plaetze, "bahn": _bahn, "schiff": _schiff,
     "nutzung": _nutzung, "flurstuecke": _flurstuecke, "grenzpunkte": _grenzpunkte,
-    "bauwerke": _bauwerke, "boden": _boden, "bewertung": _bewertung, UNKNOWN: _unbekannt,
+    "bauwerke": _bauwerke, "boden": _boden, "bewertung": _bewertung,
+    "gesundheit": _gesundheit, "nahversorgung": _nahversorgung, "bildung": _bildung,
+    "freizeit": _freizeit, "haltestellen": _haltestellen, "punkte": _punkte,
+    "eigene_ziele": _eigene_ziele, UNKNOWN: _unbekannt,
 }
 ICON_KEYS = tuple(_MAKERS)
 
