@@ -45,7 +45,8 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
    Spaltennamen; je Spalte „Kernfeld“, „Behalten“ oder „Ignorieren“.
 6. **Harmonisierung** – Dopplungen und gleiche Objekte aus verschiedenen Quellen;
    je Kategorie wählst du die Quelle (das Plugin schlägt eine vor).
-7. **Kartenthema** – Auswahl der Kategorien für die Karte.
+7. **Kartenthema** – ein oder mehrere Kartenthemen wählen und darin einzelne Klassen an-
+   und abwählen (siehe unten).
 8. **Verarbeitung** – Ergebnis-Layer erzeugen, Erreichbarkeit berechnen, speichern.
 
 ### Ergebnisse
@@ -74,13 +75,29 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
 Beide Stile bieten dieselben Funktionen; der Kartenstil der Ergebnisse ist davon
 unabhängig.
 
-### In Arbeit
+### Kartenthemen für Bestandsanalysen
 
-- **Kartenthemen:** sieben allgemeine Themen für Bestandsanalysen – Bebauung &
-  Stadtstruktur, Nutzungen, Versorgung & soziale Infrastruktur, Freiraum & öffentlicher
-  Raum, Mobilität & Erschließung, Grün, Wasser & Klima, Geschichte & Stadtbild – mit an-
-  und abwählbaren Klassen. Katalog und Einordnung sind fertig, die Auswahl in Schritt 7
-  folgt.
+Sieben allgemeine Themen, die zu jeder Analyseaufgabe und jedem Gebiet passen:
+
+| Thema | Beispiele für Klassen |
+| --- | --- |
+| Bebauung & Stadtstruktur | Haupt- und Nebengebäude, Bauwerke, Brücken, Flurstücke; Stufen nach Geschosszahl |
+| Nutzungen | Wohnen, Einzelhandel, Gastronomie, Dienstleistung, Gewerbe, öffentliche Einrichtungen, gemischt |
+| Versorgung & soziale Infrastruktur | Nahversorgung, Gesundheit, Bildung und Betreuung, Kultur, Sport; Stufen nach Abstand |
+| Freiraum & öffentlicher Raum | Plätze und Fußgängerzonen, Parks, Spielplätze, Sitzgelegenheiten, Uferzugänge |
+| Mobilität & Erschließung | Straßen nach Rang, Fuß- und Radwege, Radverkehr an Straßen, Haltestellen, Querungen, Stellplätze |
+| Grün, Wasser & Klima | Grünflächen, Wald, Gewässer, Bäume und Baumreihen, versiegelte Flächen (Näherung) |
+| Geschichte & Stadtbild | Baudenkmale, Denkmäler, historische Orte, Aussichtspunkte, markante Gebäude |
+
+- **Baukasten:** Klassen einzeln an- und abwählen, mehrere Themen überlagern (z. B. für
+  eine Synthese). Ein Objekt kann in mehreren Themen vorkommen – ein Café ist Nutzung
+  und Treffpunkt.
+- **OSM und ALKIS:** Die Zuordnung nutzt beide Quellen.
+- **Ehrlich:** Je Thema steht dabei, was die Daten nicht zeigen (z. B. Leerstand,
+  Aufenthaltsqualität), mit Tipps für bessere Daten. Fehlt eine Klasse im Gebiet, sagt
+  ein Hinweis das. Unsichere Klassen sind als „vermutlich“ markiert.
+- **Erweiterbar:** Themen und Klassen stehen als Katalog in
+  `urban_analysis/topics_catalog.json` und lassen sich ohne Programmierung ergänzen.
 
 ---
 
