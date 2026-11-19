@@ -20,6 +20,8 @@ from .data_pipeline import (
     GeoPackageImportError,
     apply_data_source,
 )
+from .osm_download import DownloadCanceled, DownloadError, lonlat_box, run_download
+from .sources import plan_osm_download
 from .outputs import (
     add_result_layers,
     build_result_layers,
@@ -28,6 +30,7 @@ from .outputs import (
     write_result_geopackage,
     result_group_name,
     result_layer_name,
+    result_layer_names,
     result_layers_text,
 )
 from .study_area import (
@@ -163,9 +166,16 @@ CHOOSE_SOURCE_MESSAGE = (
 )
 CHOOSE_STATE_MESSAGE = "Für ALKIS bitte das Bundesland wählen."
 DOWNLOAD_PENDING_MESSAGE = (
-    "Das Herunterladen von OSM- und ALKIS-Daten wird in einem späteren Schritt "
-    "angeschlossen. Bitte vorerst nur „Eigene Datei“ ankreuzen."
+    "Das Herunterladen von ALKIS-Daten wird in einem späteren Schritt "
+    "angeschlossen. Bitte vorerst „OpenStreetMap“ oder „Eigene Datei“ verwenden."
 )
+ONE_SOURCE_MESSAGE = (
+    "Mehrere Quellen in einem Durchlauf kommen in einem späteren Schritt. Bitte "
+    "vorerst nur eine Quelle ankreuzen: „OpenStreetMap“ oder „Eigene Datei“."
+)
+LAST_DOWNLOAD_FOLDER_SETTING = "urban_analysis/last_download_folder"
+DOWNLOAD_FOLDER_TITLE = "Ordner für die heruntergeladenen OSM-Daten wählen"
+DOWNLOAD_NO_FOLDER_MESSAGE = "Kein Ordner gewählt – es wurde nichts heruntergeladen."
 DOWNLOAD_TOO_LARGE_MESSAGE = (
     "Das Gebiet ist mit Puffer {size} km² groß. OSM- und ALKIS-Daten können nur "
     "für höchstens {limit} km² heruntergeladen werden. Bitte in Schritt 2 das "
@@ -269,8 +279,10 @@ def planned_layer_rows(flow, names):
     for record in flow.result.harmonized_records:
         counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
     rows = []
-    for descriptor in flow.result.selected_layers():
-        name = result_layer_name(descriptor, names.layer)
+    selected = flow.result.selected_layers()
+    unique = result_layer_names(selected, names.layer)
+    for descriptor in selected:
+        name = unique[descriptor.layer_id]
         rows.append((None, f"{name} – {objects_text(counts.get(descriptor.layer_id, 0))}",
                      icon_key(descriptor.layer_id, descriptor.category)))
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
@@ -301,11 +313,13 @@ def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_dat
     if (osm or alkis) and download_km2 is not None and is_oversized(download_km2):
         return ("error", DOWNLOAD_TOO_LARGE_MESSAGE.format(
             size=format_km2(download_km2), limit=MAX_DOWNLOAD_TEXT))
+    if alkis:
+        return ("info", DOWNLOAD_PENDING_MESSAGE)  # until M10b, never silent
+    if osm and own:
+        return ("error", ONE_SOURCE_MESSAGE)  # until M13 (several sources)
     if own and path is None and not has_data:
         return ("error", CHOOSE_FILE_MESSAGE)
-    if osm or alkis:
-        return ("info", DOWNLOAD_PENDING_MESSAGE)  # until W11, never silent
-    return None
+    return None  # OSM: download (W11); own file: load it
 
 
 def output_slug(text):
@@ -718,6 +732,7 @@ def _create_dock(plugin):
         Qgis,
         QgsApplication,
         QgsCoordinateReferenceSystem,
+        QgsFeedback,
         QgsGeometry,
         QgsProject,
         QgsSettings,
@@ -845,6 +860,7 @@ def _create_dock(plugin):
             self.output_confirmed = set()  # kinds picked in the save dialog
             self.output_draft = {}  # step-8 input not yet confirmed
             self.input_paths = set()  # loaded input files: never an output
+            self.download_feedback = None  # QgsFeedback of a running OSM download
 
             # The whole plugin shares one style (theme.py), with the bundled
             # fonts if present (otherwise the system monospace font).
@@ -1214,6 +1230,8 @@ def _create_dock(plugin):
             self.cancel_requested = True
             self.cancel_button.setEnabled(False)
             self.busy_label.setText(CANCELING_TEXT)
+            if self.download_feedback is not None:
+                self.download_feedback.cancel()  # stops a running OSM request at once
             self.import_task.cancel()
 
         def clear_busy(self, outcome="cancel"):
@@ -1709,12 +1727,99 @@ def _create_dock(plugin):
             kind, text = problem
             dock.show_message(text, kind=kind)
             return False
+        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
+            if widgets["osm"].isChecked() or widgets["own"].isChecked():
+                return reject(MISSING_AREA_MESSAGE)
+        if widgets["osm"].isChecked():
+            start_osm_download()
+            return False  # the page changes when download and import are done
         if not widgets["own"].isChecked() or widgets["path"] is None:
             return True  # data already loaded (earlier run or Python console)
-        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
-            return reject(MISSING_AREA_MESSAGE)
         start_import(widgets["path"])
         return False  # the page changes when the background import is done
+
+    def download_folder():
+        """Folder suggested in the folder dialog (E14/E18): the last one, else
+        the QGIS project folder, else the home folder."""
+        last = QgsSettings().value(LAST_DOWNLOAD_FOLDER_SETTING, "")
+        if last and Path(str(last)).is_dir():
+            return Path(str(last))
+        home = QgsProject.instance().homePath()
+        return Path(home) if home and Path(home).is_dir() else Path.home()
+
+    def start_osm_download():
+        """W11: plan with sources.py, ask for the folder, download in the
+        background, then load the GeoPackage like an own file."""
+        settings = dict(dock.settings)
+        project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
+        context = QgsProject.instance().transformContext()
+        geometry = QgsGeometry.fromWkt(settings["study_area_wkt"])
+        try:
+            box = lonlat_box(geometry, settings["buffer_meters"], project_crs, context)
+            plan = plan_osm_download(settings["study_area_wkt"], settings["buffer_meters"], box)
+        except Exception as error:  # catalog broken, CRS cannot be converted …
+            dock.show_message(f"Der OSM-Download konnte nicht vorbereitet werden: {error_text(error)}")
+            return
+        errors = [issue.message for issue in plan.issues if issue.severity == "error"]
+        if errors or not plan.requests:
+            dock.show_message("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
+            return
+        request = plan.requests[0]
+        folder = QFileDialog.getExistingDirectory(
+            dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
+        if not folder:
+            dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
+            return
+        QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
+        feedback = QgsFeedback()
+        dock.download_feedback = feedback
+        status = {"text": None}  # hint from the worker thread (retry countdown)
+        dock.set_busy("OSM-Daten werden geladen …")
+
+        def run(task):
+            def report(text):
+                status["text"] = text
+                task.setProgress(task.progress() + 0.001)  # wakes the panel up
+
+            return run_download(request, folder, project_crs, context, feedback,
+                                task.isCanceled, report, task.setProgress)
+
+        def progress_changed(percent):
+            if dock.closing:
+                return
+            if status["text"]:
+                dock.busy_text = status["text"]
+            dock.set_busy_progress(percent)
+
+        def finished(exception, result=None):
+            dock.import_task = None
+            dock.download_feedback = None
+            if dock.closing:
+                return
+            try:
+                if isinstance(exception, DownloadCanceled) or dock.cancel_requested:
+                    dock.clear_busy("cancel")
+                    dock.show_message(CANCELED_MESSAGE, kind="info")
+                    return
+                if exception is not None:
+                    dock.clear_busy("error")
+                    if isinstance(exception, (DownloadError, OSError)):
+                        dock.show_message(str(exception))
+                    else:
+                        dock.show_unexpected_error(UI_LABELS["load_data"], exception)
+                    return
+                dock.clear_busy("cancel")
+                # Datenquelle in step 8 pre-filled with the OSM attribution (E28)
+                if not dock.output_draft.get("source"):
+                    dock.output_draft["source"] = request.attribution
+                start_import(Path(result))
+            except Exception as error:  # show every program error visibly
+                dock.show_unexpected_error(UI_LABELS["load_data"], error)
+
+        task = QgsTask.fromFunction("Urban Analysis: OSM-Daten laden", run, on_finished=finished)
+        task.progressChanged.connect(progress_changed)
+        dock.import_task = task
+        QgsApplication.taskManager().addTask(task)
 
     def start_import(path):
         """Run the pipeline (S1) as a QGIS background task with a busy bar."""

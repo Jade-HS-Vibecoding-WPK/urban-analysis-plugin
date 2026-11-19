@@ -5,6 +5,7 @@ from urban_analysis.guided_dialog import (
     CHOOSE_SOURCE_MESSAGE,
     CHOOSE_STATE_MESSAGE,
     DOWNLOAD_PENDING_MESSAGE,
+    ONE_SOURCE_MESSAGE,
     GERMAN_STATES,
     source_choice_problem,
 )
@@ -70,15 +71,19 @@ def test_alkis_needs_a_state():
 def test_downloads_are_blocked_only_above_50_km2():
     kind, text = choice(osm=True, download_km2=60.0)
     assert kind == "error" and "60,0 km²" in text and "50 km²" in text
-    assert choice(osm=True, download_km2=36.0) == ("info", DOWNLOAD_PENDING_MESSAGE)
+    assert choice(osm=True, download_km2=36.0) is None  # large: download allowed
     # an own file is still possible for a large area
     assert choice(own=True, path="daten.gpkg", download_km2=60.0) is None
 
 
-def test_downloads_say_clearly_that_they_come_later():
-    assert choice(osm=True) == ("info", DOWNLOAD_PENDING_MESSAGE)
+def test_osm_downloads_now_alkis_comes_later():
+    assert choice(osm=True) is None  # W11: OSM is downloaded
     assert choice(alkis=True, state="Niedersachsen", own=True, path="x.gpkg") == (
         "info", DOWNLOAD_PENDING_MESSAGE)
+
+
+def test_only_one_source_per_run_until_m13():
+    assert choice(osm=True, own=True, path="x.gpkg") == ("error", ONE_SOURCE_MESSAGE)
 
 
 def test_all_16_states_are_listed():

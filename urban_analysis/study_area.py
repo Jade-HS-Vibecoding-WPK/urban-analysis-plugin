@@ -36,10 +36,16 @@ def area_summary_text(polygon_count, area_m2, crs_authid):
 # E13/E17: OSM/ALKIS are downloaded for the rectangle around area + buffer.
 # Above 25 km² a warning (takes long, large files), above 50 km² no download
 # (user decision 18.11.2026, changes E13 – to be confirmed by Person Mac).
-LARGE_AREA_KM2 = 25.0
-LARGE_AREA_TEXT = "25"
-MAX_DOWNLOAD_KM2 = 50.0
-MAX_DOWNLOAD_TEXT = "50"
+# The values live in sources_catalog.json (one place for step 2 and sources.py).
+def _limits():
+    from .sources import area_limits, load_catalog
+
+    return area_limits(load_catalog())
+
+
+LARGE_AREA_KM2, MAX_DOWNLOAD_KM2 = _limits()
+LARGE_AREA_TEXT = f"{LARGE_AREA_KM2:g}".replace(".", ",")
+MAX_DOWNLOAD_TEXT = f"{MAX_DOWNLOAD_KM2:g}".replace(".", ",")
 
 
 def download_box_km2(xmin, ymin, xmax, ymax, buffer_meters):

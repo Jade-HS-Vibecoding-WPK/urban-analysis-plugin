@@ -35,6 +35,16 @@ CATEGORY_ICONS = {
     "Bahnflächen": "bahn",
     "Schiffsverkehrsflächen": "schiff",
     "Nutzungsflächen": "nutzung",
+    # ALKIS vereinfacht (M12): parts of buildings and structures
+    "Gebäudeteile": "gebaeude",
+    "Bauwerke und Überdachungen": "bauwerke",
+    # OpenStreetMap (M11)
+    "Gewässer": "wasser",
+    "Bahnstrecken": "bahn",
+    "Hecken und Baumreihen": "hecke",
+    "Zäune und Mauern": "zaun",
+    "Sonstige OSM-Linien": "linien",
+    "Sonstige OSM-Flächen": "flaechen",
 }
 # Input layers (ALKIS table names) -> icon
 LAYER_ICONS = {
@@ -47,6 +57,10 @@ LAYER_ICONS = {
     "bauwerke_l": "bauwerke",
     "bodenschaetzung": "boden",
     "bewertung": "bewertung",
+    # layers of the ALKIS web services ("ALKIS vereinfacht", M12)
+    "GebaeudeBauwerk": "gebaeude",
+    "Nutzung": "nutzung",
+    "Flurstueck": "flurstuecke",
 }
 # Split result layers of 'nutzung' (layer_suffix in mapping_rules.json)
 SUFFIX_ICONS = {
@@ -285,6 +299,50 @@ def _bewertung():
     return i
 
 
+def _hecke():
+    """Row of round bushes on grass (OSM hedges and tree rows)."""
+    i = _Tile("m")
+    for x in (1, 6, 11):
+        i.art(x, 4, [".oo.", "oppo", "oplp", "oppo", ".oo."])
+    i.rect(1, 9, 14, 1, "P")
+    i.rect(1, 10, 14, 5, "g")
+    i.rect(3, 9, 1, 2, "t")
+    i.rect(8, 9, 1, 2, "t")
+    i.rect(13, 9, 1, 2, "t")
+    return i
+
+
+def _zaun():
+    """Wooden fence with posts and two rails (OSM fences and walls)."""
+    i = _Tile("m")
+    i.rect(1, 12, 14, 3, "g")
+    for x in (2, 6, 10, 14):
+        i.rect(x - 1, 3, 2, 10, "t")
+        i.set(x - 1, 3, "o")
+        i.set(x, 3, "o")
+    i.rect(1, 5, 14, 1, "T")
+    i.rect(1, 9, 14, 1, "T")
+    return i
+
+
+def _linien():
+    """Other OSM lines: a dashed line across a light map."""
+    i = _Tile("n")
+    for x in range(1, 15, 3):
+        i.rect(x, 7, 2, 2, "k")
+    i.rect(1, 3, 14, 1, "K")
+    i.rect(1, 12, 14, 1, "K")
+    return i
+
+
+def _flaechen():
+    """Other OSM areas: a plain outlined area on a light map."""
+    i = _Tile("n")
+    i.rect(3, 3, 10, 10, "o")
+    i.rect(4, 4, 8, 8, "K")
+    return i
+
+
 def _unbekannt():
     i = _Tile("w")
     i.rect(1, 1, 4, 14, "A")
@@ -297,6 +355,7 @@ def _unbekannt():
 
 
 _MAKERS = {
+    "hecke": _hecke, "zaun": _zaun, "linien": _linien, "flaechen": _flaechen,
     "gebaeude": _gebaeude, "gruen": _gruen, "wasser": _wasser, "strassen": _strassen,
     "wege": _wege, "plaetze": _plaetze, "bahn": _bahn, "schiff": _schiff,
     "nutzung": _nutzung, "flurstuecke": _flurstuecke, "grenzpunkte": _grenzpunkte,
