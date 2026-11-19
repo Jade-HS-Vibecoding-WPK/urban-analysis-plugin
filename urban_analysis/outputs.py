@@ -289,9 +289,11 @@ def add_result_layers(layer_objects: Mapping[str, object], group_name: str, proj
     group_name = run_group_name(group_name, existing, time_text())
     group = root.insertGroup(0, group_name)
     group.setCustomProperty(RESULT_GROUP_PROPERTY, True)
+    from .map_styles import fix_legend
+
     for layer in layer_objects.values():
         project.addMapLayer(layer, False)
-        group.addLayer(layer)
+        fix_legend(group.addLayer(layer))  # clean symbol in the layer panel
     return group
 
 
@@ -507,18 +509,10 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend.setTitle("Legende")
     legend.setAutoUpdateModel(False)
     root = QgsLayerTree()
-    from qgis.core import QgsMapLayerLegendUtils, QgsRuleBasedRenderer
+    from .map_styles import fix_legend
 
     for layer in [area_layer, buffer_layer] + list(layers):
-        node = root.addLayer(layer)
-        renderer = layer.renderer()
-        if isinstance(renderer, QgsRuleBasedRenderer) and len(renderer.rootRule().children()) == 2:
-            # grey outside / colour inside: the legend shows the colour only
-            QgsMapLayerLegendUtils.setLegendNodeOrder(node, [1])
-            # one line per layer: symbol + layer name, like the other layers
-            QgsMapLayerLegendUtils.setLegendNodeUserLabel(node, 1, layer.name())
-            from qgis.core import QgsLegendRenderer, QgsLegendStyle
-            QgsLegendRenderer.setNodeLegendStyle(node, QgsLegendStyle.Hidden)
+        fix_legend(root.addLayer(layer))  # cut layers: plain colour patch
     legend.model().setRootGroup(root)
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)

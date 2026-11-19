@@ -46,11 +46,15 @@ def test_overview_lines_and_always_kept_columns():
     assert lines[2] == "Ignoriert: 1 technische Spalte"
 
 
-def test_grey_outside_filter():
-    from urban_analysis.map_styles import outside_filter
+def test_objects_are_cut_at_the_border_for_drawing():
+    from urban_analysis.map_styles import category_colors, cut_expressions
 
-    assert outside_filter("POLYGON ((0 0, 1 0, 1 1, 0 0))") == (
-        "NOT intersects($geometry, geom_from_wkt('POLYGON ((0 0, 1 0, 1 1, 0 0))'))")
+    inside, outside = cut_expressions("POLYGON ((0 0, 1 0, 1 1, 0 0))")
+    assert inside == "intersection($geometry, geom_from_wkt('POLYGON ((0 0, 1 0, 1 1, 0 0))'))"
+    assert outside.startswith("difference($geometry")
+    fill = category_colors("Gebäude", "aussen")[0]
+    assert fill[1:3] == fill[3:5] == fill[5:7]  # grey
+    assert int(fill[1:3], 16) > int(category_colors("Gebäude", "graustufen")[0][1:3], 16)  # weaker
 
 
 def test_choice_values_round_trip():
