@@ -4575,7 +4575,6 @@ def _create_dock(plugin):
             scale_box,
             north,
             grey,
-            # pdf_preview_block() – off for now: crashed QGIS in a test run (see PR)
         )
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
 
@@ -4702,68 +4701,6 @@ def _create_dock(plugin):
         refresh()
         return box, refresh
 
-    def pdf_preview_block():
-        """'Vorschau aktualisieren': the PDF page as small picture."""
-        box = QWidget()
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(0, 6, 0, 0)
-        button = QPushButton("Vorschau aktualisieren")
-        set_role(button, "accent")
-        button.setCursor(Qt.PointingHandCursor)
-        picture = QLabel()
-        picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        picture.setStyleSheet("border: 1px solid #9aa3ae; background: #ffffff;")
-        picture.hide()
-        caption = QLabel()
-        caption.setWordWrap(True)
-        set_role(caption, "hint")
-        caption.hide()
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(button)
-        row.addStretch()
-        layout.addLayout(row)
-        layout.addWidget(picture)
-        layout.addWidget(caption)
-
-        def show_preview():
-            dock.clear_message()
-            group = ensure_layers()
-            if group is None:
-                return
-            visible = [node.layer() for node in group.findLayers()
-                       if node.layer() is not None and node.isVisible()]
-            if not visible:
-                reject(REMAKE_NO_LAYERS_MESSAGE)
-                return
-            target = Path(tempfile.gettempdir()) / "urban_analysis" / "pdf_vorschau.png"
-            dock.start_work("PDF-Vorschau wird erstellt …")
-            ok = False
-            try:
-                _path, scale = write_map_pdf(workflow(), None, visible, image_path=target)
-                ok = True
-            except (OSError, RuntimeError, ValueError) as error:
-                dock.show_message(f"Die Vorschau konnte nicht erstellt werden: {error_text(error)}")
-                return
-            finally:
-                dock.end_work(ok)
-            pixmap = QPixmap(str(target))
-            width = max(200, box.width() - 4)
-            picture.setPixmap(pixmap.scaledToWidth(width, Qt.SmoothTransformation))
-            picture.show()
-            caption.setText(f"So sieht das PDF ungefähr aus – Maßstab {scale_label(scale)}. "
-                            "Nach Änderungen erneut „Vorschau aktualisieren“.")
-            caption.show()
-            QTimer.singleShot(0, dock.fit_wrapped_labels)
-
-        button.clicked.connect(lambda: guarded("PDF-Vorschau", show_preview))
-        return box
-
-    def guarded(context, action):
-        try:
-            action()
-        except Exception as error:  # show every program error visibly
-            dock.show_unexpected_error(context, error)
         if dock.last_saved:
             area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
         area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
