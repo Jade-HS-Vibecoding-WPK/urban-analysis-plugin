@@ -27,9 +27,18 @@ def test_download_box_includes_the_buffer_on_all_sides():
     km2 = download_box_km2(446950, 5888700, 448991, 5891282, 500)
     assert round(km2, 1) == 10.9
     assert download_size_text(km2) == (
-        "Gebiet mit Puffer: 10,9 km² von höchstens 50 km² (Rechteck für den Download)"
+        "Gebiet mit Puffer: 10,9 km² von höchstens 50 km² (Rechteck für den Download, "
+        "grau gestrichelt in der Karte)"
     )
     assert not is_large(km2) and not is_oversized(km2)
+
+
+def test_rectangle_from_two_corners_in_any_direction():
+    from urban_analysis.study_area import download_box, rectangle_ring
+
+    assert rectangle_ring((10, 20), (0, 0)) == [(0, 0), (10, 0), (10, 20), (0, 20), (0, 0)]
+    assert rectangle_ring((5, 5), (5, 9)) is None  # a click without dragging
+    assert download_box(0, 0, 100, 50, 500) == (-500, -500, 600, 550)
 
 
 def test_large_area_warns_but_downloads_stay_possible():

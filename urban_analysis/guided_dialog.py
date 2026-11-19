@@ -75,12 +75,17 @@ from .outputs import (
     result_layers_text,
 )
 from .study_area import (
+    DRAW_BOTH_INSTRUCTIONS,
     DRAW_INSTRUCTIONS,
+    RECTANGLE_INSTRUCTIONS,
+    DownloadBoxMarker,
     StudyAreaError,
     MAX_DOWNLOAD_TEXT,
     add_drawn_area_layer,
     area_summary_text,
     create_polygon_draw_tool,
+    create_rectangle_draw_tool,
+    download_box,
     download_box_km2,
     download_size_text,
     format_km2,
@@ -1295,6 +1300,7 @@ def _create_dock(plugin):
             self.step9_tab = "output"  # open area of the last step
             self.last_access_lines = []  # result of the last accessibility run
             self.sources = []  # SourceFile of the last load (licence block, E28)
+            self.download_marker = None  # grey dashed download rectangle (E17)
             self.download_feedback = None  # QgsFeedback of a running OSM download
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -1532,6 +1538,8 @@ def _create_dock(plugin):
             last = index == len(self.pages) - 1
             if last:
                 self.step9_tab = "output"  # 'Ausgabe' is open first
+            if index not in (1, 2):
+                self.hide_download_box()  # only while area and download are chosen
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -1730,8 +1738,18 @@ def _create_dock(plugin):
             except Exception as error:  # show every program error visibly
                 self.show_unexpected_error("Zurücksetzen", error)
 
-        def start_drawing(self, on_finished, on_canceled):
-            """Activate the polygon drawing tool in the QGIS map."""
+        def show_download_box(self, box, crs):
+            """Grey dashed download rectangle in the map (steps 2 and 3)."""
+            if self.download_marker is None:
+                self.download_marker = DownloadBoxMarker(plugin.iface.mapCanvas())
+            self.download_marker.show(box, crs)
+
+        def hide_download_box(self):
+            if self.download_marker is not None:
+                self.download_marker.hide()
+
+        def start_drawing(self, on_finished, on_canceled, shape="polygon"):
+            """Activate the polygon or rectangle drawing tool in the QGIS map."""
             canvas = plugin.iface.mapCanvas()
             self.stop_drawing()
 
@@ -1744,7 +1762,8 @@ def _create_dock(plugin):
                 on_canceled(message)
 
             self.previous_map_tool = canvas.mapTool()
-            self.draw_tool = create_polygon_draw_tool(canvas, finished, canceled)
+            make_tool = create_rectangle_draw_tool if shape == "rectangle" else create_polygon_draw_tool
+            self.draw_tool = make_tool(canvas, finished, canceled)
             canvas.setMapTool(self.draw_tool)
             canvas.setFocus()
 
@@ -1769,6 +1788,9 @@ def _create_dock(plugin):
                 self.import_task = None
             self.scene.stop()
             self.stop_drawing()
+            if self.download_marker is not None:
+                self.download_marker.remove()
+                self.download_marker = None
 
     dock = GuidedDock()
 
@@ -1860,10 +1882,20 @@ def _create_dock(plugin):
         set_role(no_layer_hint, "hint")
 
         draw_button = QPushButton("Polygon zeichnen")
-        draw_button.setToolTip("Polygon in der Karte zeichnen")
-        set_role(draw_button, "secondary")
-        draw_button.setCursor(Qt.PointingHandCursor)
-        draw_hint = QLabel(DRAW_INSTRUCTIONS)
+        draw_button.setToolTip("Polygon Punkt für Punkt in der Karte zeichnen")
+        rectangle_button = QPushButton("Rechteck zeichnen")
+        rectangle_button.setToolTip("Rechteck in der Karte aufziehen – schneller, wenn die "
+                                    "genaue Form egal ist")
+        for button in (draw_button, rectangle_button):
+            set_role(button, "secondary")
+            button.setCursor(Qt.PointingHandCursor)
+        draw_row = QWidget()
+        draw_row_layout = QHBoxLayout(draw_row)
+        draw_row_layout.setContentsMargins(0, 0, 0, 0)
+        draw_row_layout.addWidget(draw_button)
+        draw_row_layout.addWidget(rectangle_button)
+        draw_row_layout.addStretch()
+        draw_hint = QLabel(DRAW_BOTH_INSTRUCTIONS)
         draw_hint.setWordWrap(True)
         set_role(draw_hint, "hint")
 
@@ -1880,7 +1912,7 @@ def _create_dock(plugin):
         page.layout.addWidget(use_layer)
         page.layout.addWidget(indented(layer_box, selected_only, no_layer_hint))
         page.layout.addWidget(use_drawing)
-        page.layout.addWidget(indented(draw_button, draw_hint))
+        page.layout.addWidget(indented(draw_row, draw_hint))
         size = QLabel()  # E17: size of the download rectangle
         size.setWordWrap(True)
         set_role(size, "hint")
@@ -1912,6 +1944,7 @@ def _create_dock(plugin):
             selected_only.setEnabled(not drawing)
             no_layer_hint.setVisible(not drawing and not has_layers)
             draw_button.setEnabled(drawing)
+            rectangle_button.setEnabled(drawing)
             draw_hint.setVisible(drawing)
             watch_selection()
             update_area_status(page)
@@ -1940,9 +1973,13 @@ def _create_dock(plugin):
             except StudyAreaError as error:
                 dock.show_message(str(error))
                 return
+            old_id = page.widgets["drawn_layer_id"]
+            if old_id and QgsProject.instance().mapLayer(old_id) is not None:
+                QgsProject.instance().removeMapLayer(old_id)  # only the newest drawing counts
             page.widgets["drawn_layer_id"] = layer.id()
             dock.show_message(
-                f"Polygon gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt.",
+                f"Gebiet gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt. "
+                "Grau gestrichelt: das Rechteck, für das OSM und ALKIS geladen werden.",
                 kind="info",
             )
             update_area_status(page)
@@ -1950,16 +1987,18 @@ def _create_dock(plugin):
         def drawing_canceled(message):
             dock.show_message(message, kind="info")
 
-        def start_drawing():
+        def start_drawing(shape):
             dock.clear_message()
-            dock.show_message(DRAW_INSTRUCTIONS, kind="info")
-            dock.start_drawing(drawing_finished, drawing_canceled)
+            dock.show_message(RECTANGLE_INSTRUCTIONS if shape == "rectangle" else DRAW_INSTRUCTIONS,
+                              kind="info")
+            dock.start_drawing(drawing_finished, drawing_canceled, shape)
 
         use_layer.toggled.connect(refresh)
         layer_box.layerChanged.connect(refresh)
         selected_only.toggled.connect(refresh_status)
         buffer_input.valueChanged.connect(refresh_status)
-        draw_button.clicked.connect(start_drawing)
+        draw_button.clicked.connect(lambda: start_drawing("polygon"))
+        rectangle_button.clicked.connect(lambda: start_drawing("rectangle"))
         refresh()
 
     def target_crs():
@@ -1988,6 +2027,7 @@ def _create_dock(plugin):
         size = page.widgets["size"]
         page.widgets["download_km2"] = None
         size.hide()
+        dock.hide_download_box()
         try:
             geometry, count = chosen_area(page)
         except StudyAreaError as error:
@@ -1999,8 +2039,14 @@ def _create_dock(plugin):
         if target_crs().mapUnits() != Qgis.DistanceUnit.Meters:
             return  # sizes in degrees make no sense; CRS hint is in step 1
         box = geometry.boundingBox()
+        buffer = page.widgets["buffer"].value()
         km2 = download_box_km2(box.xMinimum(), box.yMinimum(), box.xMaximum(),
-                               box.yMaximum(), page.widgets["buffer"].value())
+                               box.yMaximum(), buffer)
+        try:
+            dock.show_download_box(download_box(box.xMinimum(), box.yMinimum(), box.xMaximum(),
+                                                box.yMaximum(), buffer), target_crs())
+        except Exception:  # only a drawing aid: the size text below still says it
+            pass
         page.widgets["download_km2"] = km2
         if is_large(km2):
             set_role(size, "warning")
