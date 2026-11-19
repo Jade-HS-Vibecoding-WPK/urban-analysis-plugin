@@ -1,0 +1,723 @@
+{
+  "_hinweis": "Katalog der Kartenthemen (E36, S16, M25). Änderungen hier brauchen keinen neuen Code. Die ids der Themen sind dieselben wie in ui_contract.TOPIC_NAMES; die Namen der Themen stehen nur dort. Neue Klassen oder Stufen können ohne Programmierung ergänzt werden.",
+  "_hinweis_regeln": "Jede Klasse hat Regeln für OSM und für ALKIS. Eine Regel ist „Schlüssel=Wert“; mehrere Bedingungen mit „ & “ müssen alle passen, „Schlüssel!=Wert“ heißt „nicht dieser Wert“. „Schlüssel=*“ passt zu jedem Wert, „Wert*“ zu jedem Wert mit diesem Anfang, und „Hauptart“ passt auch zu „Hauptart, Detail“ (wie in mapping_rules.json). Geprüft werden alle gelesenen Merkmale: die Spalten der Quelle (ALKIS z. B. nutzart, bez, funktion, gebnutzbez; ALKIS-Export tn__bez, gfk__bez), alle OSM-Merkmale aus other_tags und drei eigene Schlüssel: kategorie (Kategorie der Pipeline), objektart (Objektart) und ebene (Name des Quell-Layers). Je Thema bekommt ein Objekt höchstens eine Klasse: die erste passende Klasse in der Reihenfolge der Liste gewinnt. Geometrie: Linien-Klassen nehmen nur Linien, Flächen- und Punkt-Klassen nehmen Flächen und Punkte (viele Einrichtungen sind in OSM mal Punkt, mal Fläche).",
+  "_hinweis_vermutlich": "\"vermutlich\": true heißt: die Zuordnung ist nur ein Vorschlag (Deutung, keine gesicherte Angabe) und wird in der Oberfläche als „vermutlich“ gezeigt.",
+  "_hinweis_stufen": "Stufen färben eine Zahlenspalte des Ergebnis-Layers: von <= Wert < bis, null = offen. Abstandsspalten entstehen erst durch die Erreichbarkeit (accessibility.py, Spaltenname „Abstand <Ziel> (m)“); die Grenzen folgen den Radien 300 m und 500 m aus mapping_rules.json.",
+  "stand": "2026-11-19",
+
+  "themen": [
+    {
+      "id": "bebauung",
+      "beschreibung": "Gebäude, Bauwerke und Flurstücke – die gebaute Struktur des Gebiets (enthält die bisherige Siedlungsstruktur).",
+      "klassen": [
+        {
+          "id": "nebengebaeude",
+          "name": "Nebengebäude",
+          "geometrie": "Fläche",
+          "farbe": "#9e9e9e",
+          "beschreibung": "Garagen, Schuppen, Gartenhäuser und Carports.",
+          "regeln": {
+            "osm": ["building=garage", "building=garages", "building=shed", "building=carport", "building=hut", "building=greenhouse"],
+            "alkis": ["funktion=Garage", "funktion=Schuppen", "funktion=Gartenhaus", "funktion=Carport", "gfk__bez=Garage", "gfk__bez=Schuppen", "gfk__bez=Gartenhaus"]
+          }
+        },
+        {
+          "id": "hauptgebaeude",
+          "name": "Hauptgebäude",
+          "geometrie": "Fläche",
+          "farbe": "#424242",
+          "beschreibung": "Alle übrigen Gebäude.",
+          "regeln": {
+            "osm": ["building=*"],
+            "alkis": ["kategorie=Gebäude"]
+          }
+        },
+        {
+          "id": "bauwerke",
+          "name": "Bauwerke und Gebäudeteile",
+          "geometrie": "Fläche",
+          "farbe": "#bdbdbd",
+          "beschreibung": "Überdachungen, Gebäudeteile, Türme und andere Bauwerke.",
+          "regeln": {
+            "osm": ["building:part=*", "man_made=*"],
+            "alkis": ["kategorie=Gebäudeteile", "kategorie=Bauwerke und Überdachungen"]
+          }
+        },
+        {
+          "id": "bruecken",
+          "name": "Brücken",
+          "geometrie": "Linie",
+          "farbe": "#6d4c41",
+          "beschreibung": "Straßen, Wege und Gleise auf Brücken.",
+          "regeln": {
+            "osm": ["bridge=* & bridge!=no", "man_made=bridge"],
+            "alkis": ["baw__bez=Brücke*"]
+          }
+        },
+        {
+          "id": "flurstuecke",
+          "name": "Flurstücke",
+          "geometrie": "Fläche",
+          "farbe": "#e0e0e0",
+          "beschreibung": "Grenzen der Grundstücke aus dem Liegenschaftskataster.",
+          "regeln": {
+            "osm": [],
+            "alkis": ["ebene=Flurstueck", "ebene=flurstuecke"]
+          }
+        }
+      ],
+      "stufen": [
+        {
+          "id": "geschosse_alkis",
+          "name": "Geschosszahl (ALKIS)",
+          "spalte": "Geschosszahl (ALKIS)",
+          "grenzen": [
+            {"name": "1 Geschoss", "von": null, "bis": 2, "farbe": "#e0e0e0"},
+            {"name": "2 Geschosse", "von": 2, "bis": 3, "farbe": "#bdbdbd"},
+            {"name": "3–4 Geschosse", "von": 3, "bis": 5, "farbe": "#757575"},
+            {"name": "5 und mehr Geschosse", "von": 5, "bis": null, "farbe": "#212121"}
+          ]
+        },
+        {
+          "id": "geschosse_osm",
+          "name": "Geschosszahl (OSM)",
+          "spalte": "Geschosszahl (OSM)",
+          "grenzen": [
+            {"name": "1 Geschoss", "von": null, "bis": 2, "farbe": "#e0e0e0"},
+            {"name": "2 Geschosse", "von": 2, "bis": 3, "farbe": "#bdbdbd"},
+            {"name": "3–4 Geschosse", "von": 3, "bis": 5, "farbe": "#757575"},
+            {"name": "5 und mehr Geschosse", "von": 5, "bis": null, "farbe": "#212121"}
+          ]
+        }
+      ],
+      "grenzen": [
+        "Raumkanten, Körnung und Bautypologien sind Deutungen und kommen nicht aus den Daten.",
+        "Die Geschosszahl fehlt in OSM oft; in ALKIS ist sie meist vorhanden."
+      ],
+      "quellen_tipps": [
+        "Für vollständige Gebäude und Geschosszahlen ALKIS laden (Schritt 3).",
+        "Bebauungspläne der Gemeinde als Eigene Datei ergänzen."
+      ]
+    },
+
+    {
+      "id": "nutzungen",
+      "beschreibung": "Was in Gebäuden und auf Flächen stattfindet: Wohnen, Handel, Gastronomie, Dienstleistung, Gewerbe.",
+      "klassen": [
+        {
+          "id": "einzelhandel",
+          "name": "Einzelhandel",
+          "geometrie": "Punkt",
+          "farbe": "#e53935",
+          "beschreibung": "Geschäfte aller Art.",
+          "regeln": {
+            "osm": ["shop=*", "amenity=marketplace"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "gastronomie",
+          "name": "Gastronomie",
+          "geometrie": "Punkt",
+          "farbe": "#fb8c00",
+          "beschreibung": "Restaurants, Cafés, Imbisse und Kneipen.",
+          "regeln": {
+            "osm": ["amenity=restaurant", "amenity=cafe", "amenity=fast_food", "amenity=bar", "amenity=pub", "amenity=ice_cream", "amenity=biergarten", "amenity=food_court"],
+            "alkis": ["funktion=Gaststätte, Restaurant", "gfk__bez=Gaststätte, Restaurant"]
+          }
+        },
+        {
+          "id": "dienstleistungen",
+          "name": "Dienstleistungen und Büros",
+          "geometrie": "Punkt",
+          "farbe": "#8e24aa",
+          "beschreibung": "Büros, Banken, Post, Hotels und andere Dienstleister.",
+          "regeln": {
+            "osm": ["office=*", "amenity=bank", "amenity=post_office", "amenity=hairdresser", "tourism=hotel", "tourism=guest_house", "tourism=hostel", "building=office"],
+            "alkis": ["funktion=Bürogebäude", "funktion=Gebäude für Handel und Dienstleistungen", "funktion=Geschäftsgebäude", "funktion=Hotel, Motel, Pension", "gfk__bez=Bürogebäude", "gfk__bez=Gebäude für Handel und Dienstleistungen", "gfk__bez=Geschäftsgebäude"]
+          }
+        },
+        {
+          "id": "gewerbe_industrie",
+          "name": "Gewerbe, Handwerk und Industrie",
+          "geometrie": "Fläche",
+          "farbe": "#6d4c41",
+          "beschreibung": "Gewerbe- und Industrieflächen, Werkstätten und Handwerksbetriebe.",
+          "regeln": {
+            "osm": ["craft=*", "landuse=industrial", "landuse=commercial", "building=industrial", "building=warehouse", "building=commercial"],
+            "alkis": ["nutzart=Industrie- und Gewerbefläche", "tn__bez=Industrie- und Gewerbefläche", "funktion=Gebäude für Gewerbe und Industrie", "funktion=Produktionsgebäude", "funktion=Werkstatt", "gfk__bez=Gebäude für Gewerbe und Industrie"]
+          }
+        },
+        {
+          "id": "gemeinbedarf",
+          "name": "Öffentliche Einrichtungen",
+          "geometrie": "Fläche",
+          "farbe": "#1e88e5",
+          "beschreibung": "Schulen, Krankenhäuser, Verwaltung, Kirchen und andere Einrichtungen für alle.",
+          "regeln": {
+            "osm": ["amenity=school", "amenity=kindergarten", "amenity=college", "amenity=university", "amenity=hospital", "amenity=townhall", "amenity=place_of_worship", "amenity=community_centre", "amenity=social_facility", "landuse=religious", "landuse=education"],
+            "alkis": ["nutzart=Fläche besonderer funktionaler Prägung", "tn__bez=Flächen besonderer funktionaler Prägung"]
+          }
+        },
+        {
+          "id": "gemischt",
+          "name": "Gemischte Nutzung",
+          "geometrie": "Fläche",
+          "farbe": "#f06292",
+          "beschreibung": "Wohnen zusammen mit Handel oder Gewerbe.",
+          "regeln": {
+            "osm": ["landuse=mixed", "building=mixed_use"],
+            "alkis": ["nutzart=Fläche gemischter Nutzung", "tn__bez=Fläche gemischter Nutzung", "funktion=Wohn- und Geschäftsgebäude", "funktion=Wohngebäude mit Handel und Dienstleistungen", "funktion=Wohngebäude mit Gewerbe und Industrie", "gfk__bez=Wohn- und Geschäftsgebäude", "gfk__bez=Wohngebäude mit Handel und Dienstleistungen"]
+          }
+        },
+        {
+          "id": "wohnen",
+          "name": "Wohnen",
+          "geometrie": "Fläche",
+          "farbe": "#fdd835",
+          "beschreibung": "Wohngebäude und Wohnbauflächen.",
+          "regeln": {
+            "osm": ["building=apartments", "building=house", "building=residential", "building=detached", "building=semidetached_house", "building=terrace", "building=dormitory", "landuse=residential"],
+            "alkis": ["nutzart=Wohnbaufläche", "tn__bez=Wohnbaufläche", "funktion=Wohnhaus", "funktion=Wohngebäude", "gfk__bez=Wohnhaus", "gfk__bez=Wohngebäude"]
+          }
+        }
+      ],
+      "stufen": [],
+      "grenzen": [
+        "Die Nutzung im Erdgeschoss lässt sich nur vermuten (Geschäft als Punkt im Gebäude); sie wird nicht automatisch zugeordnet.",
+        "Leerstand ist in OSM und ALKIS kaum erfasst.",
+        "Viele Gebäude haben in OSM nur „building=yes“ und bekommen deshalb keine Nutzung."
+      ],
+      "quellen_tipps": [
+        "Für die Nutzung der Gebäude ALKIS laden (Gebäudefunktion).",
+        "Eine eigene Kartierung vor Ort als Eigene Datei ergänzen (z. B. Erdgeschossnutzung, Leerstand)."
+      ]
+    },
+
+    {
+      "id": "versorgung",
+      "beschreibung": "Einrichtungen für den täglichen Bedarf und die soziale Infrastruktur, auf Wunsch mit Abstand zum nächsten Ziel.",
+      "klassen": [
+        {
+          "id": "nahversorgung",
+          "name": "Nahversorgung",
+          "geometrie": "Punkt",
+          "farbe": "#e53935",
+          "beschreibung": "Supermärkte, Bäcker, Drogerien, Wochenmärkte.",
+          "regeln": {
+            "osm": ["kategorie=Nahversorgung", "shop=supermarket", "shop=convenience", "shop=bakery", "shop=butcher", "shop=greengrocer", "shop=chemist", "amenity=marketplace"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "gesundheit",
+          "name": "Gesundheit",
+          "geometrie": "Punkt",
+          "farbe": "#d81b60",
+          "beschreibung": "Ärztinnen und Ärzte, Apotheken, Kliniken, Pflege.",
+          "regeln": {
+            "osm": ["kategorie=Gesundheit", "amenity=hospital", "amenity=clinic", "amenity=doctors", "amenity=dentist", "amenity=pharmacy", "healthcare=*"],
+            "alkis": ["funktion=Krankenhaus", "gfk__bez=Krankenhaus"]
+          }
+        },
+        {
+          "id": "bildung_betreuung",
+          "name": "Bildung und Betreuung",
+          "geometrie": "Punkt",
+          "farbe": "#1e88e5",
+          "beschreibung": "Kitas, Schulen, Hochschulen.",
+          "regeln": {
+            "osm": ["kategorie=Bildung und Betreuung", "amenity=school", "amenity=kindergarten", "amenity=childcare", "amenity=college", "amenity=university"],
+            "alkis": ["funktion=Schule", "funktion=Allgemein bildende Schule", "funktion=Berufsbildende Schule","funktion=Kindertagesstätte", "gfk__bez=Allgemein bildende Schule", "gfk__bez=Kindertagesstätte"]
+          }
+        },
+        {
+          "id": "kultur",
+          "name": "Kultur und Treffpunkte",
+          "geometrie": "Punkt",
+          "farbe": "#8e24aa",
+          "beschreibung": "Bibliotheken, Theater, Kinos, Museen, Gemeinschaftszentren.",
+          "regeln": {
+            "osm": ["amenity=library", "amenity=theatre", "amenity=cinema", "amenity=arts_centre", "amenity=community_centre", "tourism=museum", "amenity=place_of_worship"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "sport",
+          "name": "Sport",
+          "geometrie": "Punkt",
+          "farbe": "#43a047",
+          "beschreibung": "Sportplätze, Sporthallen, Schwimmbäder.",
+          "regeln": {
+            "osm": ["leisure=pitch", "leisure=sports_centre", "leisure=stadium", "leisure=swimming_pool", "leisure=fitness_centre", "leisure=track"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "soziales",
+          "name": "Soziale Einrichtungen",
+          "geometrie": "Punkt",
+          "farbe": "#fb8c00",
+          "beschreibung": "Seniorenheime, Beratungsstellen, Jugendtreffs.",
+          "regeln": {
+            "osm": ["amenity=social_facility", "amenity=social_centre", "amenity=nursing_home"],
+            "alkis": []
+          }
+        }
+      ],
+      "stufen": [
+        {
+          "id": "abstand_nahversorgung",
+          "name": "Abstand zur Nahversorgung",
+          "spalte": "Abstand Nahversorgung (m)",
+          "grenzen": [
+            {"name": "bis 300 m", "von": null, "bis": 300, "farbe": "#1a9850"},
+            {"name": "300–500 m", "von": 300, "bis": 500, "farbe": "#fee08b"},
+            {"name": "über 500 m", "von": 500, "bis": null, "farbe": "#d73027"}
+          ]
+        },
+        {
+          "id": "abstand_gesundheit",
+          "name": "Abstand zur Gesundheit",
+          "spalte": "Abstand Gesundheit (m)",
+          "grenzen": [
+            {"name": "bis 300 m", "von": null, "bis": 300, "farbe": "#1a9850"},
+            {"name": "300–500 m", "von": 300, "bis": 500, "farbe": "#fee08b"},
+            {"name": "über 500 m", "von": 500, "bis": null, "farbe": "#d73027"}
+          ]
+        },
+        {
+          "id": "abstand_bildung",
+          "name": "Abstand zu Bildung und Betreuung",
+          "spalte": "Abstand Bildung und Betreuung (m)",
+          "grenzen": [
+            {"name": "bis 300 m", "von": null, "bis": 300, "farbe": "#1a9850"},
+            {"name": "300–500 m", "von": 300, "bis": 500, "farbe": "#fee08b"},
+            {"name": "über 500 m", "von": 500, "bis": null, "farbe": "#d73027"}
+          ]
+        }
+      ],
+      "grenzen": [
+        "Kapazitäten (z. B. Kita-Plätze) und Öffnungszeiten stehen kaum in den Daten.",
+        "Abstände sind Luftlinie, keine Wege.",
+        "Die Abstandsstufen gibt es erst, wenn die Erreichbarkeit für dieses Ziel berechnet wurde."
+      ],
+      "quellen_tipps": [
+        "Listen der Stadt (Kitas, Schulen, Pflege) als Eigene Datei ergänzen.",
+        "Eigene Ziele können in der Erreichbarkeit als Punkte gesetzt werden."
+      ]
+    },
+
+    {
+      "id": "freiraum",
+      "beschreibung": "Öffentlich nutzbare Räume: Plätze, Fußgängerzonen, Parks, Spielplätze, Ufer und Orte zum Verweilen.",
+      "klassen": [
+        {
+          "id": "plaetze_fussgaengerzonen",
+          "name": "Plätze und Fußgängerzonen",
+          "geometrie": "Fläche",
+          "farbe": "#ffb74d",
+          "beschreibung": "Stadtplätze und Fußgängerbereiche.",
+          "regeln": {
+            "osm": ["place=square", "highway=pedestrian"],
+            "alkis": ["nutzart=Platz & bez!=Parkplatz & bez!=Rastplatz", "tn__bez=Platz & tn__bez!=Platz, Parkplatz & tn__bez!=Platz, Rastplatz", "nutzart=Straßenverkehr & bez=Fußgängerzone", "tn__bez=Strassenverkehr, Fußgängerzone"]
+          }
+        },
+        {
+          "id": "spielplaetze",
+          "name": "Spielplätze",
+          "geometrie": "Punkt",
+          "farbe": "#ec407a",
+          "beschreibung": "Spielplätze und Bolzplätze.",
+          "regeln": {
+            "osm": ["leisure=playground"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "parks",
+          "name": "Parks und Grünanlagen",
+          "geometrie": "Fläche",
+          "farbe": "#66bb6a",
+          "beschreibung": "Öffentliche Parks, Gärten und Grünanlagen.",
+          "regeln": {
+            "osm": ["leisure=park", "leisure=garden & access!=private", "landuse=village_green", "landuse=recreation_ground"],
+            "alkis": ["bez=Grünanlage", "bez=Park", "tn__bez=Sport-, Freizeit- und Erholungsfläche, Grünanlage", "tn__bez=Sport-, Freizeit- und Erholungsfläche, Park"]
+          }
+        },
+        {
+          "id": "ufer_wasserzugang",
+          "name": "Ufer- und Wasserzugänge",
+          "geometrie": "Punkt",
+          "farbe": "#29b6f6",
+          "beschreibung": "Stege, Anleger, Slipanlagen und Badestellen.",
+          "regeln": {
+            "osm": ["man_made=pier", "man_made=jetty", "leisure=slipway", "leisure=marina", "leisure=bathing_place", "amenity=ferry_terminal"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "sitzgelegenheiten",
+          "name": "Sitzgelegenheiten",
+          "geometrie": "Punkt",
+          "farbe": "#8d6e63",
+          "beschreibung": "Bänke und Picknicktische.",
+          "regeln": {
+            "osm": ["amenity=bench", "leisure=picnic_table", "leisure=outdoor_seating"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "treffpunkte",
+          "name": "Treffpunkte",
+          "geometrie": "Punkt",
+          "farbe": "#ab47bc",
+          "beschreibung": "Orte, an denen sich Menschen vermutlich treffen: Cafés, Kneipen, Brunnen, Gemeinschaftsräume.",
+          "vermutlich": true,
+          "regeln": {
+            "osm": ["amenity=cafe", "amenity=bar", "amenity=pub", "amenity=biergarten", "amenity=ice_cream", "amenity=fountain", "amenity=community_centre"],
+            "alkis": []
+          }
+        }
+      ],
+      "stufen": [],
+      "grenzen": [
+        "Aufenthaltsqualität und wie stark ein Ort genutzt wird, zeigen die Daten nicht.",
+        "Bänke und andere Ausstattung sind in OSM lückenhaft eingetragen.",
+        "Ob ein Ort öffentlich zugänglich ist, steht nicht immer in den Daten."
+      ],
+      "quellen_tipps": [
+        "Eine Begehung mit Fotos und eigener Kartierung als Eigene Datei ergänzen.",
+        "Grünflächenkataster der Stadt als Eigene Datei laden."
+      ]
+    },
+
+    {
+      "id": "mobilitaet",
+      "beschreibung": "Wie das Gebiet erschlossen ist: Straßen nach Rang, Fuß- und Radwege, Querungen, Haltestellen, Bahn und Stellplätze.",
+      "klassen": [
+        {
+          "id": "fuss_radwege",
+          "name": "Fuß- und Radwege",
+          "geometrie": "Linie",
+          "farbe": "#43a047",
+          "beschreibung": "Eigene Wege für Fuß- und Radverkehr, Treppen.",
+          "regeln": {
+            "osm": ["highway=footway", "highway=cycleway", "highway=path", "highway=pedestrian", "highway=steps", "highway=bridleway"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "radverkehr_strasse",
+          "name": "Radverkehr an Straßen",
+          "geometrie": "Linie",
+          "farbe": "#00897b",
+          "beschreibung": "Straßen mit Radstreifen oder Radweg daneben.",
+          "regeln": {
+            "osm": ["highway=* & cycleway=* & cycleway!=no", "highway=* & cycleway:both=* & cycleway:both!=no", "highway=* & cycleway:right=* & cycleway:right!=no", "highway=* & cycleway:left=* & cycleway:left!=no", "highway=* & bicycle_road=yes"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "hauptstrassen",
+          "name": "Hauptverkehrsstraßen",
+          "geometrie": "Linie",
+          "farbe": "#e53935",
+          "beschreibung": "Autobahnen, Bundes-, Landes- und Kreisstraßen.",
+          "regeln": {
+            "osm": ["highway=motorway*", "highway=trunk*", "highway=primary*", "highway=secondary*"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "sammelstrassen",
+          "name": "Sammel- und Verbindungsstraßen",
+          "geometrie": "Linie",
+          "farbe": "#fb8c00",
+          "beschreibung": "Straßen, die Wohngebiete verbinden.",
+          "regeln": {
+            "osm": ["highway=tertiary*", "highway=unclassified"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "wohnstrassen",
+          "name": "Wohn- und Erschließungsstraßen",
+          "geometrie": "Linie",
+          "farbe": "#9e9e9e",
+          "beschreibung": "Anliegerstraßen, verkehrsberuhigte Bereiche, Zufahrten.",
+          "regeln": {
+            "osm": ["highway=residential", "highway=living_street", "highway=service", "highway=track", "highway=road"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "bahn",
+          "name": "Bahn",
+          "geometrie": "Linie",
+          "farbe": "#424242",
+          "beschreibung": "Eisenbahn, Straßenbahn, S- und U-Bahn.",
+          "regeln": {
+            "osm": ["railway=rail", "railway=tram", "railway=light_rail", "railway=subway", "railway=narrow_gauge"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "haltestellen",
+          "name": "Haltestellen",
+          "geometrie": "Punkt",
+          "farbe": "#1e88e5",
+          "beschreibung": "Bus-, Straßenbahn- und Bahnhaltestellen.",
+          "regeln": {
+            "osm": ["kategorie=ÖPNV-Haltestellen", "highway=bus_stop", "public_transport=platform", "public_transport=stop_position", "public_transport=station", "railway=tram_stop", "railway=station", "railway=halt"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "querungen",
+          "name": "Querungen",
+          "geometrie": "Punkt",
+          "farbe": "#fdd835",
+          "beschreibung": "Zebrastreifen, Ampeln und andere Überwege.",
+          "regeln": {
+            "osm": ["highway=crossing", "railway=crossing", "railway=level_crossing", "highway=traffic_signals & crossing=*"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "stellplaetze",
+          "name": "Stellplätze",
+          "geometrie": "Fläche",
+          "farbe": "#78909c",
+          "beschreibung": "Parkplätze, Parkhäuser und Fahrradstellplätze.",
+          "regeln": {
+            "osm": ["amenity=parking", "amenity=parking_space", "amenity=bicycle_parking", "building=parking", "amenity=motorcycle_parking"],
+            "alkis": ["nutzart=Platz & bez=Parkplatz", "tn__bez=Platz, Parkplatz", "funktion=Parkhaus", "funktion=Tiefgarage", "gfk__bez=Parkhaus"]
+          }
+        },
+        {
+          "id": "verkehrsflaechen",
+          "name": "Verkehrsflächen (ALKIS)",
+          "geometrie": "Fläche",
+          "farbe": "#cfd8dc",
+          "beschreibung": "Straßen- und Wegeflächen aus dem Kataster (ohne Rang).",
+          "regeln": {
+            "osm": [],
+            "alkis": ["nutzart=Straßenverkehr", "nutzart=Weg", "tn__bez=Strassenverkehr", "tn__bez=Weg", "nutzart=Bahnverkehr", "tn__bez=Bahnverkehr"]
+          }
+        }
+      ],
+      "stufen": [
+        {
+          "id": "abstand_oepnv",
+          "name": "Abstand zur Haltestelle",
+          "spalte": "Abstand ÖPNV-Haltestellen (m)",
+          "grenzen": [
+            {"name": "bis 300 m", "von": null, "bis": 300, "farbe": "#1a9850"},
+            {"name": "300–500 m", "von": 300, "bis": 500, "farbe": "#fee08b"},
+            {"name": "über 500 m", "von": 500, "bis": null, "farbe": "#d73027"}
+          ]
+        }
+      ],
+      "grenzen": [
+        "Verkehrsmengen, Takt des ÖPNV und Unfälle stehen nicht in den Daten.",
+        "Anlieferung, Gehwegbreiten und Querungen sind in OSM lückenhaft.",
+        "Der Rang einer Straße kommt nur aus OSM; ALKIS kennt ihn nicht."
+      ],
+      "quellen_tipps": [
+        "Fahrpläne als GTFS-Daten des Verkehrsverbunds (Haltestellen und Takt).",
+        "Verkehrszählungen der Stadt als Eigene Datei ergänzen."
+      ]
+    },
+
+    {
+      "id": "gruen_wasser_klima",
+      "beschreibung": "Grünflächen, Wald, Bäume und Gewässer, dazu eine Näherung für versiegelte Flächen.",
+      "klassen": [
+        {
+          "id": "wald",
+          "name": "Wald und Gehölz",
+          "geometrie": "Fläche",
+          "farbe": "#2e7d32",
+          "beschreibung": "Wald, Gehölz und Gebüsch.",
+          "regeln": {
+            "osm": ["landuse=forest", "natural=wood", "natural=scrub"],
+            "alkis": ["nutzart=Wald", "nutzart=Gehölz", "tn__bez=Wald", "tn__bez=Gehölz"]
+          }
+        },
+        {
+          "id": "gruenflaechen",
+          "name": "Grünflächen",
+          "geometrie": "Fläche",
+          "farbe": "#81c784",
+          "beschreibung": "Parks, Gärten, Wiesen, Kleingärten, Friedhöfe.",
+          "regeln": {
+            "osm": ["leisure=park", "leisure=garden", "leisure=nature_reserve", "landuse=grass", "landuse=meadow", "landuse=allotments", "landuse=cemetery", "landuse=village_green", "landuse=recreation_ground", "natural=grassland", "natural=heath", "natural=wetland"],
+            "alkis": ["nutzart=Friedhof", "tn__bez=Friedhof", "nutzart=Heide", "nutzart=Moor", "nutzart=Sumpf", "nutzart=Sport-, Freizeit- und Erholungsfläche", "tn__bez=Sport-, Freizeit- und Erholungsfläche"]
+          }
+        },
+        {
+          "id": "landwirtschaft",
+          "name": "Landwirtschaft",
+          "geometrie": "Fläche",
+          "farbe": "#dce775",
+          "beschreibung": "Acker, Grünland und Obstwiesen.",
+          "regeln": {
+            "osm": ["landuse=farmland", "landuse=orchard", "landuse=vineyard", "landuse=farmyard"],
+            "alkis": ["nutzart=Landwirtschaft", "tn__bez=Landwirtschaft"]
+          }
+        },
+        {
+          "id": "gewaesser",
+          "name": "Gewässer",
+          "geometrie": "Fläche",
+          "farbe": "#4fc3f7",
+          "beschreibung": "Seen, Teiche, Flüsse und Hafenbecken als Fläche.",
+          "regeln": {
+            "osm": ["natural=water", "water=*", "landuse=reservoir", "landuse=basin"],
+            "alkis": ["nutzart=Fließgewässer", "nutzart=Stehendes Gewässer", "nutzart=Hafenbecken", "nutzart=Meer", "tn__bez=Fliessgewässer", "tn__bez=Stehendes Gewässer", "tn__bez=Hafenbecken"]
+          }
+        },
+        {
+          "id": "wasserlaeufe",
+          "name": "Wasserläufe",
+          "geometrie": "Linie",
+          "farbe": "#0288d1",
+          "beschreibung": "Flüsse, Bäche und Gräben als Linie.",
+          "regeln": {
+            "osm": ["waterway=*"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "baumreihen_hecken",
+          "name": "Baumreihen und Hecken",
+          "geometrie": "Linie",
+          "farbe": "#558b2f",
+          "beschreibung": "Baumreihen, Alleen und Hecken.",
+          "regeln": {
+            "osm": ["natural=tree_row", "barrier=hedge"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "baeume",
+          "name": "Einzelbäume",
+          "geometrie": "Punkt",
+          "farbe": "#33691e",
+          "beschreibung": "Einzeln eingetragene Bäume.",
+          "regeln": {
+            "osm": ["natural=tree"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "versiegelt",
+          "name": "Versiegelte Flächen (Näherung)",
+          "geometrie": "Fläche",
+          "farbe": "#757575",
+          "beschreibung": "Gebäude, Verkehrs-, Platz- und Gewerbeflächen – eine grobe Näherung, keine Messung.",
+          "vermutlich": true,
+          "regeln": {
+            "osm": ["building=*", "amenity=parking", "place=square", "highway=pedestrian", "landuse=industrial", "landuse=commercial", "landuse=retail"],
+            "alkis": ["kategorie=Gebäude", "nutzart=Straßenverkehr", "nutzart=Platz", "nutzart=Industrie- und Gewerbefläche", "tn__bez=Strassenverkehr", "tn__bez=Platz", "tn__bez=Industrie- und Gewerbefläche"]
+          }
+        }
+      ],
+      "stufen": [],
+      "grenzen": [
+        "Einzelbäume sind in OSM lückenhaft eingetragen.",
+        "Die Versiegelung ist nur eine Näherung über die Flächenart, keine Messung.",
+        "Verschattung, Wind und Mikroklima zeigen die Daten nicht."
+      ],
+      "quellen_tipps": [
+        "Baumkataster der Stadt als Eigene Datei laden.",
+        "Versiegelungs- oder Klimadaten des Landes (z. B. Klimaanalyse) als Eigene Datei ergänzen."
+      ]
+    },
+
+    {
+      "id": "geschichte_stadtbild",
+      "beschreibung": "Denkmäler, historische Orte, markante Gebäude und Aussichtspunkte, die das Stadtbild prägen.",
+      "klassen": [
+        {
+          "id": "baudenkmale",
+          "name": "Baudenkmale",
+          "geometrie": "Fläche",
+          "farbe": "#8d6e63",
+          "beschreibung": "Gebäude und Anlagen, die in OSM als Denkmal eingetragen sind.",
+          "regeln": {
+            "osm": ["heritage=* & heritage!=no", "historic=building", "historic=church", "historic=manor", "historic=castle"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "denkmaeler_gedenkorte",
+          "name": "Denkmäler und Gedenkorte",
+          "geometrie": "Punkt",
+          "farbe": "#6d4c41",
+          "beschreibung": "Denkmäler, Gedenktafeln, Stolpersteine, Wegkreuze.",
+          "regeln": {
+            "osm": ["historic=memorial", "historic=monument", "historic=wayside_cross", "historic=wayside_shrine", "historic=boundary_stone"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "historische_orte",
+          "name": "Historische Orte",
+          "geometrie": "Punkt",
+          "farbe": "#a1887f",
+          "beschreibung": "Ruinen, Fundstellen und andere historische Orte.",
+          "regeln": {
+            "osm": ["historic=* & historic!=no"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "aussichtspunkte",
+          "name": "Aussichtspunkte",
+          "geometrie": "Punkt",
+          "farbe": "#29b6f6",
+          "beschreibung": "Aussichtspunkte und Aussichtstürme.",
+          "regeln": {
+            "osm": ["tourism=viewpoint", "man_made=tower & tower:type=observation"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "sehenswuerdigkeiten",
+          "name": "Sehenswürdigkeiten und Kunst",
+          "geometrie": "Punkt",
+          "farbe": "#ab47bc",
+          "beschreibung": "Sehenswürdigkeiten, Museen und Kunst im öffentlichen Raum.",
+          "regeln": {
+            "osm": ["tourism=attraction", "tourism=museum", "tourism=artwork"],
+            "alkis": []
+          }
+        },
+        {
+          "id": "markante_gebaeude",
+          "name": "Markante Gebäude",
+          "geometrie": "Fläche",
+          "farbe": "#5d4037",
+          "beschreibung": "Kirchen, Türme und andere Gebäude, die vermutlich das Stadtbild prägen.",
+          "vermutlich": true,
+          "regeln": {
+            "osm": ["building=church", "building=cathedral", "building=chapel", "building=mosque", "building=synagogue", "building=temple", "amenity=place_of_worship", "man_made=tower", "man_made=water_tower", "man_made=lighthouse", "man_made=windmill", "building=castle"],
+            "alkis": ["funktion=Kirche", "funktion=Kapelle", "funktion=Turm", "gfk__bez=Kirche"]
+          }
+        }
+      ],
+      "stufen": [],
+      "grenzen": [
+        "Die Denkmalliste ist in OSM unvollständig; verbindlich ist nur die Liste des Landes.",
+        "Sichtachsen, Ortsbild und Raumwirkung sind Deutungen und kommen nicht aus den Daten.",
+        "„Markante Gebäude“ sind nur ein Vorschlag nach Gebäudeart."
+      ],
+      "quellen_tipps": [
+        "Denkmalliste des Landes (z. B. Denkmalatlas Niedersachsen) als Eigene Datei laden.",
+        "Historische Karten als Hintergrund in QGIS laden (z. B. Preußische Landesaufnahme als WMS)."
+      ]
+    }
+  ]
+}
