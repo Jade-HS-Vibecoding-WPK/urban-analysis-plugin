@@ -44,3 +44,57 @@ def test_icon_choice():
     assert icons.icon_key("nutzung_gruen", "Grünflächen") == "gruen"
     assert icons.icon_key("irgendwas") == icons.UNKNOWN
     assert icons.icon_key() == icons.UNKNOWN
+
+
+# --- F6b: target point icons; step 4 icons for every titled hint -------------
+
+from types import SimpleNamespace
+
+from urban_analysis.ui.layer_icons import UNKNOWN, icon_key
+
+
+def test_target_categories_and_own_targets_have_their_own_icons():
+    from urban_analysis.ui.classic_icons import CLASSIC_ICONS
+    from urban_analysis.ui.layer_icons import ICON_KEYS
+
+    for category in ("Gesundheit", "Nahversorgung", "Bildung und Betreuung",
+                     "Freizeit und Grün", "ÖPNV-Haltestellen", "Sonstige OSM-Punkte", "Eigene Ziele"):
+        key = icon_key(category=category)
+        assert key != UNKNOWN, category
+        assert key in ICON_KEYS and key in CLASSIC_ICONS
+    assert icon_key("points") == "punkte"  # OSM points are no boundary stones
+    assert icon_key("points_haltestellen") == "haltestellen"
+
+
+def _flow(*layers):
+    descriptors = [SimpleNamespace(layer_id=layer_id, category=category) for layer_id, category in layers]
+    return SimpleNamespace(result=SimpleNamespace(layers=descriptors))
+
+
+def test_step_4_hints_get_icons_for_layers_sources_and_categories():
+    from urban_analysis.guided_dialog import issue_icon_key
+
+    flow = _flow(("flurstuecke", None), ("gebaeude", "Gebäude"), ("multipolygons_gruen", "Grünflächen"),
+                 ("nutzung_strassen", "Straßen"))
+
+    def key(message):
+        return issue_icon_key(flow, SimpleNamespace(message=message))
+
+    assert key("ALKIS – Flurstücke: 567 von 61 311 Objekten liegen im Gebiet.") == "flurstuecke"
+    assert key("ALKIS – Gebäude: 31 Gebäude haben mehrere Adressen.") == "gebaeude"
+    assert key("OpenStreetMap – OSM – Punkte: 53 von 239 Objekten liegen im Gebiet.") == "punkte"
+    assert key("Grünflächen: 7 Objekte sind wahrscheinlich in ALKIS und OSM doppelt vorhanden.") == "gruen"
+    assert key("Straßen: 8 Objekte sind wahrscheinlich doppelt vorhanden.") == "strassen"
+    assert key("ALKIS – Datenquelle fehlt: In der Datei steht nicht, woher die Daten stammen.") is None
+
+
+def test_category_of_a_hint():
+    from urban_analysis.user_guidance import issue_category
+
+    names = ["Grünflächen", "Straßen", "Gebäude"]
+    assert issue_category("Grünflächen: 7 Objekte", names) == "Grünflächen"
+    assert issue_category("Bei den Straßen fehlt etwas", names) == "Straßen"
+    assert issue_category("Straßen und Gebäude", names) == "Straßen"   # start of the text wins
+    assert issue_category("Bei Straßen und Gebäuden", names) == "Straßen"
+    assert issue_category("Nichts davon", names) is None
+

@@ -174,6 +174,10 @@ ROLES = (
     "issue-error",    # one review hint (step 4), by severity
     "issue-warning",
     "issue-info",
+    "accent",          # click point, e.g. a map tool ('Punkt setzen')
+    "key",             # important information in the accent colour
+    "own-target",      # one own target in the list (last step)
+    "own-target-new",  # ... just added: lights up for a moment
 )
 
 # Map drawing (study area) uses the accent colour.
@@ -354,6 +358,41 @@ QFrame[uaRole="panel"] {{
 }}
 QFrame[uaRole="panel"] QLabel, QFrame[uaRole="panel"] QWidget {{
     background-color: {c['surface']};
+}}
+/* Accent: click points (map tools) and important information */
+QFrame[uaRole="panel"] QPushButton[uaRole="accent"], QPushButton[uaRole="accent"] {{
+    background-color: {c['accent_light']};
+    color: {c['accent_dark']};
+    border-color: {c['accent_dark']};
+    font-weight: bold;
+}}
+QFrame[uaRole="panel"] QPushButton[uaRole="accent"]:hover {{
+    background-color: {c['accent_hover']};
+    color: {c['text_on_accent']};
+}}
+QFrame[uaRole="panel"] QLabel[uaRole="key"], QLabel[uaRole="key"] {{
+    color: {c['accent_dark']};
+    font-weight: bold;
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target"] {{
+    background-color: {c['background']};
+    border: 2px solid {c['outline']};
+    border-left: 6px solid {c['accent']};
+    border-radius: {r}px;
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target-new"] {{
+    background-color: {c['accent_light']};
+    border: 2px solid {c['accent_dark']};
+    border-left: 6px solid {c['accent_dark']};
+    border-radius: {r}px;
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target"] QLabel,
+QFrame[uaRole="panel"] QFrame[uaRole="own-target"] QWidget {{
+    background-color: {c['background']};
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target-new"] QLabel,
+QFrame[uaRole="panel"] QFrame[uaRole="own-target-new"] QWidget {{
+    background-color: {c['accent_light']};
 }}
 
 QPushButton:disabled, QPushButton[uaRole="primary"]:disabled {{
@@ -598,6 +637,41 @@ QFrame[uaRole="panel"] {{
 }}
 QFrame[uaRole="panel"] QLabel, QFrame[uaRole="panel"] QWidget {{
     background-color: {c['surface']};
+}}
+/* Accent: click points (map tools) and important information */
+QFrame[uaRole="panel"] QPushButton[uaRole="accent"], QPushButton[uaRole="accent"] {{
+    background-color: {c['accent_light']};
+    color: {c['accent_pressed']};
+    border: 1px solid {c['accent']};
+    font-weight: bold;
+}}
+QFrame[uaRole="panel"] QPushButton[uaRole="accent"]:hover {{
+    background-color: {c['accent']};
+    color: {c['text_on_accent']};
+}}
+QFrame[uaRole="panel"] QLabel[uaRole="key"], QLabel[uaRole="key"] {{
+    color: {c['accent_pressed']};
+    font-weight: bold;
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target"] {{
+    background-color: {c['surface']};
+    border: 1px solid {c['border']};
+    border-left: 4px solid {c['accent']};
+    border-radius: {r}px;
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target-new"] {{
+    background-color: {c['accent_light']};
+    border: 1px solid {c['accent']};
+    border-left: 4px solid {c['accent']};
+    border-radius: {r}px;
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target"] QLabel,
+QFrame[uaRole="panel"] QFrame[uaRole="own-target"] QWidget {{
+    background-color: {c['surface']};
+}}
+QFrame[uaRole="panel"] QFrame[uaRole="own-target-new"] QLabel,
+QFrame[uaRole="panel"] QFrame[uaRole="own-target-new"] QWidget {{
+    background-color: {c['accent_light']};
 }}
 QPushButton:disabled {{
     background-color: {c['disabled']};

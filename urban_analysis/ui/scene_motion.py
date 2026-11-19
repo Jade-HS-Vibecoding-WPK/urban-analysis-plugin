@@ -46,7 +46,11 @@ SPLASH_FRAMES = 3          # ripples after the float lands
 TWITCH = (2, -1, 1)        # float twitches (px) when something fails
 BUBBLE_FRAMES = 30         # "…" bubble stays about 3 s
 IDLE_BOB_EVERY = 30        # float bobs 1 px every ~3 s
+# While QGIS works the float bobs up and down steadily (px per 2 frames).
+LOADING_BOB = (0, 1, 2, 1, 0, -1)
+LOADING_BOB_FRAMES = 2
 CLOUD_STEP_EVERY = 8       # clouds move 1 px every 0.8 s
+WATER_STEP_EVERY = 5       # light lines on the water drift 1 px every 0.5 s
 FISH_SPEED = 3             # px per frame when the step fish swims
 FISH_TAIL_EVERY = 4        # tail flaps every 0.4 s
 WAKE_LINES = ((-10, 1, 7), (-20, 4, 6), (-30, 0, 5), (-40, 3, 4), (-48, 1, 3))
@@ -118,6 +122,7 @@ class FishingScene:
         self.catches = 0
         self.ticks = 0
         self.cloud_offset = 0
+        self.water_offset = 0    # drift of the light lines (stays 0 without animations)
         self.step = 0
         self.fish_x = float(step_positions(width, total_steps)[0])
         self.fish_facing_right = True
@@ -221,6 +226,8 @@ class FishingScene:
             self.splash -= 1
         if self.animations and self.ticks % CLOUD_STEP_EVERY == 0:
             self.cloud_offset += 1
+        if self.animations and self.ticks % WATER_STEP_EVERY == 0:
+            self.water_offset += 1
         self._move_fish()
         self._advance_jump()
         self.frame += 1
@@ -306,6 +313,8 @@ class FishingScene:
         dy = 0
         if self.twitch > 0:
             dy = TWITCH[len(TWITCH) - self.twitch]
+        elif self.phase == "loading" and self.animations:
+            dy = LOADING_BOB[(self.ticks // LOADING_BOB_FRAMES) % len(LOADING_BOB)]
         elif self.phase == "idle" and self.animations and self.ticks % IDLE_BOB_EVERY in (1, 2):
             dy = 1
         return x, dy, True, 0

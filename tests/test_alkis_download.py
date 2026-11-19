@@ -80,3 +80,11 @@ def test_source_choice_texts():
     assert uncertain_sources_label(3) == "Auch die 3 unsicheren Fälle so entscheiden"
     assert "nichts" in sources_applied_text(0)
     assert "12" in sources_applied_text(12)
+
+
+def test_maintenance_page_of_the_alkis_service_is_an_error():
+    from urban_analysis.osm_download import wfs_exception_text
+
+    page = b"<!DOCTYPE html><html><head><title>Wartung</title></head><body>Wartung</body></html>"
+    assert "Wartung" in wfs_exception_text(page)
+    assert wfs_exception_text(b'<?xml version="1.0"?><wfs:FeatureCollection/>') is None

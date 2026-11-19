@@ -229,3 +229,49 @@ def test_resting_scene_needs_no_event_animation():
     scene = FishingScene()
     run(scene, 5)
     assert not scene.busy()
+
+
+def test_float_bobs_up_and_down_while_qgis_works():
+    from urban_analysis.ui.scene_motion import LOADING_BOB
+
+    scene = FishingScene()
+    scene.start_loading()
+    for _ in range(len(CAST_FRAMES)):
+        scene.tick()
+    assert scene.phase == "loading"
+    heights = set()
+    for _ in range(len(LOADING_BOB) * 2):
+        scene.tick()
+        heights.add(scene.float_state()[1])
+    assert min(heights) < 0 < max(heights)
+
+
+def test_float_stays_still_while_loading_with_reduced_animations():
+    scene = FishingScene(animations=False)
+    scene.start_loading()
+    heights = set()
+    for _ in range(20):
+        scene.tick()
+        heights.add(scene.float_state()[1])
+    assert heights == {0}
+
+
+def test_water_lines_drift_only_with_animations():
+    moving, still = FishingScene(), FishingScene(animations=False)
+    for _ in range(30):
+        moving.tick()
+        still.tick()
+    assert moving.water_offset > 0
+    assert still.water_offset == 0
+
+
+def test_water_gets_darker_towards_the_fish_strip():
+    from urban_analysis.ui import scene_art as art
+
+    def lightness(name):
+        value = art.SCENE_COLORS[name].lstrip("#")
+        return sum(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+    assert art.WATER_Y < art.WATER_MID_Y < art.WATER_DEEP_Y < art.FISH_Y
+    assert lightness("water") > lightness("water_mid") > lightness("water_deep")
+    assert lightness("shadow") < lightness("water_deep")  # the fish stays visible
