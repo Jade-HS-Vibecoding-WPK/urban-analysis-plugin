@@ -202,8 +202,9 @@
   },
 
   "quellen_abgleich": {
-    "_hinweis": "Abgleich ALKIS ↔ OSM (E12, E19). Zwei Flächen aus verschiedenen Quellen gelten als wahrscheinlich gleich, wenn der Mittelpunkt der einen in der anderen liegt und die Flächen höchstens max_flaechen_abweichung (0.2 = 20 %) abweichen; liegt der Mittelpunkt drin, die Abweichung ist aber größer, ist der Fall unsicher und muss bestätigt werden. vorrang ist der Vorschlag je Kategorie für Schritt 6; die Nutzerin bestätigt oder ändert ihn.",
-    "max_flaechen_abweichung": 0.2,
+    "_hinweis": "Abgleich ALKIS ↔ OSM (E12, E19). Zwei Flächen aus verschiedenen Quellen gelten als wahrscheinlich gleich, wenn der Mittelpunkt der einen in der anderen liegt und die Flächen höchstens max_flaechen_abweichung (0.3 = 30 %) abweichen; liegen beide Mittelpunkte im jeweils anderen, gilt max_flaechen_abweichung_gegenseitig (0.5 = 50 %). Ist die Abweichung größer, ist der Fall unsicher und muss in Schritt 6 bestätigt werden. Die 20 % von vorher waren für ALKIS ↔ OSM zu streng (Donnerschwee: fast die Hälfte der Gebäude-Paare unsicher), weil OSM Gebäude oft anders schneidet. vorrang ist der Vorschlag je Kategorie für Schritt 6; die Nutzerin bestätigt oder ändert ihn.",
+    "max_flaechen_abweichung": 0.3,
+    "max_flaechen_abweichung_gegenseitig": 0.5,
     "vorrang": {
       "Gebäude": "ALKIS",
       "Nutzungsflächen": "ALKIS",

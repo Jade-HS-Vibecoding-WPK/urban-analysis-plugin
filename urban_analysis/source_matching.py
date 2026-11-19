@@ -2,9 +2,11 @@
 
 Two areas of the same category from different sources are *probably the
 same* object when the centre of one lies inside the other and their areas
-differ by at most 20 % (``mapping_rules.json`` → ``quellen_abgleich``).  If
-the centre lies inside but the areas differ more, the group is *uncertain*
-and only counts after the user confirmed it.
+differ by at most 30 % – or by at most 50 % if each centre lies inside the
+other (``mapping_rules.json`` → ``quellen_abgleich``).  OSM often cuts
+buildings differently from ALKIS, so a fixed 20 % left half of all pairs
+uncertain.  If a centre lies inside but the areas differ more, the group is
+*uncertain* and only counts after the user confirmed it.
 
 ``match_sources`` marks the records (``HarmonizedRecord.source_match``) and
 returns one readable group per match; ``priority_choices`` gives step 6 the
@@ -32,7 +34,9 @@ GRID_CELL_M = 100.0
 
 @dataclass(frozen=True)
 class MatchSettings:
-    max_area_deviation: float = 0.2
+    max_area_deviation: float = 0.3
+    # Higher limit when each centre lies inside the other area.
+    max_area_deviation_mutual: float = 0.5
     # category -> suggested source kind (E19)
     suggested_priority: Mapping[str, str] = field(default_factory=dict)
 
@@ -65,11 +69,14 @@ class PriorityChoice:
 def load_settings(path: Optional[Path] = None) -> MatchSettings:
     """Threshold and suggested priority from ``mapping_rules.json``."""
     data = json.loads(Path(path or RULES_FILE).read_text(encoding="utf-8")).get("quellen_abgleich", {})
-    deviation = float(data.get("max_flaechen_abweichung", 0.2))
-    if not 0 <= deviation < 1:
-        raise ValueError("max_flaechen_abweichung muss zwischen 0 und 1 liegen")
+    deviation = float(data.get("max_flaechen_abweichung", MatchSettings.max_area_deviation))
+    mutual = float(data.get("max_flaechen_abweichung_gegenseitig", MatchSettings.max_area_deviation_mutual))
+    for name, value in (("max_flaechen_abweichung", deviation), ("max_flaechen_abweichung_gegenseitig", mutual)):
+        if not 0 <= value < 1:
+            raise ValueError(f"{name} muss zwischen 0 und 1 liegen")
     return MatchSettings(
         max_area_deviation=deviation,
+        max_area_deviation_mutual=max(mutual, deviation),
         suggested_priority={
             str(category): str(kind)
             for category, kind in data.get("vorrang", {}).items()
@@ -116,16 +123,26 @@ def _cells(bbox: BBox) -> Iterable[Tuple[int, int]]:
             yield x, y
 
 
-def _centre_inside(first: _Area, second: _Area) -> bool:
-    return point_in_geometry(first.centre, second.geometry) or point_in_geometry(second.centre, first.geometry)
+def _centres_inside(first: _Area, second: _Area) -> int:
+    """How many of the two centres lie inside the other area (0, 1 or 2)."""
+    return int(point_in_geometry(first.centre, second.geometry)) + int(
+        point_in_geometry(second.centre, first.geometry)
+    )
 
 
 def _deviation(first: _Area, second: _Area) -> float:
     return abs(first.area - second.area) / max(first.area, second.area)
 
 
-def _pairs(areas: Sequence[_Area]) -> List[Tuple[int, int, float]]:
-    """Index pairs (into ``areas``) from different sources whose centre lies in the other."""
+def _pair_certain(deviation: float, mutual: bool, settings: MatchSettings) -> bool:
+    limit = settings.max_area_deviation_mutual if mutual else settings.max_area_deviation
+    return deviation <= limit
+
+
+def _pairs(areas: Sequence[_Area]) -> List[Tuple[int, int, float, bool]]:
+    """Index pairs (into ``areas``) from different sources whose centre lies in the other.
+
+    The last value says whether each centre lies inside the other area."""
     grid: Dict[Tuple[str, Tuple[int, int]], List[int]] = {}
     for index, item in enumerate(areas):
         for cell in _cells(item.bbox):
@@ -141,12 +158,13 @@ def _pairs(areas: Sequence[_Area]) -> List[Tuple[int, int, float]]:
                 if first.kind == second.kind or key in seen:
                     continue
                 seen.add(key)
-                if _centre_inside(first, second):
-                    pairs.append((key[0], key[1], _deviation(first, second)))
+                inside = _centres_inside(first, second)
+                if inside:
+                    pairs.append((key[0], key[1], _deviation(first, second), inside == 2))
     return pairs
 
 
-def _groups(count: int, pairs: Sequence[Tuple[int, int, float]]) -> List[List[int]]:
+def _groups(count: int, pairs: Sequence[Tuple[int, int, float, bool]]) -> List[List[int]]:
     parent = list(range(count))
 
     def root(index: int) -> int:
@@ -155,10 +173,10 @@ def _groups(count: int, pairs: Sequence[Tuple[int, int, float]]) -> List[List[in
             index = parent[index]
         return index
 
-    for first, second, _ in pairs:
+    for first, second, *_ in pairs:
         parent[root(first)] = root(second)
     members: Dict[int, List[int]] = {}
-    for first, second, _ in pairs:
+    for first, second, *_ in pairs:
         for index in (first, second):
             group = members.setdefault(root(index), [])
             if index not in group:
@@ -179,9 +197,12 @@ def match_sources(
     areas = _areas(records)
     pairs = _pairs(areas)
     worst: Dict[int, float] = {}
-    for first, second, deviation in pairs:
+    doubtful: Set[int] = set()  # members of at least one uncertain pair
+    for first, second, deviation, mutual in pairs:
         for index in (first, second):
             worst[index] = max(worst.get(index, 0.0), deviation)
+            if not _pair_certain(deviation, mutual, settings):
+                doubtful.add(index)
 
     marked = [replace(record, source_match=None) if record.source_match else record for record in records]
     matches: List[SourceMatch] = []
@@ -200,7 +221,7 @@ def match_sources(
                 category=category,
                 record_count=len(group),
                 source_kinds=tuple(sorted({areas[index].kind for index in group})),
-                certain=deviation <= settings.max_area_deviation,
+                certain=not any(index in doubtful for index in group),
                 area_deviation=round(deviation, 3),
             )
         )
@@ -212,6 +233,7 @@ def _issues(matches: Sequence[SourceMatch], settings: MatchSettings) -> List[Val
     for match in matches:
         by_category.setdefault(match.category, []).append(match)
     percent = round(settings.max_area_deviation * 100)
+    mutual_percent = round(settings.max_area_deviation_mutual * 100)
     issues = []
     for category, group in by_category.items():
         kinds = " und ".join(sorted({kind for match in group for kind in match.source_kinds}))
@@ -232,11 +254,13 @@ def _issues(matches: Sequence[SourceMatch], settings: MatchSettings) -> List[Val
                 details=(
                     "Zwei Objekte aus verschiedenen Quellen gelten als gleich, wenn der Mittelpunkt "
                     f"des einen im anderen liegt und ihre Flächen höchstens {percent} % voneinander "
-                    "abweichen. Liegt der Mittelpunkt drin, die Flächen weichen aber stärker ab, ist "
-                    "der Fall unsicher. Objekte, die es nur in einer Quelle gibt, bleiben immer erhalten."
+                    f"abweichen – liegen beide Mittelpunkte im jeweils anderen, sind bis zu {mutual_percent} % "
+                    "erlaubt. Weichen die Flächen stärker ab, ist der Fall unsicher. Objekte, die es nur "
+                    "in einer Quelle gibt, bleiben immer erhalten."
                 ),
                 severity="warning" if uncertain else "info",
-                requires_confirmation=bool(uncertain),
+                # The choice is made in step 6, not by a tick in step 4.
+                requires_confirmation=False,
                 rule="Abgleich der Quellen",
             )
         )
