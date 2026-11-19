@@ -170,6 +170,19 @@
     "heritage": "Denkmalschutz"
   },
 
+  "spalten_reihenfolge": {
+    "_hinweis": "Reihenfolge der übernommenen Spalten in den Ergebnis-Layern: erst 'zuerst' in dieser Reihenfolge, dann alle übrigen wie in der Quelle, zuletzt 'ans_ende'. Was ist es → wo ist es → Eigenschaften → Herkunft.",
+    "zuerst": [
+      "name",
+      "lagebeztxt", "addr:street", "bez", "addr:housenumber", "hnr", "addr:postcode", "addr:city", "gemeinde", "gem__bez",
+      "building:levels", "anzahlgs", "roof:levels", "building", "gebnutzbez", "funktion", "gfk__bez", "nutzart", "tn__bez",
+      "roof:shape", "height", "building:material", "start_date", "baw__bez", "ofl__bez",
+      "amenity", "shop", "healthcare", "leisure", "sport", "landuse", "natural", "highway", "railway", "waterway",
+      "operator", "wheelchair", "heritage"
+    ],
+    "ans_ende": ["oid", "objid", "osm_id", "osm_way_id", "aktualit", "gfk", "gfkzshh", "baw", "ofl", "tn", "bwf", "ken"]
+  },
+
   "erreichbarkeit": {
     "_hinweis": "Erreichbarkeit Stufe 1, Luftlinie (E26, E34). Gemessen wird vom Mittelpunkt jedes Objekts der Ausgangs-Kategorien zum nächsten gewählten Ziel. Radien in Metern.",
     "radien_m": [300, 500],
