@@ -3533,6 +3533,14 @@ def _create_dock(plugin):
         fill.toggled.connect(opacity_row_box.setEnabled)
         opacity_row_box.setEnabled(choice.fill)
 
+        def show_ring_colors(on):
+            """Without filling the rings are drawn grey: no colours to choose."""
+            for _tick, _spin, color_button in ring_widgets:
+                color_button.setVisible(on)
+
+        fill.toggled.connect(show_ring_colors)
+        show_ring_colors(choice.fill)
+
         if available:
             tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
         use_data.toggled.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
@@ -3629,6 +3637,12 @@ def _create_dock(plugin):
         def show(number):
             try:
                 set_role(card, steps[number])
+                # the colours of the texts inside depend on the card's role:
+                # Qt only re-applies them when asked
+                for child in card.findChildren(QWidget):
+                    child.style().unpolish(child)
+                    child.style().polish(child)
+                    child.update()
             except RuntimeError:
                 return  # list was rebuilt in between
             if number + 1 < len(steps):
