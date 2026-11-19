@@ -6,8 +6,8 @@ sauberen Datengrundlage führt: Es lädt Daten für ein selbst gewähltes Gebiet
 sie, prüft auf Dopplungen und erzeugt daraus geordnete Karten-Layer, eine
 Erreichbarkeitsanalyse und ein PDF.
 
-Entstanden im Wahlpflichtkurs „KI / Vibecoding“ im Studiengang Urban Design an der
-Jade Hochschule (Wintersemester 2026/27).
+Entstanden im Wahlpflichtkurs „KI / Vibecoding“ an der Jade Hochschule, Fachbereich
+Architektur, Studiengang Urban Design (Wintersemester 2026/27).
 
 > **Stand:** experimentell (Version 0.1). Das Plugin funktioniert für ganz Deutschland,
 > getestet wurde vor allem in Oldenburg (Niedersachsen).
@@ -16,26 +16,17 @@ Jade Hochschule (Wintersemester 2026/27).
 
 ## Unser Anspruch: nah an den Daten, fachlich sauber
 
-Das Plugin soll nichts „schöner rechnen“, als die Daten sind. Deshalb gilt überall:
+Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
 
-- **Rohdaten bleiben unverändert.** Bereinigte Daten und Ergebnisse entstehen immer als
-  neue Layer bzw. neue Dateien.
-- **Keine stillen Korrekturen.** Fehler, Lücken und unsichere Fälle werden als Hinweis
-  angezeigt – mit einem Satz, was los ist, und einem Satz, was zu tun ist.
-- **Vorschläge sind nur Vorschläge.** Spaltenzuordnungen, Kategorien und die Wahl der
-  Quelle schlägt das Plugin vor; endgültig werden sie erst, wenn du sie bestätigst.
-- **Dopplungen mit Augenmaß.** Exakt gleiche Objekte werden automatisch entfernt. Ähnliche
-  Objekte (z. B. dasselbe Haus aus ALKIS und aus OSM) werden nur angezeigt und mit einem
-  Beispiel erklärt – du entscheidest.
-- **Herkunft bleibt sichtbar.** Jedes Objekt behält seine Quelle und den Dateinamen; die
-  Lizenzvermerke kommen automatisch in Attributtabelle und PDF.
-- **Kein Wert geht verloren.** Spalten werden lesbar benannt und geordnet; weggelassen wird
-  eine Spalte nur, wenn sie im ganzen Layer leer ist oder du sie bewusst abwählst.
-- **Genau zugeschnitten.** Ein Objekt gehört dazu, wenn sein Abstand zum
-  Untersuchungsgebiet höchstens dem Puffer entspricht – nicht nur das umgebende Rechteck.
-- **Grenzen werden genannt.** Was die Daten nicht hergeben (z. B. Leerstand,
-  Aufenthaltsqualität, echte Wegelängen), steht als Hinweis dabei. Unsichere Zuordnungen
-  sind als „vermutlich“ markiert.
+- **Rohdaten bleiben unverändert** – Ergebnisse entstehen als neue Layer und Dateien.
+- **Nichts passiert still** – Fehler, Lücken und unsichere Fälle erscheinen als Hinweis,
+  Vorschläge des Plugins gelten erst, wenn du sie bestätigst.
+- **Dopplungen mit Augenmaß** – exakt gleiche Objekte werden entfernt, ähnliche nur
+  angezeigt; du entscheidest.
+- **Herkunft bleibt sichtbar** – jedes Objekt behält Quelle und Dateiname, kein Wert geht
+  verloren.
+- **Grenzen werden genannt** – was die Daten nicht zeigen, steht dabei; Unsicheres ist als
+  „vermutlich“ markiert.
 
 ---
 
@@ -103,14 +94,39 @@ Das Plugin enthält **keine Geodaten**. Es lädt sie beim Benutzen für dein Geb
 oder liest deine eigenen Dateien. Heruntergeladene Daten landen in einem Ordner, den du
 wählst.
 
-| Quelle | Woher | Lizenz | Hinweis |
-| --- | --- | --- | --- |
-| OpenStreetMap | Overpass-API (ganz Deutschland) | ODbL 1.0 – „© OpenStreetMap-Mitwirkende“ | Ist der Server überlastet, springt für Niedersachsen ein vorberechneter Zwischenspeicher ein (mit Hinweis). |
-| ALKIS (amtliches Liegenschaftskataster) | Dienste der Bundesländer | je Land, z. B. CC BY 4.0 oder dl-de | Frei abrufbar derzeit in BB, HH, HE, MV, NI, NW, RP, SN, SH, TH. Weitere Länder folgen; Sachsen-Anhalt bietet ALKIS nicht frei an. |
-| Eigene Datei | z. B. GeoPackage, auch eigener ALKIS-Export | deine Verantwortung | Bitte die Lizenz deiner Daten im Feld „Datenquelle“ angeben. |
+### Was welcher Lizenz unterliegt
 
-Die Quellenvermerke werden automatisch in die Attributtabelle (Spalte „Datenquelle“)
-und ins PDF übernommen. **Bitte keine lizenzpflichtigen Daten weitergeben oder
+| Bestandteil | Lizenz |
+| --- | --- |
+| Plugin: Code, Kataloge (Quellen, Kategorien, Kartenthemen), Icons | [Apache License 2.0](LICENSE) |
+| OpenStreetMap-Daten (über Overpass oder den Niedersachsen-Zwischenspeicher) | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) – Vermerk „© OpenStreetMap-Mitwirkende, ODbL“ |
+| ALKIS-Daten | Lizenz des jeweiligen Bundeslands (Tabelle unten) |
+| Eigene Dateien | die Lizenz deiner Daten – bitte im Feld „Datenquelle“ angeben |
+| Deine Ergebnisse (Layer, GeoPackage, PDF) | die Lizenzen der darin enthaltenen Daten; aus OSM abgeleitete Daten bleiben unter der ODbL |
+
+### ALKIS je Bundesland
+
+| Land | Im Plugin | Lizenz | Quellenvermerk |
+| --- | --- | --- | --- |
+| Brandenburg | verfügbar | dl-de/by-2-0 | © GeoBasis-DE/LGB, dl-de/by-2-0 |
+| Hamburg | verfügbar | dl-de/by-2-0 | © FHH, LGV, dl-de/by-2-0 |
+| Hessen | verfügbar | dl-de/zero-2-0 | © HVBG |
+| Mecklenburg-Vorpommern | verfügbar | CC BY 4.0 | © GeoBasis-DE/M-V ‹Jahr›, CC BY 4.0 |
+| Niedersachsen | verfügbar | CC BY 4.0 | © GeoBasis-DE/LGLN ‹Jahr›, CC BY 4.0 |
+| Nordrhein-Westfalen | verfügbar | dl-de/zero-2-0 | © GeoBasis NRW |
+| Rheinland-Pfalz | verfügbar | dl-de/by-2-0 | © GeoBasis-DE / LVermGeoRP ‹Jahr›, dl-de/by-2-0 |
+| Sachsen | verfügbar | dl-de/by-2-0 | © GeoSN, dl-de/by-2-0 |
+| Schleswig-Holstein | verfügbar | CC BY 4.0 | © GeoBasis-DE/LVermGeo SH, CC BY 4.0 |
+| Thüringen | verfügbar | CC BY 4.0 | © GDI-Th |
+| Baden-Württemberg, Bayern, Berlin, Bremen, Saarland | kommt später | – | – |
+| Sachsen-Anhalt | nicht frei abrufbar | – | – |
+
+Lizenztexte: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de),
+[dl-de/by-2-0](https://www.govdata.de/dl-de/by-2-0),
+[dl-de/zero-2-0](https://www.govdata.de/dl-de/zero-2-0).
+
+Die Quellenvermerke trägt das Plugin automatisch in die Attributtabelle (Spalte
+„Datenquelle“) und ins PDF ein. **Bitte keine lizenzpflichtigen Daten weitergeben oder
 veröffentlichen.**
 
 ---
@@ -127,11 +143,11 @@ veröffentlichen.**
   Wartungszeiten. Das Plugin meldet das; eine eigene Datei ist dann der Ausweg.
 - **Keine Umprojektion im Hintergrund.** Passt das Koordinatensystem einer Quelle nicht,
   wird das angezeigt statt still umgerechnet.
-- **Experimentell:** Fehler sind möglich. Rückmeldungen gern als Issue im Repository.
 
 ---
 
 ## Lizenz
 
-Der Code steht unter der [Apache License 2.0](LICENSE). Für die Daten gelten die
-Lizenzen der jeweiligen Quellen (siehe oben).
+Das Plugin steht unter der [Apache License 2.0](LICENSE). Für die Daten gelten die
+Lizenzen der jeweiligen Quellen (siehe „Daten und Lizenzen“). Diese README ist keine
+Rechtsberatung.
