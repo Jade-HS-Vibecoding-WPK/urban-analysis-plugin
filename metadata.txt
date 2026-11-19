@@ -1,15 +1,17 @@
 [general]
 name=Urban Analysis Plugin
 qgisMinimumVersion=3.44
-description=Shared foundation for the urban analysis MVP workflow.
+description=Guided step-by-step urban analysis for students: load OSM, ALKIS or own data for a study area, clean and combine it, and create map layers, an accessibility check and a PDF.
 version=0.1.0
 author=Urban Analysis Team
 email=
-about=Provides the common contract and entry point for the urban analysis plugin.
-repository=
-tracker=
+about=A guided side panel (in German) leads urban design students from an empty map to a clean data basis in 8 steps: choose a coordinate system and a study area, load data (OpenStreetMap, official ALKIS data from the open services of the German states, or own GeoPackages), check hints, choose columns and sources, and create ordered result layers, a simple accessibility check and a PDF map. Raw data is never changed; uncertain cases are shown, not fixed silently. Created in the elective course "Vibecoding KI Werkstatt" at Jade Hochschule (Urban Design, winter term 2026/27). Experimental: tested mainly in Oldenburg (Lower Saxony).
+repository=https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin
+tracker=https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin/issues
+icon=urban_analysis/icons/hase_karte_klassisch.svg
+changelog=0.1.0 First public release.
 category=Analysis
 experimental=True
 deprecated=False
-tags=urban analysis,geopackage,cartography
+tags=urban analysis,urban design,openstreetmap,osm,alkis,geopackage,cartography,accessibility,education
 hasProcessingProvider=False
