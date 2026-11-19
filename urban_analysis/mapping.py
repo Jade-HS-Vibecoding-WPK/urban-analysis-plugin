@@ -305,7 +305,15 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
                     street_field=str(street_field) if street_field else None,
                     house_number_field=str(house_number_field) if house_number_field else None,
                     tag_fields=tuple(str(key) for key in layer.get("tag_fields", ())),
-                    tag_labels=tag_labels,
+                    # A layer may name a tag differently, e.g. a hospital
+                    # point "Krankenhaus" but its area "Krankenhausgelände".
+                    tag_labels={
+                        **tag_labels,
+                        **{
+                            str(tag): str(label)
+                            for tag, label in _without_comments(layer.get("tag_labels", {})).items()
+                        },
+                    },
                     tags_field=str(tags_field) if tags_field else None,
                     tag_columns=tag_columns,
                     object_id_fields=tuple(

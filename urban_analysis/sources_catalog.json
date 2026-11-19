@@ -19,7 +19,7 @@
       "_hinweis": "Was die Overpass-Abfrage holt (M10a). 'schluessel' = alle Merkmale, nach denen das OSM-Profil in mapping_rules.json einordnet, außer 'boundary' (Grenz-Relationen reichen weit über das Gebiet hinaus und machen den Download riesig). Relationen nur als Flächen (type=multipolygon). Ein Test hält die Liste mit dem Profil in Einklang.",
       "zeitlimit_s": 300,
       "schluessel": [
-        "amenity", "barrier", "building", "building:part", "highway", "landuse", "leisure",
+        "amenity", "barrier", "building", "building:part", "healthcare", "highway", "landuse", "leisure",
         "man_made", "natural", "place", "power", "public_transport", "railway", "shop",
         "water", "waterway"
       ],
@@ -37,8 +37,42 @@
     }
   },
 
+  "osm_cache": {
+    "_hinweis": "Niedersachsen-Cache (E35): vorberechnete OSM-Daten des Teams auf GitHub Pages, wöchentlich aus dem Geofabrik-Auszug gebaut. Wird nur benutzt, wenn Overpass nach allen Wiederholungen scheitert, und nur, wenn das Download-Rechteck ganz im Cache liegt. Repo: https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache",
+    "name": "Niedersachsen-Cache",
+    "basis_url": "https://jade-hs-vibecoding-wpk.github.io/niedersachsen-cache/daten/",
+    "manifest": "manifest.json",
+    "rohdatei": "osm_cache_{datum}.json",
+    "geojson": "osm_cache_{datum}_{layer}.geojson",
+    "geopackage": "osm_cache_{datum}.gpkg",
+    "lizenz": "ODbL-1.0",
+    "lizenz_url": "https://opendatacommons.org/licenses/odbl/1-0/",
+    "quellenvermerk": "© OpenStreetMap-Mitwirkende, ODbL (über den Niedersachsen-Cache)",
+    "merkmal_namen": {
+      "_hinweis": "Lesbare Namen für Merkmale, die im Cache fehlen können (für den Hinweis in Schritt 4).",
+      "barrier": "Hecken, Zäune und Mauern",
+      "building:part": "Gebäudeteile",
+      "power": "Stromleitungen und -anlagen",
+      "boundary": "Grenzen",
+      "amenity": "Einrichtungen",
+      "shop": "Geschäfte",
+      "highway": "Straßen und Wege",
+      "building": "Gebäude",
+      "landuse": "Landnutzung",
+      "leisure": "Freizeitflächen",
+      "natural": "Naturflächen",
+      "water": "Gewässer",
+      "waterway": "Wasserläufe",
+      "railway": "Bahnanlagen",
+      "public_transport": "ÖPNV-Anlagen",
+      "healthcare": "Gesundheitseinrichtungen",
+      "man_made": "Bauwerke",
+      "place": "Plätze"
+    }
+  },
+
   "laendergrenzen": {
-    "_hinweis": "Vereinfachte Ländergrenzen für den Bundesland-Vorschlag (E11). Datei wird einmal ins Plugin gelegt, nicht bei jedem Lauf geladen. Lizenz in M10b am Datensatz selbst bestätigen.",
+    "_hinweis": "Zurzeit nicht genutzt: Entscheidung 19.11.2026 (M10b), das Bundesland wählt die Nutzerin von Hand. Lizenz am 19.11.2026 auf der BKG-Produktseite bestätigt: dl-de/by-2.0, kostenfrei; Quellenvermerk und Veränderungshinweis Pflicht, auf Webseiten 'BKG' und 'dl-de/by-2-0' verlinken.",
     "produkt": "VG2500 (Verwaltungsgebiete 1:2 500 000)",
     "anbieter": "Bundesamt für Kartographie und Geodäsie (BKG)",
     "url": "https://daten.gdz.bkg.bund.de/produkte/vg/vg2500/aktuell/vg2500_01-01-2026.utm32s.gpkg.zip",
@@ -46,7 +80,18 @@
     "groesse_mb": 3.2,
     "crs": "EPSG:25832",
     "lizenz": "dl-de/by-2-0",
-    "quellenvermerk": "© GeoBasis-DE / BKG ({jahr})"
+    "quellenvermerk": "© BKG ({jahr}) dl-de/by-2-0, Datenquellen: https://sgx.geodatenzentrum.de/web_public/gdz/datenquellen/datenquellen_vg_nuts.pdf"
+  },
+
+  "alkis_abfrage": {
+    "_hinweis": "ALKIS-Download über WFS (M10b). Der NI-Dienst liefert höchstens 10 000 Objekte je Abfrage und kann nicht seitenweise laden (CountDefault 10000, ImplementsResultPaging FALSE, geprüft 19.11.2026). Deshalb wird das Download-Rechteck in Kacheln von etwa kachel_m geteilt; Objekte am Kachelrand kommen mehrfach und werden beim Zusammenfügen über die Objekt-ID entfernt. Liefert eine Kachel max_objekte_je_abfrage Objekte, ist sie wahrscheinlich abgeschnitten → sichtbarer Hinweis.",
+    "fertige_formate": ["ave"],
+    "kachel_m": 1000,
+    "max_objekte_je_abfrage": 10000,
+    "zeitlimit_s": 120,
+    "ebenen": ["gebaeude", "nutzung", "flurstuecke"],
+    "rohdatei": "alkis_{land}_{ebene}_{teil}_{datum}.gml",
+    "geopackage": "alkis_{land}_{datum}.gpkg"
   },
 
   "alkis_formate": {
@@ -273,6 +318,7 @@
       "lizenz": "dl-de/by-2-0",
       "quellenvermerk": "© GeoBasis-DE / LVermGeo ST",
       "geprueft": "2026-11-18",
+      "gesperrt": "Die Lizenz ist noch nicht bestätigt (E28).",
       "einschraenkung": "Der Dienst verweist auf die Kostenverordnung; laut Metadaten kostenfrei beim Online-Abruf. Lizenz in M10b auf der Seite des LVermGeo bestätigen (war am 18.11. nicht erreichbar)."
     },
     "SH": {

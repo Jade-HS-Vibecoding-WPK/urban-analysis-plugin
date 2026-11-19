@@ -225,13 +225,183 @@ Setzt E31 mit dem Vertrag aus G11 um. Baut auf F1 auf (Branch
   nach Entscheidungen neu aufgerufen werden.
 - Tests: `tests/test_duplicate_groups.py` (6).
 
+## F6 / M17 Teil 1 – Ziel-Punkte für die Erreichbarkeit (19.11.2026)
+
+Setzt E22/E34 um. Branch `feature/pipeline-ziel-punkte` liegt auf
+`feature/pipeline-dubletten-beispiel` (F3) und damit auf F1.
+
+- **OSM-Punkte** (`points`) haben jetzt Kategorien und eigene
+  Ergebnis-Layer: **Gesundheit** (Krankenhaus, Klinik, Arztpraxis,
+  Zahnarztpraxis, Apotheke, weitere `healthcare=*`), **Nahversorgung**
+  (Supermarkt, Lebensmittelladen, Bäckerei, Metzgerei, Obst- und
+  Gemüseladen, Drogerie, Wochenmarkt), **Bildung und Betreuung** (Schule,
+  Kita, Kinderbetreuung, Hochschule), **Freizeit und Grün** (Spielplatz,
+  Sportplatz, Sportanlage, Park, Bibliothek), **ÖPNV-Haltestellen**
+  (Bus-, Straßenbahnhaltestelle, Haltestelle, Haltepunkt, Bahnhof,
+  Bahnhaltepunkt). Alles andere: „Sonstige OSM-Punkte“.
+- **Unterart** = Objektart (`object_type`), z. B. „Arztpraxis“. Damit
+  wählt W16 „Kategorie + Unterart“ (E34).
+- Layer können eigene Namen für Merkmale haben (`tag_labels` je Layer):
+  Punkt „Krankenhaus“, Fläche weiter „Krankenhausgelände“.
+- **Overpass-Abfrage** holt zusätzlich `healthcare`; alle anderen Merkmale
+  wurden schon geladen.
+- **Für Person Windows:** sechs neue Kategorien → Icons (W11-Icons) und
+  Auswahl beim Kartenthema.
+- Noch nicht mit echten OSM-Punkten geprüft (lokale `OSM.gpkg` hat keine).
+- Tests: `tests/test_ziel_punkte.py` (5).
+
+## E35 – Niedersachsen-Cache, wenn Overpass scheitert (19.11.2026)
+
+Wunsch Person Mac: Ist Overpass nach allen Wiederholungen überlastet,
+holt das Plugin OSM aus dem Niedersachsen-Cache des Teams
+(https://github.com/Jade-HS-Vibecoding-WPK/niedersachsen-cache). Nur als
+Notlösung, nie still: ein Info-Hinweis sagt es. Branch
+`feature/pipeline-osm-cache` (liegt auf F6).
+
+- **Katalog:** Abschnitt `osm_cache` in `sources_catalog.json` (Adresse,
+  Dateinamen, Lizenz ODbL, Quellenvermerk, lesbare Namen fehlender
+  Merkmale).
+- **Neu `urban_analysis/osm_cache.py`** (QGIS-frei, nur Standardbibliothek):
+  - `manifest_url(catalog)` → Adresse von `manifest.json`.
+  - `plan_cache_download(box, manifest, catalog)` → `CachePlan`: nutzbar
+    nur, wenn **jede** z15-Kachel des Download-Rechtecks im Cache liegt
+    (sonst `reason` für die Fehlermeldung); `tile_urls` (z15-Kacheln plus
+    z12-Kacheln für große Objekte), `missing_keys` (heute `barrier`,
+    `building:part`, `power`), Dateinamen, Lizenz, Quellenvermerk.
+  - `merge_tiles(tiles)` → Objekte ohne Doppelte (ein Objekt liegt in jeder
+    Kachel, die es berührt).
+  - `elements_to_layers(elements, keys)` → GeoJSON `points`, `lines`,
+    `multipolygons` in EPSG:4326 mit **denselben Spalten wie GDAL** bei einer
+    `.osm`-Datei (`osm_id`, `osm_way_id`, `name`, …, `other_tags`);
+    geschlossene Wege mit Flächen-Merkmal → Fläche, Multipolygon-Relationen
+    aus Wegstücken zusammengesetzt (mit Löchern). Nicht schließbare
+    Relationen werden gezählt (`skipped`), nicht still verworfen.
+  - `cache_issue(plan, catalog, skipped)` → Info-Hinweis „OSM-Daten kommen
+    aus dem Niedersachsen-Cache (Stand …), weil der OSM-Server nicht
+    geantwortet hat. Nicht enthalten: Hecken, Zäune und Mauern,
+    Gebäudeteile, Stromleitungen und -anlagen.“
+- **Live geprüft** (Donnerschwee, Cache-Stand 17.11.2026): 32 Kacheln
+  (2 MB), 25 685 Objekte → 7 212 Punkte, 6 435 Linien, 11 353 Flächen,
+  keine Relation verloren. Durch die Pipeline: keine Fehler, dieselben
+  Kategorien wie beim Overpass-Download, Ziel-Punkte aus F6 erkannt
+  (z. B. REWE, PENNY als „Supermarkt“). München → „nicht im Cache“.
+- **Für Person Windows (W11b, `osm_download.py`):** Wenn `fetch` nach allen
+  Versuchen mit `DownloadError` (überlastet/keine Antwort) endet:
+  1. `manifest.json` über das QGIS-Netz laden, `plan_cache_download` mit
+     demselben 4326-Rechteck aufrufen.
+  2. Nicht nutzbar → bisherige Fehlermeldung plus `plan.reason`.
+  3. Nutzbar → alle `tile_urls` laden (gzip, mit `gzip.decompress` und
+     `json.loads` lesen), `merge_tiles`, Rohdatei `plan.raw_file_name`
+     unverändert speichern (`{"elements": …}`), `elements_to_layers` mit
+     `catalog["osm"]["abfrage"]["schluessel"]`, die drei GeoJSON
+     (`plan.geojson_name` mit `{layer}`) schreiben und wie bisher als
+     `points`/`lines`/`multipolygons` ins GeoPackage `plan.geopackage_name`
+     im Projekt-KBS umwandeln.
+  4. `cache_issue(...)` an die Hinweise anhängen; Datenquelle mit
+     `plan.attribution` vorausfüllen.
+- **Gemeinsam:** E35 in den Plan aufnehmen (ergänzt E15: der Cache ist eine
+  eigene, wöchentlich neue Quelle, kein alter Download); `osm_cache.py` in
+  die Dateitabelle von `CLAUDE.md` (Person Mac).
+- Tests: `tests/test_osm_cache.py` (7).
+
+## F7 / M20 – Erreichbarkeit Stufe 1: Luftlinie (19.11.2026)
+
+Setzt E26 (Stufe 1) und E34 um. Branch `feature/pipeline-erreichbarkeit`
+liegt auf dem Cache-Branch (Kette F1 → F3 → F6 → Cache → F7).
+
+- **Neu `urban_analysis/accessibility.py`** (QGIS-frei):
+  - `target_choices(records)` → was im Gebiet als Ziel vorkommt, je
+    Kategorie mit Unterarten und Anzahl, z. B. `{"Nahversorgung":
+    [("Bäckerei", 20), ("Supermarkt", 11), …]}` – für die Auswahl in W16.
+  - `TargetChoice(category, subtypes)` – Kategorie, optional Unterarten.
+  - `add_air_distance(records, choice)` → je Gebäude in
+    `extra_attributes`: „Abstand Supermarkt (m)“ (ganze Meter) und
+    „Supermarkt bis 300 m“ / „… bis 500 m“ = „ja“/„nein“; dazu ein
+    Info-Hinweis „Erreichbarkeit „Supermarkt“ (Luftlinie): 32 % höchstens
+    300 m; 57 % höchstens 500 m vom nächsten Ziel entfernt.“ Mehrfach
+    aufrufbar (eine Wahl je Aufruf, Spaltennamen trennen sie).
+  - `target_records(records, choice)` → die Ziel-Objekte, z. B. für die
+    Radien-Kreise in QGIS.
+  - Warnung statt stiller Lücke, wenn es keine Ziele oder keine Gebäude
+    gibt; Fehler, wenn die Koordinaten in Grad statt Metern sind.
+- **Gemessen** vom Mittelpunkt des Gebäudes (`representative_point` in
+  `geometry.py`) zum nächsten Ziel. **Flächen als Ziele** über ihren
+  Mittelpunkt (`flaechen_als_ziele`): Krankenhausgelände → Gesundheit /
+  Krankenhaus, Schulgelände, Kita, Hochschulgelände, Park, Spielplatz,
+  Sportplatz, Sportanlage. Viele davon sind in OSM nur als Fläche drin.
+- **Einstellungen** in `mapping_rules.json` → `erreichbarkeit`: Radien
+  (300/500 m), Ausgangs-Kategorien (Gebäude), Ziel-Kategorien, Flächen als
+  Ziele.
+- **Live geprüft** mit den Cache-Daten Donnerschwee (nach UTM 32N
+  umgerechnet): ÖPNV 79 % ≤ 300 m, 98 % ≤ 500 m; Supermarkt 32 % / 57 %;
+  Krankenhaus 4 % / 13 %; Park oder Spielplatz 82 % / 97 %. Drei
+  Auswertungen über rund 2 600 Gebäude in 0,24 s.
+- **Grenzen:** Luftlinie, nicht Fußweg (Stufe 2 später). Ziele außerhalb
+  des geladenen Gebiets fehlen → am Rand zu große Abstände (steht im
+  Hinweis). Bei großen Parks zählt der Mittelpunkt, nicht der Eingang.
+  Supermärkte, die nur als Gebäude mit `shop=supermarket` eingetragen sind,
+  heißen heute „Einzelhandel“ und zählen noch nicht.
+- **Für Person Windows (W16):** Auswahl aus `target_choices` (Kategorie,
+  dann Häkchen bei Unterarten) → je Wahl `add_air_distance`; Ergebnis
+  wählbar: Radien als QGIS-Puffer um `target_records` und/oder Gebäude
+  nach „Abstand … (m)“ eingefärbt. Die neuen Spalten stehen in
+  `extra_attributes` und kommen mit W14 in die Attributtabelle.
+- Tests: `tests/test_accessibility.py` (8).
+
+## M10b – ALKIS-Aufträge je Bundesland (19.11.2026)
+
+Branch `feature/pipeline-alkis-auftraege` (liegt auf F7).
+
+- **Entscheidung 19.11.2026 (ändert E11):** Das Bundesland wählt die
+  Nutzerin **von Hand** in Schritt 3; keine Ländergrenzen-Datei im Plugin.
+  Lizenz der BKG-Grenzen trotzdem geklärt (dl-de/by-2.0, Quellenvermerk im
+  Katalog korrigiert), falls wir später doch einen Vorschlag wollen.
+- `alkis_states()` → alle 16 Länder für die Auswahlliste, sortiert, mit
+  Status: **verfügbar** (BB, HH, HE, MV, NI, NW, RP, SN, SH, TH – Format
+  „ALKIS vereinfacht“ mit Profil), **kommt später** (BW, BY, BE, HB, SL –
+  eigenes Format, M12 Teil 2), **gesperrt** (ST – Lizenz, E28).
+- `plan_alkis_download(study_area_wkt, buffer_meters, lonlat_box, state)`
+  → `SourcePlan`: Größenprüfung wie bei OSM (E13), dann WFS-Aufträge für
+  **Gebäude, Nutzung und Flurstücke** (eigener Layer je Ebene); für nicht
+  verfügbare Länder eine Warnung („… kommt später / ist gesperrt … Das
+  Plugin verwendet OSM.“) und keine Aufträge. Nie Flurstücke in Bayern.
+- **Wichtig – Objekt-Grenze:** Der NI-WFS liefert höchstens **10 000
+  Objekte je Abfrage** und kann **nicht seitenweise** laden (live geprüft).
+  Donnerschwee allein hat über 13 000 Gebäude/Bauwerke. Deshalb teilt
+  `split_box` das Rechteck in Kacheln von etwa 1 km; jeder `DownloadRequest`
+  hat `layer_name`, `part`/`parts`, `max_features` (10 000) und `id_field`
+  (`oid`).
+- **WFS-Abfrage:** `wfs_getfeature_url` – Auswahl mit dem Rechteck in
+  EPSG:4326, Lieferung im KBS des Dienstes (`delivery_crs`, z. B. 25833 für
+  BB/MV/SN); QGIS rechnet ins Projekt-KBS um, die Pipeline nicht.
+- **Live geprüft (NI, Donnerschwee mit 500 m Puffer, 9,8 km²):** 16 Kacheln ×
+  3 Ebenen = 48 Abfragen in 25 s; größte Kachel 2 406 Objekte. Eindeutig
+  nach `oid`: 13 518 Gebäude/Bauwerke (13 757 mit Doppelten am Rand),
+  3 527 Nutzungsflächen (4 065), 7 558 Flurstücke (8 118).
+- **Für Person Windows (W11/W10 Teil 2):**
+  1. Schritt 3: Auswahlliste aus `alkis_states()` (Status und Hinweis
+     anzeigen; nur „verfügbar“ lädt ALKIS).
+  2. `plan_alkis_download(...)` mit demselben 4326-Rechteck wie bei OSM.
+  3. Jede Abfrage als GET laden (GML), Rohdatei `raw_file_name` unverändert
+     speichern.
+  4. Alle Teile eines `layer_name` in **einen** Layer des GeoPackage
+     `geopackage_name` im Projekt-KBS schreiben; Objekte, deren `id_field`
+     (`oid`) schon geschrieben wurde, auslassen.
+  5. Hat ein Teil `max_features` Objekte, sichtbare Warnung („Teil n ist
+     vermutlich unvollständig – Gebiet verkleinern“).
+  6. Datenquelle mit `attribution` vorausfüllen (E28).
+- **Gemeinsam (G12):** E11 im Plan ändern (Bundesland von Hand).
+- Tests: `tests/test_alkis_auftraege.py` (7).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 303 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 330 grün.
 
 ## Als Nächstes (Person Mac)
 
-Feature Freeze (`ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6, Etappe F):
-F6 M17 Teil 1 Startpunkte · F7 M20 Luftlinie.
-Danach: M10b, M18, M6, M12 Teil 2.
+Etappe F ist für Person Mac erledigt (F0, F1, F3, F6, F7 und E35), dazu
+M10b. Offen: PRs nacheinander öffnen (F3 offen; dann F6, Cache, F7, M10b –
+jeweils nach dem Merge des vorherigen), gemeinsam G12 (Plan: E35, E11
+geändert; `CLAUDE.md`-Dateitabelle mit `osm_cache.py` und
+`accessibility.py`). Danach: M12 Teil 2 (BW, HB, BE, SL, BY), M18, M6.

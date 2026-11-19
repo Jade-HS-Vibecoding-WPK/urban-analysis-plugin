@@ -166,7 +166,26 @@
     "admin_level": "Verwaltungsebene (OSM)",
     "operator": "Betreiber",
     "wheelchair": "Rollstuhlgerecht",
+    "healthcare": "Gesundheitswesen (OSM)",
     "heritage": "Denkmalschutz"
+  },
+
+  "erreichbarkeit": {
+    "_hinweis": "Erreichbarkeit Stufe 1, Luftlinie (E26, E34). Gemessen wird vom Mittelpunkt jedes Objekts der Ausgangs-Kategorien zum nächsten gewählten Ziel. Radien in Metern.",
+    "radien_m": [300, 500],
+    "ausgang_kategorien": ["Gebäude"],
+    "ziel_kategorien": ["Gesundheit", "Nahversorgung", "Bildung und Betreuung", "Freizeit und Grün", "ÖPNV-Haltestellen"],
+    "_hinweis_flaechen_als_ziele": "Flächen, die als Ziel zählen (über ihren Mittelpunkt): Objektart der Fläche → [Ziel-Kategorie, Unterart]. Viele Krankenhäuser, Schulen oder Parks sind in OSM nur als Fläche eingetragen.",
+    "flaechen_als_ziele": {
+      "Krankenhausgelände": ["Gesundheit", "Krankenhaus"],
+      "Schulgelände": ["Bildung und Betreuung", "Schule"],
+      "Kita": ["Bildung und Betreuung", "Kita"],
+      "Hochschulgelände": ["Bildung und Betreuung", "Hochschule"],
+      "Park": ["Freizeit und Grün", "Park"],
+      "Spielplatz": ["Freizeit und Grün", "Spielplatz"],
+      "Sportplatz": ["Freizeit und Grün", "Sportplatz"],
+      "Sportanlage": ["Freizeit und Grün", "Sportanlage"]
+    }
   },
 
   "profiles": [
@@ -353,7 +372,7 @@
       "requires_fields": ["osm_id", "other_tags"],
       "_hinweis_tags": "Diese Schlüssel werden aus other_tags als eigene Spalten gelesen (Adresse, Geschosszahl, Merkmale für die Kategorie).",
       "tags_field": "other_tags",
-      "tag_columns": ["addr:street", "addr:housenumber", "addr:postcode", "addr:city", "building:levels", "building:part", "building:material", "roof:shape", "roof:levels", "height", "start_date", "highway", "surface", "maxspeed", "lanes", "lit", "sidewalk", "cycleway", "railway", "water", "waterway", "natural", "public_transport", "boundary", "power", "operator", "wheelchair", "heritage", "sport", "amenity", "shop", "leisure", "landuse", "tourism", "historic", "office", "craft", "man_made", "barrier", "place"],
+      "tag_columns": ["addr:street", "addr:housenumber", "addr:postcode", "addr:city", "building:levels", "building:part", "building:material", "roof:shape", "roof:levels", "height", "start_date", "highway", "surface", "maxspeed", "lanes", "lit", "sidewalk", "cycleway", "railway", "water", "waterway", "natural", "public_transport", "boundary", "power", "operator", "wheelchair", "heritage", "sport", "healthcare", "amenity", "shop", "leisure", "landuse", "tourism", "historic", "office", "craft", "man_made", "barrier", "place"],
       "street_field": "addr:street",
       "house_number_field": "addr:housenumber",
       "_hinweis_tag_labels": "Verständliche Objektart für häufige OSM-Merkmale. Fehlt ein Eintrag, wird „Schlüssel=*“ genommen, sonst das Merkmal selbst (z. B. „shop=bakery“).",
@@ -519,8 +538,48 @@
           "default_rule": {"category": "Sonstige OSM-Linien", "layer_suffix": "sonstige"}
         },
         "points": {
-          "category": null,
-          "object_id_fields": [{"field": "osm_id", "prefix": "node/"}]
+          "_hinweis": "Ziele für die Erreichbarkeit (E22, E34): Kategorie = Gruppe, Objektart = Unterart. Die Reihenfolge der tag_fields entscheidet, welches Merkmal zählt, wenn ein Punkt mehrere hat.",
+          "tag_fields": ["amenity", "shop", "leisure", "healthcare", "highway", "railway", "public_transport"],
+          "object_id_fields": [{"field": "osm_id", "prefix": "node/"}],
+          "category_rules": [
+            {"category": "Gesundheit", "layer_suffix": "gesundheit", "values": ["amenity=hospital", "amenity=clinic", "amenity=doctors", "amenity=dentist", "amenity=pharmacy", "healthcare=*"]},
+            {"category": "Nahversorgung", "layer_suffix": "nahversorgung", "values": ["shop=supermarket", "shop=convenience", "shop=bakery", "shop=butcher", "shop=greengrocer", "shop=chemist", "amenity=marketplace"]},
+            {"category": "Bildung und Betreuung", "layer_suffix": "bildung", "values": ["amenity=school", "amenity=kindergarten", "amenity=childcare", "amenity=college", "amenity=university"]},
+            {"category": "Freizeit und Grün", "layer_suffix": "freizeit", "values": ["leisure=playground", "leisure=pitch", "leisure=sports_centre", "leisure=park", "amenity=library"]},
+            {"category": "ÖPNV-Haltestellen", "layer_suffix": "haltestellen", "values": ["highway=bus_stop", "public_transport=platform", "public_transport=stop_position", "railway=tram_stop", "railway=station", "railway=halt"]}
+          ],
+          "default_rule": {"category": "Sonstige OSM-Punkte", "layer_suffix": "sonstige"},
+          "tag_labels": {
+            "amenity=hospital": "Krankenhaus",
+            "amenity=clinic": "Klinik",
+            "amenity=doctors": "Arztpraxis",
+            "amenity=dentist": "Zahnarztpraxis",
+            "amenity=pharmacy": "Apotheke",
+            "healthcare=*": "Gesundheitseinrichtung",
+            "shop=supermarket": "Supermarkt",
+            "shop=convenience": "Lebensmittelladen",
+            "shop=bakery": "Bäckerei",
+            "shop=butcher": "Metzgerei",
+            "shop=greengrocer": "Obst- und Gemüseladen",
+            "shop=chemist": "Drogerie",
+            "amenity=marketplace": "Wochenmarkt",
+            "amenity=school": "Schule",
+            "amenity=kindergarten": "Kita",
+            "amenity=childcare": "Kinderbetreuung",
+            "amenity=college": "Hochschule",
+            "amenity=university": "Hochschule",
+            "leisure=playground": "Spielplatz",
+            "leisure=pitch": "Sportplatz",
+            "leisure=sports_centre": "Sportanlage",
+            "leisure=park": "Park",
+            "amenity=library": "Bibliothek",
+            "highway=bus_stop": "Bushaltestelle",
+            "public_transport=platform": "Haltestelle",
+            "public_transport=stop_position": "Haltepunkt",
+            "railway=tram_stop": "Straßenbahnhaltestelle",
+            "railway=station": "Bahnhof",
+            "railway=halt": "Bahnhaltepunkt"
+          }
         }
       }
     }

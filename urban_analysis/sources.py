@@ -14,6 +14,7 @@ Person Windows in PR #34).
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -46,6 +47,14 @@ class DownloadRequest:
     licence_url: str
     attribution: str  # pre-fills "Datenquelle" (S8, E28)
     timeout_s: int
+    # ALKIS (M10b): layer in the GeoPackage, e.g. "GebaeudeBauwerk"; one
+    # layer can come in several parts (tiles) that are joined in QGIS,
+    # dropping objects whose ``id_field`` value was already written.
+    layer_name: str = ""
+    part: int = 1
+    parts: int = 1
+    max_features: int = 0  # a part with this many objects is probably cut off
+    id_field: str = ""
 
 
 @dataclass
@@ -202,6 +211,16 @@ def plan_osm_download(
     ``ValidationIssue`` and, for errors, without any download job.
     """
     catalog = catalog if catalog is not None else load_catalog()
+    plan = _checked_plan(study_area_wkt, buffer_meters, lonlat_box, catalog)
+    if not plan.blocked:
+        plan.requests.append(osm_request(tuple(lonlat_box), catalog, today))
+    return plan
+
+
+def _checked_plan(
+    study_area_wkt: str, buffer_meters: float, lonlat_box: Sequence[float], catalog: Mapping[str, Any]
+) -> SourcePlan:
+    """Plan with the size (E13) and the download rectangle checked, no jobs yet."""
     plan = SourcePlan()
     try:
         plan.area_km2 = download_box_km2(study_area_wkt, buffer_meters)
@@ -228,7 +247,179 @@ def plan_osm_download(
                 rule="Download-Rechteck in EPSG:4326 (West, Süd, Ost, Nord)",
             )
         )
+    return plan
+
+
+# --- ALKIS (M10b) -------------------------------------------------------------
+
+STATE_READY = "verfügbar"
+STATE_LATER = "kommt später"
+STATE_BLOCKED = "gesperrt"
+
+
+@dataclass(frozen=True)
+class StateInfo:
+    """One federal state for the choice in step 3 (the user picks it, E11)."""
+
+    code: str  # "NI"
+    name: str  # "Niedersachsen"
+    status: str  # STATE_READY, STATE_LATER or STATE_BLOCKED
+    note: str = ""  # why not ready, in plain language
+
+
+def alkis_states(catalog: Optional[Mapping[str, Any]] = None) -> List[StateInfo]:
+    """All 16 states, sorted by name, with whether ALKIS can be loaded there.
+
+    Ready: the format has a profile in ``mapping_rules.json`` (M12). Later:
+    another format (Berlin, Bavaria …). Blocked: licence not confirmed (E28).
+    """
+    catalog = catalog if catalog is not None else load_catalog()
+    ready = set(catalog["alkis_abfrage"]["fertige_formate"])
+    formats = catalog.get("alkis_formate", {})
+    states = []
+    for code, entry in catalog["alkis"].items():
+        if code.startswith("_"):
+            continue
+        if entry.get("gesperrt"):
+            status, note = STATE_BLOCKED, str(entry["gesperrt"])
+        elif entry.get("format") in ready and entry.get("dienst") == "wfs":
+            status, note = STATE_READY, ""
+        else:
+            name = formats.get(entry.get("format"), {}).get("name", entry.get("format", ""))
+            status, note = STATE_LATER, f"Eigenes Datenformat ({name}), wird noch eingebaut."
+        states.append(StateInfo(code, entry["land"], status, note))
+    return sorted(states, key=lambda state: state.name)
+
+
+def split_box(box: LonLatBox, tile_m: float) -> List[LonLatBox]:
+    """Cut the download rectangle into parts of about ``tile_m`` × ``tile_m``.
+
+    Only the rectangle is divided (degrees per metre at its middle); no data
+    is reprojected.
+    """
+    west, south, east, north = box
+    middle = math.radians((south + north) / 2)
+    width_m = (east - west) * 111_320 * math.cos(middle)
+    height_m = (north - south) * 110_574
+    columns = max(1, math.ceil(width_m / tile_m))
+    rows = max(1, math.ceil(height_m / tile_m))
+    step_x, step_y = (east - west) / columns, (north - south) / rows
+    return [
+        (west + column * step_x, south + row * step_y, west + (column + 1) * step_x, south + (row + 1) * step_y)
+        for row in range(rows)
+        for column in range(columns)
+    ]
+
+
+def wfs_getfeature_url(url: str, type_name: str, box: LonLatBox, srs: str) -> str:
+    """WFS 2.0 GetFeature for ``box`` given in EPSG:4326 (lat/lon order).
+
+    The service selects in EPSG:4326 and delivers in its own ``srs``; QGIS
+    converts to the project CRS afterwards (the pipeline never reprojects).
+    """
+    west, south, east, north = box
+    code = srs.split(":")[-1]
+    return (
+        f"{url}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES={type_name}"
+        f"&SRSNAME=urn:ogc:def:crs:EPSG::{code}"
+        f"&BBOX={south:.6f},{west:.6f},{north:.6f},{east:.6f},urn:ogc:def:crs:EPSG::4326"
+    )
+
+
+def alkis_requests(
+    state: str, box: LonLatBox, catalog: Mapping[str, Any], today: Optional[date] = None
+) -> List[DownloadRequest]:
+    """WFS jobs for one ready state: per layer (buildings, land use, parcels)
+    one job per tile of the download rectangle."""
+    entry = catalog["alkis"][state]
+    settings = catalog["alkis_abfrage"]
+    fmt = catalog["alkis_formate"][entry["format"]]
+    day = (today or date.today()).isoformat()
+    tiles = split_box(box, float(settings["kachel_m"]))
+    attribution = str(entry["quellenvermerk"]).replace("{jahr}", day[:4])
+    id_field = fmt.get("felder", {}).get("objekt_id", "")
+    requests = []
+    for layer in settings["ebenen"]:
+        if layer not in entry.get("inhalt", ()) or layer not in fmt.get("layer", {}):
+            continue
+        type_name = fmt["layer"][layer]
+        layer_name = type_name.split(":")[-1]
+        for number, tile in enumerate(tiles, start=1):
+            requests.append(
+                DownloadRequest(
+                    source_kind="ALKIS",
+                    url=wfs_getfeature_url(entry["url"], type_name, tile, entry["crs"]),
+                    query="",
+                    delivery_crs=entry["crs"],
+                    raw_file_name=settings["rohdatei"].format(
+                        land=state, ebene=layer_name, teil=f"{number:02d}", datum=day
+                    ),
+                    geopackage_name=settings["geopackage"].format(land=state, datum=day),
+                    licence=entry["lizenz"],
+                    licence_url=LICENCE_URLS.get(entry["lizenz"], ""),
+                    attribution=attribution,
+                    timeout_s=int(settings["zeitlimit_s"]),
+                    layer_name=layer_name,
+                    part=number,
+                    parts=len(tiles),
+                    max_features=int(settings["max_objekte_je_abfrage"]),
+                    id_field=id_field,
+                )
+            )
+    return requests
+
+
+LICENCE_URLS = {
+    "CC-BY-4.0": "https://creativecommons.org/licenses/by/4.0/deed.de",
+    "dl-de/by-2-0": "https://www.govdata.de/dl-de/by-2-0",
+    "dl-de/zero-2-0": "https://www.govdata.de/dl-de/zero-2-0",
+}
+
+
+def plan_alkis_download(
+    study_area_wkt: str,
+    buffer_meters: float,
+    lonlat_box: Sequence[float],
+    state: str,
+    *,
+    catalog: Optional[Mapping[str, Any]] = None,
+    today: Optional[date] = None,
+) -> SourcePlan:
+    """Check the size (E13) and build the ALKIS jobs for the chosen state.
+
+    States that are not ready get a visible hint and no jobs; the plugin then
+    works with OSM (E6). Never Flurstücke in Bavaria (E28): Bavaria is not a
+    WFS state, so it gets no jobs at all.
+    """
+    catalog = catalog if catalog is not None else load_catalog()
+    plan = _checked_plan(study_area_wkt, buffer_meters, lonlat_box, catalog)
     if plan.blocked:
         return plan
-    plan.requests.append(osm_request(tuple(lonlat_box), catalog, today))
+    info = next((s for s in alkis_states(catalog) if s.code == state), None)
+    if info is None:
+        plan.issues.append(
+            ValidationIssue(
+                code="alkis-unknown-state",
+                message=f"Unbekanntes Bundesland „{state}“. Bitte ein Land aus der Liste wählen.",
+                severity="error",
+                rule="Bundesland aus dem Quellen-Katalog",
+            )
+        )
+        return plan
+    if info.status != STATE_READY:
+        plan.issues.append(
+            ValidationIssue(
+                code="alkis-not-available",
+                message=(
+                    f"ALKIS für {info.name} "
+                    + ("ist gesperrt" if info.status == STATE_BLOCKED else "kommt später")
+                    + f": {info.note} Das Plugin verwendet OSM."
+                ),
+                severity="warning",
+                rule="ALKIS je Bundesland (E6, E28)",
+                action="Mit OSM weiterarbeiten oder einen eigenen ALKIS-Export als Datei laden.",
+            )
+        )
+        return plan
+    plan.requests.extend(alkis_requests(state, tuple(lonlat_box), catalog, today))
     return plan
