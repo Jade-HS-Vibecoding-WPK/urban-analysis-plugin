@@ -73,3 +73,29 @@ def test_summary_line_counts_layers_and_hints_with_correct_grammar():
     assert text == "1 Layer geladen · 1 Fehler · 4 Warnungen · 1 Info"
     assert severity_label("warning", 1) == "1 Warnung"
     assert severity_label("info", 0) == "0 Infos"
+
+
+def test_same_objects_in_alkis_and_osm_are_decided_in_step_6():
+    issue = ValidationIssue("cross-source-duplicate", "Gebäude: 841 Objekte …", severity="warning",
+                            requires_confirmation=True)
+    flow = make_workflow([issue])
+    assert not flow.needs_review_confirmation(issue)
+    assert flow.open_review_confirmations() == ()
+
+
+def test_the_same_hint_from_several_sources_is_shown_once():
+    from urban_analysis.user_guidance import merge_same_hints
+
+    hints = [
+        ValidationIssue("missing-source", "OpenStreetMap – Datenquelle fehlt: unbekannt.", severity="info"),
+        ValidationIssue("other", "OpenStreetMap – Gebäude: 3 ohne Adresse.", severity="info"),
+        ValidationIssue("missing-source", "ALKIS Niedersachsen – Datenquelle fehlt: unbekannt.",
+                        severity="info"),
+        ValidationIssue("plain", "Ohne Quelle davor.", severity="info"),
+    ]
+    merged = merge_same_hints(hints)
+    assert [(text, len(members)) for text, members in merged] == [
+        ("Datenquelle fehlt: unbekannt. (betrifft: OpenStreetMap, ALKIS Niedersachsen)", 2),
+        ("OpenStreetMap – Gebäude: 3 ohne Adresse.", 1),
+        ("Ohne Quelle davor.", 1),
+    ]

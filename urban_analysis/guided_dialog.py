@@ -106,7 +106,8 @@ from .theme import (
 from .ui_contract import UI_LABELS
 from .ui.layer_icons import LAYER_ICONS, icon_key
 from .user_guidance import (
-    DECIDED_IN_HARMONIZATION,
+    DECIDED_LATER,
+    merge_same_hints,
     SEVERITY_LABELS,
     SEVERITY_ORDER,
     describe_group,
@@ -710,6 +711,7 @@ def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_dat
     return None  # download OSM/ALKIS, load the own file, all in one run
 
 
+REVIEW_LATER_TITLE = "Wird in Schritt 6 entschieden"
 SOURCES_TITLE = "Gleiche Objekte aus mehreren Quellen"
 SOURCES_INTRO = (
     "Manche Objekte gibt es in ALKIS und in OSM, z. B. dasselbe Gebäude. Wähle je "
@@ -2548,27 +2550,41 @@ def _create_dock(plugin):
         groups = flow.issues_by_severity()
         if not any(groups.values()):
             page.layout.addWidget(QLabel("Keine Prüfhinweise."))
+        later = []  # decided in step 6: one folded section at the end
         for severity in SEVERITY_ORDER:
-            issues = groups[severity]
+            issues = [issue for issue in groups[severity] if issue.code not in DECIDED_LATER]
+            later.extend((severity, issue) for issue in groups[severity] if issue.code in DECIDED_LATER)
             if not issues:
                 continue
+            entries = merge_same_hints(issues)
+            # count every hint (as in the line above), merged ones show once
             title = f"{SEVERITY_LABELS[severity][1]} ({len(issues)})"
             group_layout = choice_with_panel(page, f"review_{severity}", title)
-            for issue in issues:
-                group_layout.addWidget(issue_card(flow, severity, issue))
-            page.widgets[f"review_{severity}_button"].setChecked(True)
+            for text, members in entries:
+                group_layout.addWidget(issue_card(flow, severity, members, text))
+            # open: errors, and warnings with something still to confirm
+            to_confirm = any(flow.needs_review_confirmation(issue) and issue.confirmed is not True
+                             for issue in issues)
+            if severity == "error" or to_confirm:
+                page.widgets[f"review_{severity}_button"].setChecked(True)
+        if later:
+            group_layout = choice_with_panel(page, "review_later", f"{REVIEW_LATER_TITLE} ({len(later)})")
+            for severity, issue in later:
+                group_layout.addWidget(issue_card(flow, severity, [issue], issue.message))
 
-    def issue_card(flow, severity, issue):
+    def issue_card(flow, severity, members, message):
+        """One hint (or several merged ones with the same text) as a card."""
+        issue = members[0]
         card = QFrame()
         set_role(card, f"issue-{severity}")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 6, 8, 6)
-        short, more = split_summary(issue.message, getattr(issue, "details", None))
+        short, more = split_summary(message, getattr(issue, "details", None))
         text = QLabel(short)
         text.setWordWrap(True)
         key = issue_icon_key(flow, issue)
         card_layout.addWidget(with_icon(key, text) if key else text)
-        if issue.code in DECIDED_IN_HARMONIZATION:
+        if issue.code in DECIDED_LATER:
             step6 = QLabel("Entscheidung in Schritt 6 „Harmonisierung“")
             step6.setWordWrap(True)
             set_role(step6, "hint")
@@ -2600,11 +2616,12 @@ def _create_dock(plugin):
             card_layout.addWidget(more_label)
         if flow.needs_review_confirmation(issue):
             confirm = QCheckBox("Gelesen und bestätigt")
-            confirm.setChecked(issue.confirmed is True)
+            confirm.setChecked(all(member.confirmed is True for member in members))
             confirm.setCursor(Qt.PointingHandCursor)
 
-            def toggled(checked, issue=issue):
-                flow.confirm_issue(issue, checked)
+            def toggled(checked, members=members):
+                for member in members:  # merged hints are confirmed together
+                    flow.confirm_issue(member, checked)
                 dock.clear_message()
 
             confirm.toggled.connect(toggled)
