@@ -8,6 +8,7 @@ Pages 1-3 (Projekt-CRS, Untersuchungsgebiet, Daten laden) work without a
 they always reflect the data that is currently loaded.
 """
 
+import dataclasses
 import os
 import re
 import tempfile
@@ -30,6 +31,7 @@ from .data_pipeline import (
     GeoPackageImportError,
     apply_column_decisions,
     apply_data_source,
+    combine_source_layers,
     default_column_decisions,
 )
 from .accessibility_view import (
@@ -658,14 +660,24 @@ def overview_rows(flow, area_ha, names):
     )
 
 
+def shown_result(result):
+    """The result as the result layers show it: one layer per category and
+    geometry instead of one per source, e.g. one „Gebäude“ from ALKIS and
+    OSM (``combine_source_layers``, #61).  Returns a copy; ``result`` keeps
+    its layers per source for steps 4–6.  (Vertretung Mac, 19.11.2026.)"""
+    layers, records = combine_source_layers(result.layers, result.harmonized_records)
+    return dataclasses.replace(result, layers=layers, harmonized_records=records)
+
+
 def planned_layer_rows(flow, names):
     """One row per result layer that will be created, with its object count
     and its icon key as third element."""
+    shown = shown_result(flow.result)
     counts = {}
-    for record in flow.result.harmonized_records:
+    for record in shown.harmonized_records:
         counts[record.layer_id] = counts.get(record.layer_id, 0) + 1
     rows = []
-    selected = flow.result.selected_layers()
+    selected = shown.selected_layers()
     unique = result_layer_names(selected, names.layer)
     for descriptor in selected:
         name = unique[descriptor.layer_id]
@@ -3726,7 +3738,7 @@ def _create_dock(plugin):
             details = collapsible(area, "layers_done",
                                   f"Angelegte Ergebnis-Layer ({len(dock.last_reports)})")
             details.addWidget(summary_card("Angelegte Ergebnis-Layer", result_rows(
-                dock.last_reports, {d.layer_id: d.category for d in flow.result.layers})))
+                dock.last_reports, {d.layer_id: d.category for d in shown_result(flow.result).layers})))
             return
         area_hint(area, LAYERS_INTRO)
         planned = planned_layer_rows(flow, names)
@@ -3808,9 +3820,12 @@ def _create_dock(plugin):
             readable_layer = None
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            layer_objects, reports = build_result_layers(flow.result, selected, readable_layer)
+            # one layer per category instead of one per source (#61)
+            shown = shown_result(flow.result)
+            shown_selected = shown.selected_layers()
+            layer_objects, reports = build_result_layers(shown, shown_selected, readable_layer)
             # E33: map colours per category; buildings and lines on top of areas
-            categories = {d.layer_id: d.category for d in selected}
+            categories = {d.layer_id: d.category for d in shown_selected}
             style = draft.get("map_style", DEFAULT_MAP_STYLE)
             for layer_id, layer in layer_objects.items():
                 apply_style(layer, categories.get(layer_id), style)
@@ -3864,7 +3879,8 @@ def _create_dock(plugin):
             # distance columns into the buildings that are already in the map
             values = distance_columns(records, list(targets))
             filled = missing = 0
-            origin_ids = {d.layer_id for d in flow.result.layers if d.category == "Gebäude"}
+            origin_ids = {d.layer_id for d in shown_result(flow.result).layers
+                          if d.category == "Gebäude"}
             for layer_id, layer in (plugin.result_layers or {}).items():
                 if layer_id not in origin_ids:
                     continue

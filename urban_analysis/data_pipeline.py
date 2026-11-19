@@ -1494,11 +1494,17 @@ def _add_source(
     # The download request knows where the data come from (attribution): it
     # fills empty 'source' fields, so "Datenquelle fehlt" is not needed.
     attribution = source.attribution.strip()
+    # An own file has no attribution; it names the file instead, so its
+    # objects never inherit the Datenquelle of a download (e.g. the OSM
+    # notice pre-filled in step 8) through apply_data_source.
+    record_source = attribution or (
+        f"Eigene Datei: {Path(source.path).name}" if source.source_kind == "Eigene Datei" else ""
+    )
 
     def with_source(attributes: Mapping[str, Any]) -> Mapping[str, Any]:
-        if not attribution or attributes.get("source") not in (None, ""):
+        if not record_source or attributes.get("source") not in (None, ""):
             return attributes
-        return {**attributes, "source": attribution}
+        return {**attributes, "source": record_source}
 
     for layer in part.layers:
         result.layers.append(replace(layer, layer_id=new_id(layer.layer_id), source_kind=source.source_kind))
