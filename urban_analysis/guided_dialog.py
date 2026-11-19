@@ -14,12 +14,22 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-from .contracts import MVP_DEFAULT_BUFFER_METERS, MVP_UI_STEPS
+from .contracts import (
+    COLUMN_DROP,
+    COLUMN_KEEP,
+    COLUMN_TARGET,
+    CORE_FIELDS,
+    MVP_DEFAULT_BUFFER_METERS,
+    MVP_UI_STEPS,
+    ColumnDecision,
+)
 from .data_pipeline import (
     TARGET_FIELDS,
     GeoPackageImporter,
     GeoPackageImportError,
+    apply_column_decisions,
     apply_data_source,
+    default_column_decisions,
 )
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import (
@@ -247,6 +257,76 @@ SAME_RUN_QUESTION = (
     "Seit der letzten Verarbeitung hat sich nichts geändert – das Ergebnis wäre "
     "gleich.\n\nTrotzdem eine neue Gruppe mit denselben Ergebnis-Layern erzeugen?"
 )
+
+
+# Step 5 (W14, E29/E30): columns of the input layers
+STEP5_GUIDE = (
+    "Was siehst du? Alle Spalten deiner Daten, je Layer, mit lesbarem Namen und Beispielen.",
+    "Was entscheidest du? Je Spalte: in ein Kernfeld übernehmen (z. B. Adresse), "
+    "als eigene Spalte behalten oder weglassen.",
+    "Was passiert dann? Die Ergebnis-Layer enthalten genau diese Spalten. Die "
+    "Vorauswahl passt meistens – du musst nur ändern, was du anders willst.",
+)
+MORE_COLUMNS_LABEL = "Nicht geladen (nicht lesbar)"
+COLUMN_KEEP_HELP = "Die Spalte kommt unter ihrem lesbaren Namen in die Ergebnis-Layer."
+COLUMN_DROP_HELP = "Die Spalte kommt nicht in die Ergebnis-Layer."
+COLUMNS_SAVED_TEXT = "Spaltenauswahl übernommen. Sie gilt bei „Verarbeitung starten“."
+
+
+def column_choices():
+    """(value, text, help) for the choice list of a column."""
+    try:
+        from .mapping import readable_target_field, target_field_explanation
+    except ImportError:  # pragma: no cover
+        readable_target_field, target_field_explanation = (lambda f: f), (lambda f: None)
+    choices = [(f"target:{f}", f"→ {readable_target_field(f)}", target_field_explanation(f))
+               for f in CORE_FIELDS]
+    choices.append(("keep", "Als eigene Spalte behalten", COLUMN_KEEP_HELP))
+    choices.append(("drop", "Weglassen", COLUMN_DROP_HELP))
+    return choices
+
+
+def choice_help(value):
+    for choice_value, _text, help_text in column_choices():
+        if choice_value == value:
+            return help_text
+    return None
+
+
+def decision_value(decision):
+    """ColumnDecision -> value of the choice list ('target:address', 'keep', 'drop')."""
+    if decision is None:
+        return "drop"
+    if decision.action == COLUMN_TARGET:
+        return f"target:{decision.target_field}"
+    return decision.action
+
+
+def decision_from_value(column, value):
+    """Value of the choice list -> ColumnDecision for the pipeline."""
+    if value and value.startswith("target:"):
+        return ColumnDecision(column.layer_id, column.source_field, COLUMN_TARGET,
+                              target_field=value.split(":", 1)[1])
+    if value == "keep":
+        return ColumnDecision(column.layer_id, column.source_field, COLUMN_KEEP,
+                              name=column.readable_name or column.source_field)
+    return ColumnDecision(column.layer_id, column.source_field, COLUMN_DROP)
+
+
+def column_decisions_of(flow):
+    """Choices made earlier in step 5, else the pipeline's preselection."""
+    decisions = getattr(flow, "column_decisions", None) or default_column_decisions(flow.result.columns)
+    return {(d.layer_id, d.source_field): d for d in decisions}
+
+
+def column_header_text(layer_name, columns, decisions):
+    """'Gebäude – 4 Kernfelder, 6 behalten, 12 nicht geladen'."""
+    counts = {"target": 0, "keep": 0, "drop": 0}
+    for column in columns:
+        decision = decisions.get((column.layer_id, column.source_field))
+        counts[decision.action if decision else "drop"] += 1
+    return (f"{layer_name} – {counts['target']} Kernfelder, {counts['keep']} behalten, "
+            f"{counts['drop']} nicht geladen")
 
 
 def crs_mismatch_text(qgis_crs, plugin_crs):
@@ -2066,8 +2146,109 @@ def _create_dock(plugin):
             if button is not None and not button.isChecked():
                 button.setChecked(True)
 
-    # 5 Attributzuordnung: one fold-out per layer, "column -> target field"
+    # 5 Attributzuordnung (W14): every column of every layer, with readable
+    # name, examples and one choice: core field / keep / leave out.
     def build_mapping(page):
+        flow = workflow()
+        if not flow.result.columns:
+            return build_mapping_legacy(page)  # older pipeline result: old view
+        page.widgets["columns_view"] = True
+        for line in STEP5_GUIDE:
+            label = QLabel(line)
+            label.setWordWrap(True)
+            set_role(label, "hint")
+            page.layout.addWidget(label)
+        names = readable_names()
+        decisions = column_decisions_of(flow)
+        by_layer = {}
+        for column in flow.result.columns:
+            by_layer.setdefault(column.layer_id, []).append(column)
+        inputs = []
+        for number, (layer_id, columns) in enumerate(by_layer.items()):
+            shown = [c for c in columns if c.known or c.suggested_target]
+            hidden = [c for c in columns if not (c.known or c.suggested_target)]
+            panel = collapsible(
+                page, f"cols_{number}",
+                f"{names.layer(layer_id)} ({len(columns)} Spalten)",
+                layer_icon_key(flow, layer_id))
+            counts = QLabel(column_header_text("Vorauswahl", columns, decisions))
+            counts.setWordWrap(True)
+            set_role(counts, "hint")
+            panel.addWidget(counts)
+            for column in shown:
+                inputs.append(column_row(panel, column, decisions))
+            if hidden:
+                more = QWidget()
+                more_layout = QVBoxLayout(more)
+                more_layout.setContentsMargins(0, 0, 0, 0)
+                more.hide()
+                toggle = QPushButton(f"{MORE_COLUMNS_LABEL} ({len(hidden)}) ▸")
+                toggle.setFlat(True)
+                toggle.setCursor(Qt.PointingHandCursor)
+                toggle.setStyleSheet("text-align: left; padding: 0; border: none; "
+                                     "background: transparent; text-decoration: underline;")
+
+                def flip(_c=False, box=more, button=toggle, count=len(hidden)):
+                    box.setVisible(not box.isVisible())
+                    arrow = "▾" if box.isVisible() else "▸"
+                    button.setText(f"{MORE_COLUMNS_LABEL} ({count}) {arrow}")
+                    QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+                toggle.clicked.connect(flip)
+                panel.addWidget(toggle)
+                for column in hidden:
+                    inputs.append(column_row(more_layout, column, decisions))
+                panel.addWidget(more)
+        page.widgets["column_inputs"] = inputs
+        guard_wheel(page.widget)
+
+    def column_row(layout, column, decisions):
+        """One column: readable name, technical name, examples and the choice."""
+        title = QLabel(f"<b>{column.readable_name or column.source_field}</b>"
+                       f"  <span style='color:gray'>({column.source_field})</span>")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        if column.examples:
+            examples = QLabel("z. B. " + ", ".join(f"„{e}“" for e in column.examples[:3]))
+            examples.setWordWrap(True)
+            set_role(examples, "hint")
+            layout.addWidget(indented(examples))
+        choice = QComboBox()
+        for value, text, help_text in column_choices():
+            choice.addItem(text, value)
+            if help_text:
+                choice.setItemData(choice.count() - 1, help_text, Qt.ToolTipRole)
+        current = decision_value(decisions.get((column.layer_id, column.source_field)))
+        choice.setCurrentIndex(max(choice.findData(current), 0))
+        info = QLabel("ⓘ")
+        info.setCursor(Qt.WhatsThisCursor)
+
+        def explain(_i=0, combo=choice, label=info):
+            label.setToolTip(choice_help(combo.currentData()) or COLUMN_KEEP_HELP)
+
+        choice.currentIndexChanged.connect(explain)
+        explain()
+        row = QHBoxLayout()
+        row.setContentsMargins(INDENT_PX, 0, 0, 6)
+        row.addWidget(choice, 1)
+        row.addWidget(info)
+        layout.addLayout(row)
+        return column, choice
+
+    def validate_columns(page):
+        flow = workflow()
+        decisions = [decision_from_value(column, combo.currentData())
+                     for column, combo in page.widgets["column_inputs"]]
+        try:
+            apply_column_decisions([], flow.result.columns, decisions)  # checks doubles
+        except ValueError as error:
+            open_sections(page)
+            return reject(error_text(error))
+        flow.column_decisions = decisions
+        dock.next_message = COLUMNS_SAVED_TEXT
+        return True
+
+    def build_mapping_legacy(page):
         flow = workflow()
         names = readable_names()
         intro = QLabel(MAPPING_INTRO)
@@ -2120,6 +2301,8 @@ def _create_dock(plugin):
         page.widgets["inputs"] = inputs
 
     def validate_mapping(page):
+        if page.widgets.get("columns_view"):
+            return validate_columns(page)
         flow = workflow()
         decisions = {}
         for suggestion, accepted, target in page.widgets["inputs"]:
@@ -2528,6 +2711,10 @@ def _create_dock(plugin):
             # Current decisions of step 5 (and step 6) on the data (S5),
             # then the data source into empty 'source' fields (S8).
             flow.apply_attribute_decisions()
+            if flow.result.columns:  # W14: the column choices of step 5
+                flow.result.harmonized_records = apply_column_decisions(
+                    flow.result.harmonized_records, flow.result.columns,
+                    getattr(flow, "column_decisions", None))
             flow.result.harmonized_records = apply_data_source(
                 flow.result.harmonized_records, output.data_source)
         except ValueError as error:

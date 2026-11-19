@@ -33,6 +33,23 @@ def result_field_specs() -> Tuple[Tuple[str, str], ...]:
     return tuple(specs)
 
 
+def extra_field_names(records) -> Dict[str, str]:
+    """Kept source columns of a layer: {name in the records: field name}.
+
+    Order of first appearance; a name that clashes with a target field gets
+    the prefix 'Quelle: ' so nothing is overwritten."""
+    names: Dict[str, str] = {}
+    used = {name.casefold() for name in TARGET_FIELDS}
+    for record in records:
+        for key in (getattr(record, "extra_attributes", None) or {}):
+            if key in names:
+                continue
+            field_name = key if key.casefold() not in used else f"Quelle: {key}"
+            used.add(field_name.casefold())
+            names[key] = field_name
+    return names
+
+
 def field_value(kind: str, value):
     """Value for a result field; empty values stay NULL instead of ''."""
     if value in (None, ""):
@@ -191,7 +208,12 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
         layer = QgsVectorLayer(f"{type_name}?crs={crs.authid()}", name, "memory")
         layer.setCrs(crs)
         provider = layer.dataProvider()
-        provider.addAttributes([QgsField(field_name, field_types[kind]) for field_name, kind in specs])
+        # W14/E29: source columns kept in step 5 follow the target fields
+        extra_names = extra_field_names(
+            record for record, _geometry in geometries)
+        provider.addAttributes(
+            [QgsField(field_name, field_types[kind]) for field_name, kind in specs]
+            + [QgsField(column, field_types["text"]) for column in extra_names.values()])
         layer.updateFields()
         if readable is not None:
             _set_field_aliases(layer, specs)
@@ -203,8 +225,10 @@ def build_result_layers(result, selected_layers: Iterable[LayerDescriptor], read
                 continue
             feature = QgsFeature(layer.fields())
             feature.setGeometry(geometry)
+            extra = getattr(record, "extra_attributes", None) or {}
             feature.setAttributes(
                 [field_value(kind, record.attributes.get(field_name)) for field_name, kind in specs]
+                + [field_value("text", extra.get(key)) for key in extra_names]
             )
             features.append(feature)
         ok, _added = provider.addFeatures(features)
