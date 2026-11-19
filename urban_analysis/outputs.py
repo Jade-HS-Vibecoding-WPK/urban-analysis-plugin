@@ -453,18 +453,46 @@ def scale_label(scale):
     return "passend zum Gebiet" if not scale else f"1:{int(round(scale)):,}".replace(",", ".")
 
 
-def layout_frames(width, height, orientation="quer"):
+# share of the page for the panel (legend, title …): grows when the legend
+# does not fit, the map gets a bit smaller instead of a cut legend
+PANEL_SHARES = {"quer": (0.28, 0.36, 0.44), "hoch": (0.26, 0.36, 0.46)}
+
+
+def panel_parts(panel, orientation, factor=1.0, subtitle=False):
+    """Inside the panel (x, y, w, h): where title, legend and the block with
+    north arrow, scale bar and sources go.  Landscape: one column, legend in
+    the middle.  Portrait: info left, legend right over the full height."""
+    px, py, pw, ph = panel
+    head = (13 + (8 if subtitle else 0)) * factor
+    bottom = 42 * factor
+    if orientation == "quer":
+        return {
+            "title": (px, py, pw),
+            "legend": (px, py + head, pw, max(20.0, ph - head - bottom)),
+            "info": (px, py + ph - bottom, pw, bottom),
+        }
+    gap = 6 * factor
+    info_w = min(pw * 0.38, 80 * factor)
+    return {
+        "title": (px, py, info_w),
+        "legend": (px + info_w + gap, py, pw - info_w - gap, ph),
+        "info": (px, py + max(head, ph - bottom), info_w, bottom),
+    }
+
+
+def layout_frames(width, height, orientation="quer", panel_share=None):
     """Rectangles (x, y, w, h) in mm for map and side panel; panel holds
     title, legend, north arrow, scale bar and sources."""
     margin = max(8.0, width * 0.03)
+    share = panel_share or PANEL_SHARES.get(orientation, PANEL_SHARES["quer"])[0]
     if orientation == "quer":
-        panel_w = (width - 3 * margin) * 0.28
+        panel_w = (width - 3 * margin) * share
         map_w = width - 3 * margin - panel_w
         return {
             "map": (margin, margin, map_w, height - 2 * margin),
             "panel": (2 * margin + map_w, margin, panel_w, height - 2 * margin),
         }
-    panel_h = (height - 3 * margin) * 0.26
+    panel_h = (height - 3 * margin) * share
     map_h = height - 3 * margin - panel_h
     return {
         "map": (margin, margin, width - 2 * margin, map_h),
@@ -609,40 +637,11 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
         item.attemptMove(QgsLayoutPoint(x, y, QgsUnitTypes.LayoutMillimeters))
         item.attemptResize(QgsLayoutSize(w, h, QgsUnitTypes.LayoutMillimeters))
 
-    # map
-    mx, my, mw, mh = frames["map"]
+    # legend first: its size decides how much room the map leaves (no overlap)
     map_item = QgsLayoutItemMap(layout)
     map_item.setFrameEnabled(True)
-    place(map_item, mx, my, mw, mh)
     map_item.setCrs(project.crs() if not crs_authid else area_layer.crs())
     map_item.setLayers([area_layer, buffer_layer] + list(layers))
-    extent = QgsRectangle(buffer_geometry.boundingBox())
-    extent.scale(1.05)
-    map_item.zoomToExtent(extent)
-    # a usual scale: the chosen one, or the next one that shows the whole area
-    scale = scale or fitting_scale(map_item.scale())
-    map_item.setScale(scale)
-
-    # side panel: title, subtitle, legend, north arrow, scale bar, sources
-    px, py, pw, ph = frames["panel"]
-    y = py
-    title_label = QgsLayoutItemLabel(layout)
-    title_label.setText(title or "Urban Analysis")
-    font = QFont()
-    font.setPointSizeF(16 * factor)
-    font.setBold(True)
-    title_label.setFont(font)
-    place(title_label, px, y, pw, 12 * factor)
-    y += 13 * factor
-    if subtitle:
-        sub = QgsLayoutItemLabel(layout)
-        sub.setText(subtitle)
-        font_sub = QFont()
-        font_sub.setPointSizeF(10 * factor)
-        sub.setFont(font_sub)
-        place(sub, px, y, pw, 7 * factor)
-        y += 8 * factor
-
     legend = QgsLayoutItemLegend(layout)
     legend.setTitle("Legende")
     legend.setAutoUpdateModel(False)
@@ -655,29 +654,66 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)
     legend.setReferencePoint(QgsLayoutItemLegend.UpperLeft)  # starts at the top, not centred
-    bottom_reserved = 42 * factor
-    legend_h = max(20.0, py + ph - y - bottom_reserved)
-    place(legend, px, y, pw, legend_h)
-    if not fit_legend(legend, pw, legend_h, factor):
+    layout.addLayoutItem(legend)
+    fits = False
+    for share in PANEL_SHARES[orientation]:
+        frames = layout_frames(width, height, orientation, share)
+        parts = panel_parts(frames["panel"], orientation, factor, bool(subtitle))
+        _lx, _ly, lw, lh = parts["legend"]
+        if fit_legend(legend, lw, lh, factor):
+            fits = True
+            break
+    if not fits:
         legend.setTitle(LEGEND_CUT_TITLE)  # never cut silently
-    legend.setResizeToContents(False)
-    place(legend, px, y, pw, legend_h)
 
-    base_y = py + ph - bottom_reserved
+    # map
+    mx, my, mw, mh = frames["map"]
+    place(map_item, mx, my, mw, mh)
+    extent = QgsRectangle(buffer_geometry.boundingBox())
+    extent.scale(1.05)
+    map_item.zoomToExtent(extent)
+    # a usual scale: the chosen one, or the next one that shows the whole area
+    scale = scale or fitting_scale(map_item.scale())
+    map_item.setScale(scale)
+
+    # panel: title, subtitle, legend, north arrow, scale bar, sources
+    tx, ty, tw = parts["title"]
+    title_label = QgsLayoutItemLabel(layout)
+    title_label.setText(title or "Urban Analysis")
+    font = QFont()
+    font.setPointSizeF(16 * factor)
+    font.setBold(True)
+    title_label.setFont(font)
+    place(title_label, tx, ty, tw, 12 * factor)
+    if subtitle:
+        sub = QgsLayoutItemLabel(layout)
+        sub.setText(subtitle)
+        font_sub = QFont()
+        font_sub.setPointSizeF(10 * factor)
+        sub.setFont(font_sub)
+        place(sub, tx, ty + 13 * factor, tw, 7 * factor)
+
+    lx, ly, lw, lh = parts["legend"]
+    legend.setResizeToContents(False)
+    legend.attemptMove(QgsLayoutPoint(lx, ly, QgsUnitTypes.LayoutMillimeters))
+    legend.attemptResize(QgsLayoutSize(lw, lh, QgsUnitTypes.LayoutMillimeters))
+
+    ix, iy, iw, ih = parts["info"]
     if north_arrow:
         arrow = QgsLayoutItemPicture(layout)
         arrow.setPicturePath(QgsSymbolLayerUtils.svgSymbolNameToPath(
             "arrows/NorthArrow_02.svg", project.pathResolver()))
-        place(arrow, px, base_y, 10 * factor, 10 * factor)
+        place(arrow, ix, iy, 10 * factor, 10 * factor)
     bar = QgsLayoutItemScaleBar(layout)
     bar.setStyle("Single Box")
     bar.setLinkedMap(map_item)
     bar.setUnits(QgsUnitTypes.DistanceMeters)
     bar.setNumberOfSegments(2)
     bar.setNumberOfSegmentsLeft(0)
+    bar.setMaximumBarWidth(max(20.0, iw - 15 * factor))
     bar.applyDefaultSize()
     layout.addLayoutItem(bar)
-    bar.attemptMove(QgsLayoutPoint(px + 13 * factor, base_y + 2 * factor, QgsUnitTypes.LayoutMillimeters))
+    bar.attemptMove(QgsLayoutPoint(ix + 13 * factor, iy + 2 * factor, QgsUnitTypes.LayoutMillimeters))
 
     info = QgsLayoutItemLabel(layout)
     info.setText(f"Maßstab {scale_label(scale)}\n\n"
@@ -685,7 +721,7 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     font_info = QFont()
     font_info.setPointSizeF(6.5 * factor)
     info.setFont(font_info)
-    place(info, px, base_y + 13 * factor, pw, bottom_reserved - 13 * factor)
+    place(info, ix, iy + 13 * factor, iw, ih - 13 * factor)
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -373,7 +373,7 @@ ACCESS_NO_TARGETS = ("In den geladenen Daten gibt es keine Ziele wie Haltestelle
                      "„OpenStreetMap“ laden.")
 ACCESS_RADII_HINT = ("Mehrere Radien mit Komma trennen. Jeder Radius wird als gestrichelte "
                      "Linie um die Ziele gezeichnet; gemessen wird die Luftlinie.")
-ACCESS_FILL_LABEL = "Flächen einfärben (Deckkraft 15 %)"
+ACCESS_FILL_LABEL = "Flächen einfärben"
 STEP5_QUESTION = (
     "Deine Daten haben viele Spalten. Sollen sie automatisch zugeordnet werden? "
     "Danach siehst du das Ergebnis als Tabelle und kannst bei Bedarf noch ändern."
@@ -3237,14 +3237,37 @@ def _create_dock(plugin):
             color_button.setColor(QColor(color))
             color_button.setFixedWidth(46)
             color_button.setToolTip(f"Farbe für Ring {number}")
-            tick.toggled.connect(spin.setEnabled)
+            radius_box = stepper(spin)
+            tick.toggled.connect(radius_box.setEnabled)
             row.addWidget(tick)
-            row.addWidget(spin)
+            row.addWidget(radius_box)
             row.addWidget(color_button)
             row.addStretch()
             rings_layout.addWidget(row_box)
             ring_widgets.append((tick, spin, color_button))
+            # only two rings at first (and every ticked one); more on request
+            row_box.setVisible(number <= 2 or on)
         page.widgets["access_rings"] = ring_widgets
+        more_rings = QPushButton("+ Weiteren Ring hinzufügen")
+        set_role(more_rings, "secondary")
+        more_rings.setCursor(Qt.PointingHandCursor)
+        rows = [rings_layout.itemAt(i).widget() for i in range(rings_layout.count())]
+
+        def show_next_ring():
+            hidden = [index for index, row in enumerate(rows) if row.isHidden()]
+            if hidden:
+                rows[hidden[0]].setVisible(True)
+                ring_widgets[hidden[0]][0].setChecked(True)  # a new ring is meant to be used
+            more_rings.setVisible(len(hidden) > 1)
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        more_rings.clicked.connect(show_next_ring)
+        more_rings.setVisible(any(row.isHidden() for row in rows))
+        more_row = QHBoxLayout()
+        more_row.setContentsMargins(0, 2, 0, 0)
+        more_row.addWidget(more_rings)
+        more_row.addStretch()
+        details_layout.addLayout(more_row)
         guide_box = QWidget()
         guide_layout = QVBoxLayout(guide_box)
         guide_layout.setContentsMargins(0, 4, 0, 0)
@@ -3296,12 +3319,20 @@ def _create_dock(plugin):
         opacity.setValue(int(round(choice.opacity * 100)))
         opacity.setToolTip("Deckkraft der Flächen zwischen den Ringen")
         opacity.setEnabled(choice.fill)
-        fill.toggled.connect(opacity.setEnabled)
+        opacity_box = stepper(opacity)
         fill_row.addWidget(fill)
-        fill_row.addWidget(QLabel("Deckkraft"))
-        fill_row.addWidget(opacity)
         fill_row.addStretch()
         details_layout.addWidget(fill_row_box)
+        # own line: in the narrow panel the row would cut text and buttons
+        opacity_row_box = QWidget()
+        opacity_row = QHBoxLayout(opacity_row_box)
+        opacity_row.setContentsMargins(INDENT_PX, 0, 0, 0)
+        opacity_row.addWidget(QLabel("Deckkraft der Flächen"))
+        opacity_row.addWidget(opacity_box)
+        opacity_row.addStretch()
+        details_layout.addWidget(opacity_row_box)
+        fill.toggled.connect(opacity_row_box.setEnabled)
+        opacity_row_box.setEnabled(choice.fill)
 
         if available:
             tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
@@ -3309,6 +3340,31 @@ def _create_dock(plugin):
         page.widgets.update(access_tree=tree, access_fill=fill, access_opacity=opacity,
                             access_available=bool(available))
         show_own_markers()
+
+    def stepper(spin):
+        """Number field with visible '−' and '+' buttons (the small arrows of
+        Qt are hard to see, in the pixel style not at all)."""
+        spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        box = QWidget()
+        layout = QHBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        for text, step, tip in (("−", -1, "kleiner"), ("+", 1, "größer")):
+            button = QPushButton(text)
+            set_role(button, "secondary")
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFixedWidth(34)
+            button.setStyleSheet("padding: 0px; min-width: 0px; font-weight: bold;")
+            button.setToolTip(f"{spin.singleStep()} {spin.suffix().strip()} {tip}".strip())
+            button.setAutoRepeat(True)  # held down: keeps counting
+            button.clicked.connect(lambda _c=False, s=step: spin.stepBy(s))
+            layout.addWidget(button)
+            if step < 0:
+                layout.addWidget(spin)
+        # switched on/off as a whole (box.setEnabled) by the caller
+        box.setEnabled(spin.isEnabled())
+        spin.setEnabled(True)
+        return box
 
     def ring_values(page):
         return tuple((tick.isChecked(), spin.value(), color.color().name())
