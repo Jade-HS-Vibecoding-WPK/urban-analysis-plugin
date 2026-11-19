@@ -11,7 +11,6 @@ from .contracts import (
     ValidationIssue,
 )
 from .data_pipeline import merge_confirmed_duplicates
-from .ui_contract import MVP_REQUIRED_TOPIC_SUGGESTIONS
 
 
 SEVERITY_ORDER = ("error", "warning", "info")
@@ -492,7 +491,12 @@ class GuidedWorkflow:
         *,
         confirm_missing: bool = False,
     ) -> Tuple[LayerDescriptor, ...]:
-        """Select the topic categories and mark only their layers for output."""
+        """Select the topic categories and mark only their layers for output.
+
+        Each topic suggests its own categories (``topic_preselection``); no
+        category is required any more (W19).  ``confirm_missing`` is kept
+        for older callers and has no effect.
+        """
         selected_categories = tuple(categories) if categories is not None else self.recognized_categories()
         unknown = set(selected_categories) - set(self.recognized_categories())
         if unknown:
@@ -500,34 +504,35 @@ class GuidedWorkflow:
                 "Diese Kategorien wurden in den Daten nicht erkannt: "
                 + ", ".join(sorted(unknown))
             )
-
-        missing = [category for category in MVP_REQUIRED_TOPIC_SUGGESTIONS if category not in selected_categories]
-        if missing and not confirm_missing:
+        if not selected_categories:
             raise ValueError(
-                "Für das Kartenthema fehlen diese Kategorien: "
-                + ", ".join(missing)
-                + ". Bitte „Unvollständig fortfahren“ ankreuzen, um bewusst ohne sie "
-                "weiterzumachen. Das Ergebnis wird dann als unvollständig markiert."
+                "Für das Kartenthema ist keine Kategorie angehakt. "
+                "Was tun: Mindestens eine Kategorie in der Liste anhaken."
             )
         self.result.selected_topic = topic
         for layer in self.result.layers:
             layer.selected_for_topic = bool(layer.category in selected_categories)
 
+        # earlier versions stored a confirmed 'missing category' warning
         self.result.issues = [
             issue for issue in self.result.issues if issue.code != "missing-topic-category"
         ]
-        if missing:
-            self.result.issues.append(
-                ValidationIssue(
-                    code="missing-topic-category",
-                    message="Fehlende Kategorien bestätigt: " + ", ".join(missing),
-                    severity="warning",
-                    requires_confirmation=True,
-                    confirmed=True,
-                    rule="MVP-Zielkategorien",
-                )
-            )
         return tuple(self.result.selected_layers())
+
+    def topic_preselection(self, topic: str) -> Optional[Tuple[str, ...]]:
+        """Categories pre-ticked in step 7 for ``topic``: the catalogue
+        suggestion, limited to categories found in the data (data order).
+
+        ``None`` when the catalogue has no suggestion for the topic; the UI
+        then says so instead of guessing.
+        """
+        try:
+            from .topics import topic_categories
+
+            suggested = set(topic_categories(topic))
+        except Exception:  # catalogue missing or topic unknown
+            return None
+        return tuple(c for c in self.recognized_categories() if c in suggested)
 
     def choose_output(
         self,

@@ -35,12 +35,11 @@ def test_guidance_confirms_mapping_and_selects_dynamic_categories():
     selected = workflow.select_topic(
         "Siedlungsstruktur",
         categories=("Gebäude", "Straßen"),
-        confirm_missing=True,
     )
 
     assert workflow.attribute_suggestions()[0].user_value == "building_type"
     assert [layer.layer_id for layer in selected] == ["b", "r"]
-    assert workflow.result.issues[0].code == "missing-topic-category"
+    assert workflow.result.issues == []
     assert workflow.result.buffer_meters == 250
 
 
@@ -57,13 +56,56 @@ def test_project_setup_rejects_invalid_buffer_and_exposes_contract_steps():
         )
 
 
-def test_missing_category_requires_explicit_confirmation():
+def test_topic_needs_no_fixed_categories_any_more():
+    # W19: 'Mobilität' without Grünflächen/Nutzungsflächen is fine
     workflow = GuidedWorkflow(make_result())
 
-    with pytest.raises(ValueError, match="fehlen diese Kategorien: Straßen") as error:
-        workflow.select_topic("Siedlungsstruktur", categories=("Gebäude",))
+    selected = workflow.select_topic("Mobilität", categories=("Straßen",))
 
-    assert "Unvollständig fortfahren" in str(error.value)
+    assert [layer.layer_id for layer in selected] == ["r"]
+    assert workflow.result.issues == []
+
+
+def test_topic_needs_at_least_one_category():
+    workflow = GuidedWorkflow(make_result())
+
+    with pytest.raises(ValueError, match="keine Kategorie angehakt") as error:
+        workflow.select_topic("Mobilität", categories=())
+
+    assert "Was tun" in str(error.value)
+
+
+def test_preselection_follows_the_topic_and_the_data(monkeypatch):
+    import urban_analysis.topics as topics
+
+    suggestions = {
+        "Mobilität": ("Straßen", "ÖPNV-Haltestellen"),
+        "Leer": ("Bahnstrecken",),
+    }
+
+    def fake(topic, path=None):
+        if topic not in suggestions:
+            raise ValueError(f"Unbekanntes Thema: {topic}")
+        return suggestions[topic]
+
+    monkeypatch.setattr(topics, "topic_categories", fake)
+    workflow = GuidedWorkflow(make_result())
+
+    # only categories that are in the data
+    assert workflow.topic_preselection("Mobilität") == ("Straßen",)
+    assert workflow.topic_preselection("Leer") == ()
+    assert workflow.topic_preselection("Unbekannt") is None
+
+
+def test_preselection_from_the_real_catalogue():
+    workflow = GuidedWorkflow(make_result())
+
+    assert workflow.topic_preselection("Mobilität & Erschließung") == ("Gebäude", "Straßen")
+    # names from the catalogue = names in the step-7 list
+    from urban_analysis.guided_dialog import topic_entries
+
+    for name, _description in topic_entries():
+        assert workflow.topic_preselection(name) is not None
 
 
 def test_output_plan_keeps_qgis_layers_and_describes_optional_exports():
@@ -71,7 +113,6 @@ def test_output_plan_keeps_qgis_layers_and_describes_optional_exports():
     workflow.select_topic(
         "Siedlungsstruktur",
         categories=("Gebäude", "Straßen"),
-        confirm_missing=True,
     )
     workflow.choose_output(
         save_cleaned_geopackage=True,
