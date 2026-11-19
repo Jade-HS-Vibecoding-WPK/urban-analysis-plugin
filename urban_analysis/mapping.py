@@ -217,6 +217,11 @@ class MappingRules:
     layer_labels: Mapping[str, str] = field(default_factory=dict)
     target_field_labels: Mapping[str, str] = field(default_factory=dict)
     target_field_explanations: Mapping[str, str] = field(default_factory=dict)
+    # Order of the kept source columns in the result layers ("spalten_
+    # reihenfolge"); columns not listed follow in the order of the source,
+    # columns listed under "ans_ende" come last.
+    column_order: Tuple[str, ...] = ()
+    column_order_last: Tuple[str, ...] = ()
 
     def profile_for(self, table_name: str, fields: Iterable[str]) -> Optional[LayerProfile]:
         available = set(fields)
@@ -342,6 +347,8 @@ def parse_mapping_rules(data: Mapping[str, Any]) -> MappingRules:
         _labels("layer_labels"),
         _labels("target_field_labels"),
         _labels("target_field_explanations"),
+        column_order=tuple(str(name) for name in (data.get("spalten_reihenfolge") or {}).get("zuerst", ())),
+        column_order_last=tuple(str(name) for name in (data.get("spalten_reihenfolge") or {}).get("ans_ende", ())),
     )
 
 

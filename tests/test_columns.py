@@ -76,7 +76,8 @@ def by_field(columns):
 
 def test_every_column_is_described_without_geometry_and_row_number(result):
     columns = by_field(result.columns_of("gebaeude"))
-    assert list(columns) == ["objid", "gfk__bez", "hnr", "anzahlgs", "xyz_intern"]
+    # readable order: address, properties, unknown columns, IDs last
+    assert list(columns) == ["hnr", "anzahlgs", "gfk__bez", "xyz_intern", "objid"]
     assert columns["hnr"].readable_name == "Hausnummer"
     assert columns["hnr"].examples == ("2", "4a")
     assert columns["gfk__bez"].suggested_target == "object_type"
@@ -213,3 +214,17 @@ def test_osm_object_id_column_is_reported_as_core_field_and_kept_intact(tmp_path
     assert {r.source_row_id: r.attributes["object_id"] for r in records} == before
     house = next(r for r in records if r.source_layer == "multipolygons" and r.source_row_id == 1)
     assert house.attributes["object_id"] == "way/11"
+
+
+def test_second_osm_id_column_is_not_taken_over_and_not_reported(tmp_path):
+    path = tmp_path / "osm.gpkg"
+    make_osm_geopackage(path)
+    result = import_osm(path)
+
+    areas = by_field(result.columns_of("multipolygons"))
+    assert not areas["osm_id"].known  # its number is already in Objekt-ID
+    hint = next(i for i in result.issues if i.code == "columns-not-loaded" and i.layer_id == "multipolygons")
+    assert "osm_id" not in hint.details
+    house = next(r for r in result.harmonized_records if r.source_layer == "multipolygons" and r.source_row_id == 1)
+    assert "OSM-ID" not in house.extra_attributes
+    assert list(house.extra_attributes)[:3] == ["Name", "Straße", "Hausnummer"]
