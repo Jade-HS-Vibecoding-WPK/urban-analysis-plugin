@@ -38,6 +38,7 @@ from .osm_download import (
     ensure_project_crs,
     lonlat_box,
     run_download,
+    unique_path,
 )
 from .sources import plan_osm_download
 from .outputs import (
@@ -48,6 +49,7 @@ from .outputs import (
     export_map_pdf,
     format_count,
     scale_label,
+    time_text,
     write_result_geopackage,
     result_group_name,
     result_layer_name,
@@ -257,6 +259,21 @@ SUMMARY_INTRO = (
 )
 DONE_TITLE = "Fertig ✓ – die Ergebnis-Layer sind in QGIS angelegt."
 RERUN_ACTION = "Erneut verarbeiten"
+REMAKE_PDF_LABEL = "PDF neu erzeugen"
+REMAKE_PDF_TOOLTIP = (
+    "Erzeugt das PDF mit dem aktuellen Stand in QGIS: nur sichtbare Layer der "
+    "Ergebnis-Gruppe, in ihrer Reihenfolge. Titel und Format stellst du in Schritt 8 ein."
+)
+REMAKE_QUESTION = (
+    "Das PDF wird mit den gerade sichtbaren Ergebnis-Layern neu erzeugt.\n\n"
+    "Soll die bisherige PDF-Datei überschrieben oder eine neue Datei angelegt werden?"
+)
+REMAKE_NO_GROUP_MESSAGE = (
+    "Die Ergebnis-Gruppe wurde in QGIS nicht gefunden. Bitte „Erneut verarbeiten“ klicken."
+)
+REMAKE_NO_LAYERS_MESSAGE = (
+    "In der Ergebnis-Gruppe ist kein Layer sichtbar. Bitte mindestens einen Layer einschalten."
+)
 SAME_RUN_QUESTION = (
     "Seit der letzten Verarbeitung hat sich nichts geändert – das Ergebnis wäre "
     "gleich.\n\nTrotzdem eine neue Gruppe mit denselben Ergebnis-Layern erzeugen?"
@@ -317,10 +334,54 @@ def decision_from_value(column, value):
     return ColumnDecision(column.layer_id, column.source_field, COLUMN_DROP)
 
 
+AUTO_COLUMNS_LABEL = "Automatisch zuordnen (empfohlen)"
+MANUAL_COLUMNS_LABEL = "Selbst wählen"
+# Kept by default whenever the data have them (user wish 19.11.)
+ALWAYS_KEEP = ("Geschosszahl", "Baujahr")
+
+
 def column_decisions_of(flow):
-    """Choices made earlier in step 5, else the pipeline's preselection."""
-    decisions = getattr(flow, "column_decisions", None) or default_column_decisions(flow.result.columns)
+    """Choices made earlier in step 5, else the pipeline's preselection
+    (plus ALWAYS_KEEP columns if they exist)."""
+    decisions = getattr(flow, "column_decisions", None)
+    if not decisions:
+        columns = {(c.layer_id, c.source_field): c for c in flow.result.columns}
+        decisions = []
+        for decision in default_column_decisions(flow.result.columns):
+            column = columns[(decision.layer_id, decision.source_field)]
+            if decision.action == COLUMN_DROP and column.readable_name in ALWAYS_KEEP:
+                decision = decision_from_value(column, "keep")
+            decisions.append(decision)
     return {(d.layer_id, d.source_field): d for d in decisions}
+
+
+def column_summary(columns, decisions):
+    """{'target': [...names], 'keep': [...], 'drop': [...]} for the overview."""
+    summary = {"target": [], "keep": [], "drop": []}
+    for column in columns:
+        decision = decisions.get((column.layer_id, column.source_field))
+        action = decision.action if decision else "drop"
+        if action == COLUMN_TARGET:
+            try:
+                from .mapping import readable_target_field
+                name = readable_target_field(decision.target_field)
+            except ImportError:  # pragma: no cover
+                name = decision.target_field
+        else:
+            name = column.readable_name or column.source_field
+        summary[action].append(name)
+    return summary
+
+
+def summary_lines(summary):
+    """Overview lines of one layer in step 5 (automatic mode)."""
+    lines = [
+        "Kernfelder: " + (", ".join(summary["target"]) or "–"),
+        "Behalten: " + (", ".join(summary["keep"]) or "–"),
+    ]
+    count = len(summary["drop"])
+    lines.append(f"Ignoriert: {count} technische {'Spalte' if count == 1 else 'Spalten'}")
+    return lines
 
 
 def column_header_text(layer_name, columns, decisions):
@@ -2168,6 +2229,53 @@ def _create_dock(plugin):
         by_layer = {}
         for column in flow.result.columns:
             by_layer.setdefault(column.layer_id, []).append(column)
+
+        # 1: automatic (overview only) or own choice (full list)
+        mode = getattr(flow, "column_mode", "auto")
+        auto = QRadioButton(AUTO_COLUMNS_LABEL)
+        manual = QRadioButton(MANUAL_COLUMNS_LABEL)
+        (auto if mode == "auto" else manual).setChecked(True)
+        mode_group = QButtonGroup(page.widget)
+        mode_group.addButton(auto)
+        mode_group.addButton(manual)
+        page.layout.addWidget(auto)
+        page.layout.addWidget(manual)
+        page.widgets["mode_group"] = mode_group
+
+        def switch(to_manual, open_layer=None):
+            flow.column_mode = "manual" if to_manual else "auto"
+            flow.column_open_layer = open_layer
+            dock._rebuild_current_page()
+
+        auto.toggled.connect(lambda on: on and mode != "auto" and switch(False))
+        manual.toggled.connect(lambda on: on and mode != "manual" and switch(True))
+        page.widgets["column_inputs"] = []
+        if mode == "auto":
+            # 2: one short card per layer: core fields, kept, ignored (+ change)
+            for number, (layer_id, columns) in enumerate(by_layer.items()):
+                summary = column_summary(columns, decisions)
+                card = QFrame()
+                set_role(card, "issue-info")
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(10, 6, 8, 6)
+                title = QLabel(f"<b>{names.layer(layer_id)}</b>")
+                card_layout.addWidget(with_icon(layer_icon_key(flow, layer_id), title))
+                for line in summary_lines(summary):
+                    text = QLabel(line)
+                    text.setWordWrap(True)
+                    if line.startswith("Ignoriert") and summary["drop"]:
+                        text.setToolTip(", ".join(summary["drop"]))  # names on hover
+                    card_layout.addWidget(text)
+                change = QPushButton("Ändern ▸")
+                change.setFlat(True)
+                change.setCursor(Qt.PointingHandCursor)
+                change.setStyleSheet("text-align: left; padding: 0; border: none; "
+                                     "background: transparent; text-decoration: underline;")
+                change.clicked.connect(lambda _c=False, n=number: switch(True, n))
+                card_layout.addWidget(change)
+                page.layout.addWidget(card)
+            page.widgets["auto_decisions"] = list(decisions.values())
+            return
         inputs = []
         for number, (layer_id, columns) in enumerate(by_layer.items()):
             shown = [c for c in columns if c.known or c.suggested_target]
@@ -2205,6 +2313,9 @@ def _create_dock(plugin):
                     inputs.append(column_row(more_layout, column, decisions))
                 panel.addWidget(more)
         page.widgets["column_inputs"] = inputs
+        opened = getattr(flow, "column_open_layer", None)
+        if opened is not None:
+            open_sections(page, [f"cols_{opened}"])
         guard_wheel(page.widget)
 
     def column_row(layout, column, decisions):
@@ -2242,8 +2353,11 @@ def _create_dock(plugin):
 
     def validate_columns(page):
         flow = workflow()
-        decisions = [decision_from_value(column, combo.currentData())
-                     for column, combo in page.widgets["column_inputs"]]
+        if "auto_decisions" in page.widgets:  # automatic: the preselection as shown
+            decisions = page.widgets["auto_decisions"]
+        else:
+            decisions = [decision_from_value(column, combo.currentData())
+                         for column, combo in page.widgets["column_inputs"]]
         try:
             apply_column_decisions([], flow.result.columns, decisions)  # checks doubles
         except ValueError as error:
@@ -2582,6 +2696,10 @@ def _create_dock(plugin):
         page.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
+        grey = QCheckBox("Umgebung außerhalb des Untersuchungsgebiets in Graustufen")
+        grey.setChecked(draft.setdefault("grey_outside", True))
+        grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
+        page.layout.addWidget(grey)
 
         output_choice(page, "geopackage", "Bereinigtes GeoPackage speichern",
                       draft["geopackage"])
@@ -2669,6 +2787,13 @@ def _create_dock(plugin):
                 "Angelegte Ergebnis-Layer",
                 result_rows(dock.last_reports,
                             {d.layer_id: d.category for d in flow.result.layers})))
+            if flow.result.output.create_pdf:
+                again = QPushButton(REMAKE_PDF_LABEL)
+                set_role(again, "secondary")
+                again.setCursor(Qt.PointingHandCursor)
+                again.setToolTip(REMAKE_PDF_TOOLTIP)
+                again.clicked.connect(remake_pdf)
+                page.layout.addWidget(again)
             if dock.last_saved:
                 # folded: the long file paths would take much room
                 files = collapsible(page, "saved_files", f"Gespeicherte Dateien ({len(dock.last_saved)})")
@@ -2734,8 +2859,10 @@ def _create_dock(plugin):
             # E33: map colours per category; buildings and lines on top of areas
             categories = {d.layer_id: d.category for d in selected}
             style = dock.output_draft.get("map_style", DEFAULT_MAP_STYLE)
+            grey_wkt = (flow.result.study_area_wkt
+                        if dock.output_draft.get("grey_outside", True) else None)
             for layer_id, layer in layer_objects.items():
-                apply_style(layer, categories.get(layer_id), style)
+                apply_style(layer, categories.get(layer_id), style, grey_wkt)
             layer_objects = dict(sorted(
                 layer_objects.items(),
                 key=lambda item: -draw_rank(categories.get(item[0]))))
@@ -2763,6 +2890,59 @@ def _create_dock(plugin):
         dock.mark_all_done()
         return False  # last step: stay here
 
+    def write_map_pdf(flow, path, layers):
+        """PDF map with the settings of step 8 (also used by 'PDF neu erzeugen')."""
+        draft = dock.output_draft
+        return export_map_pdf(
+            path, layers=layers,
+            study_area_wkt=flow.result.study_area_wkt,
+            buffer_meters=flow.result.buffer_meters,
+            crs_authid=flow.result.project_crs,
+            title=draft.get("pdf_title") or flow.result.selected_topic or "Siedlungsstruktur",
+            subtitle=draft.get("pdf_subtitle", ""),
+            data_source=flow.result.output.data_source,
+            page=draft.get("pdf_page", "A3"),
+            orientation=draft.get("pdf_orientation", "auto"),
+            scale=draft.get("pdf_scale") or None,
+            north_arrow=draft.get("pdf_north", True))
+
+    def remake_pdf():
+        """'PDF neu erzeugen': current layers in QGIS (visible ones, in their
+        order); ask whether to replace the file or make a new one."""
+        flow = workflow()
+        group = QgsProject.instance().layerTreeRoot().findGroup(dock.last_group_name or "")
+        if group is None:
+            return reject(REMAKE_NO_GROUP_MESSAGE)
+        layers = [node.layer() for node in group.findLayers()
+                  if node.isVisible() and node.layer() is not None]
+        if not layers:
+            return reject(REMAKE_NO_LAYERS_MESSAGE)
+        box = QMessageBox(dock)
+        box.setWindowTitle("PDF neu erzeugen")
+        box.setText(REMAKE_QUESTION)
+        same = box.addButton("Gleiche Datei überschreiben", QMessageBox.AcceptRole)
+        new = box.addButton("Neue Datei anlegen", QMessageBox.AcceptRole)
+        box.addButton("Abbrechen", QMessageBox.RejectRole)
+        box.exec_() if hasattr(box, "exec_") else box.exec()
+        current = Path(dock.output_paths.get("pdf") or default_output_path(
+            output_folder(), flow.result.selected_topic, "pdf", date.today()))
+        if box.clickedButton() is same:
+            target = current
+        elif box.clickedButton() is new:
+            target = unique_path(current.parent, f"{current.stem}_{time_text().replace(':', '-')}.pdf")
+        else:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            written = Path(write_map_pdf(flow, target, layers))
+        except (OSError, RuntimeError, ValueError) as error:
+            dock.show_message(SAVE_FAILED_MESSAGE.format(kind="PDF", reason=error_text(error)))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        dock.output_paths["pdf"] = written
+        dock.show_message(f"PDF erzeugt: {written.name} ({len(layers)} sichtbare Layer).", kind="info")
+
     def save_outputs(flow, selected, layer_objects):
         """Write the GeoPackage/PDF chosen in step 8.  Returns the written files
         and readable error texts; a failed file does not undo the QGIS layers."""
@@ -2773,24 +2953,7 @@ def _create_dock(plugin):
             layers = [layer_objects[d.layer_id] for d in selected if d.layer_id in layer_objects]
             jobs.append(("geopackage", lambda path: write_result_geopackage(path, layers)))
         if output.create_pdf:
-            draft = dock.output_draft
-            topic = flow.result.selected_topic or "Siedlungsstruktur"
-
-            def write_pdf(path):
-                return export_map_pdf(
-                    path, layers=list(layer_objects.values()),
-                    study_area_wkt=flow.result.study_area_wkt,
-                    buffer_meters=flow.result.buffer_meters,
-                    crs_authid=flow.result.project_crs,
-                    title=draft.get("pdf_title") or topic,
-                    subtitle=draft.get("pdf_subtitle", ""),
-                    data_source=output.data_source,
-                    page=draft.get("pdf_page", "A3"),
-                    orientation=draft.get("pdf_orientation", "auto"),
-                    scale=draft.get("pdf_scale") or None,
-                    north_arrow=draft.get("pdf_north", True))
-
-            jobs.append(("pdf", write_pdf))
+            jobs.append(("pdf", lambda path: write_map_pdf(flow, path, list(layer_objects.values()))))
         for kind, write in jobs:
             path = dock.output_paths[kind]
             QApplication.setOverrideCursor(Qt.WaitCursor)

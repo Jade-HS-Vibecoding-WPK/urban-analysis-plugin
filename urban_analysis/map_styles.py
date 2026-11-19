@@ -72,15 +72,46 @@ def draw_rank(category):
     return DRAW_RANK.get(category, 5)
 
 
-def apply_style(layer, category, style=DEFAULT_MAP_STYLE):
-    """Give a result layer the colours of ``style`` (QGIS)."""
-    from qgis.core import QgsSingleSymbolRenderer, QgsSymbol, QgsWkbTypes
+def outside_filter(area_wkt):
+    """QGIS expression: object lies outside the study area (no overlap)."""
+    wkt = area_wkt.replace("'", "")
+    return f"NOT intersects($geometry, geom_from_wkt('{wkt}'))"
+
+
+def apply_style(layer, category, style=DEFAULT_MAP_STYLE, grey_outside_wkt=None):
+    """Give a result layer the colours of ``style`` (QGIS).
+
+    With ``grey_outside_wkt`` (the study area) everything outside the area is
+    drawn in grey values, inside in the colours of ``style``."""
+    from qgis.core import QgsRuleBasedRenderer, QgsSingleSymbolRenderer
+
+    inside = _symbol(layer, category, style)
+    if inside is None:
+        return
+    if grey_outside_wkt and style != "graustufen":
+        root = QgsRuleBasedRenderer.Rule(None)
+        outside = QgsRuleBasedRenderer.Rule(_symbol(layer, category, "graustufen"),
+                                            filterExp=outside_filter(grey_outside_wkt))
+        outside.setLabel("außerhalb des Gebiets")
+        rest = QgsRuleBasedRenderer.Rule(inside, label="im Untersuchungsgebiet")
+        rest.setIsElse(True)
+        root.appendChild(outside)
+        root.appendChild(rest)
+        layer.setRenderer(QgsRuleBasedRenderer(root))
+    else:
+        layer.setRenderer(QgsSingleSymbolRenderer(inside))
+    layer.triggerRepaint()
+
+
+def _symbol(layer, category, style):
+    """Symbol of one category in one style (fill/outline/line width)."""
+    from qgis.core import QgsSymbol, QgsWkbTypes
     from qgis.PyQt.QtGui import QColor
 
     fill, outline = category_colors(category, style)
     symbol = QgsSymbol.defaultSymbol(layer.geometryType())
     if symbol is None:
-        return
+        return None
     geometry = layer.geometryType()
     if geometry == QgsWkbTypes.PolygonGeometry:
         symbol.setColor(QColor(fill))
@@ -94,5 +125,4 @@ def apply_style(layer, category, style=DEFAULT_MAP_STYLE):
     else:
         symbol.setColor(QColor(fill))
         symbol.setSize(1.6)
-    layer.setRenderer(QgsSingleSymbolRenderer(symbol))
-    layer.triggerRepaint()
+    return symbol

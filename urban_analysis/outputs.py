@@ -507,8 +507,18 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend.setTitle("Legende")
     legend.setAutoUpdateModel(False)
     root = QgsLayerTree()
+    from qgis.core import QgsMapLayerLegendUtils, QgsRuleBasedRenderer
+
     for layer in [area_layer, buffer_layer] + list(layers):
-        root.addLayer(layer)
+        node = root.addLayer(layer)
+        renderer = layer.renderer()
+        if isinstance(renderer, QgsRuleBasedRenderer) and len(renderer.rootRule().children()) == 2:
+            # grey outside / colour inside: the legend shows the colour only
+            QgsMapLayerLegendUtils.setLegendNodeOrder(node, [1])
+            # one line per layer: symbol + layer name, like the other layers
+            QgsMapLayerLegendUtils.setLegendNodeUserLabel(node, 1, layer.name())
+            from qgis.core import QgsLegendRenderer, QgsLegendStyle
+            QgsLegendRenderer.setNodeLegendStyle(node, QgsLegendStyle.Hidden)
     legend.model().setRootGroup(root)
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)

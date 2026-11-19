@@ -33,6 +33,26 @@ def test_preselection_core_keep_drop():
         "Gebäude – 1 Kernfelder, 1 behalten, 1 nicht geladen")
 
 
+def test_overview_lines_and_always_kept_columns():
+    from urban_analysis.guided_dialog import column_summary, summary_lines
+
+    columns = COLUMNS + [ColumnInfo("gebaeude", "baujahr", "Baujahr", False, ("1912",))]
+    flow = flow_with_columns()
+    flow.result.columns = columns
+    decisions = column_decisions_of(flow)
+    assert decision_value(decisions[("gebaeude", "baujahr")]) == "keep"  # always kept
+    lines = summary_lines(column_summary(columns, decisions))
+    assert lines[1] == "Behalten: Geschosszahl, Baujahr"
+    assert lines[2] == "Ignoriert: 1 technische Spalte"
+
+
+def test_grey_outside_filter():
+    from urban_analysis.map_styles import outside_filter
+
+    assert outside_filter("POLYGON ((0 0, 1 0, 1 1, 0 0))") == (
+        "NOT intersects($geometry, geom_from_wkt('POLYGON ((0 0, 1 0, 1 1, 0 0))'))")
+
+
 def test_choice_values_round_trip():
     for value in ("target:address", "keep", "drop"):
         assert decision_value(decision_from_value(COLUMNS[1], value)) == value
