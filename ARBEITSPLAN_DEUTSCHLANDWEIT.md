@@ -10,6 +10,11 @@ Beschluss in Aufgabe 5 (G10).
 stehen in §6 **in der Reihenfolge, in der sie erledigt werden**. Auf `main`
 sind alle 234 Tests grün.
 
+**Stand 19.11.2026 (Feature Freeze):** Nach dem Live-Test hat Person Mac
+E29–E34 vorgeschlagen (Attributtabelle, Dubletten, PDF, Kartenstile,
+Erreichbarkeit). Die Aufgaben bis zum Feature Freeze stehen in §6 als
+**Etappe F – heute, vor allem anderen**. Auf `main` sind 278 Tests grün.
+
 Der erste Arbeitsplan (`ARBEITSPLAN.md`) ist im Wesentlichen erledigt: Das
 Plugin läuft in QGIS von Schritt 1 bis 9 mit einer lokalen GeoPackage-Datei.
 Dieser Plan beschreibt den nächsten Ausbau. Die Regeln aus `CLAUDE.md` und
@@ -95,6 +100,19 @@ bestätigen):
 | Nr. | Vorschlag |
 | --- | --- |
 | E28 | **Lizenzen und Quellenvermerke korrekt angeben.** Alle Quellen sind frei nutzbar, verlangen aber (bis auf dl-de/zero) eine Namensnennung: **dl-de/by-2.0** (BW, BB, HH, RP, SL, SN, ST, BKG-Ländergrenzen) und **CC BY 4.0** (NI, SH, MV, TH, HB, BY) verlangen Quellenvermerk, Lizenzname mit Link und einen **Hinweis, dass die Daten verändert wurden** (Zuschnitt, Zusammenführung); **dl-de/zero-2.0** (NW, HE, BE) verlangt nichts, wir nennen die Quelle trotzdem. **OSM (ODbL):** „© OpenStreetMap-Mitwirkende“; Karten und PDFs brauchen nur diesen Vermerk, ein **öffentlich weitergegebenes GeoPackage** mit OSM-Objekten steht für den OSM-Teil unter ODbL (Share-Alike). Umsetzung: (1) Lizenz und Quellenvermerk je Quelle stehen in `sources_catalog.json`; (2) das Feld „Datenquelle“ jedes Objekts wird daraus vorausgefüllt; (3) beim Download werden Quelle, Datum, Lizenz und Adresse als Metadaten gespeichert, Rohdaten bleiben unverändert; (4) GeoPackage und PDF enthalten einen Block **„Datenquellen und Lizenzen“** mit allen tatsächlich genutzten Quellen, Jahr, Lizenz mit Link, dem Satz „Daten zugeschnitten und zusammengeführt (verändert)“ und – wenn OSM dabei ist – dem ODbL-Hinweis; (5) nie abgefragt werden Eigentümerdaten, Flurstücke in Bayern (nicht frei) und Sachsen-Anhalt, solange die Lizenz nicht bestätigt ist; (6) bei eigenen Dateien bleibt die Nutzerin verantwortlich, das Plugin fragt die Datenquelle ab (Schritt 8); (7) heruntergeladene Daten werden nie committed. |
+
+Vorschläge von Person Mac nach dem Live-Test (19.11.2026, im PR zu diesem
+Plan von Person Windows zu bestätigen). Sie gelten für den Feature Freeze
+(Etappe F in §6):
+
+| Nr. | Vorschlag |
+| --- | --- |
+| E29 | **Attributtabelle: Kernfelder plus Originalspalten.** Bisher schreiben die Ergebnis-Layer nur die 11 festen Zielfelder; alle anderen Spalten gehen verloren. Künftig gibt es nur noch wenige **Kernfelder**, die Karte und Legende brauchen: `object_id`, `address`, `object_type`, `category`, `source`, `source_name`. Dazu kommen **alle bekannten Originalspalten mit lesbarem Namen** (z. B. `hnr` → „Hausnummer“, `anzahlgs` → „Geschosszahl“). `object_detail`, `status`, `area_m2`, `year` und `floors` sind keine Pflichtfelder mehr, sondern normale Spalten, wenn die Quelle sie hat. Ersetzt in E23 „die 11 Zielfelder bleiben die Basis“; `PLAN.md` §3.4 wird in G11 angepasst. |
+| E30 | **Nur bekannte Spalten werden geladen, der Rest ist zuschaltbar.** Für jede Quelle (ALKIS-Export, ALKIS vereinfacht, OSM) gibt es eine **Namensliste** in `mapping_rules.json`. Spalten aus der Liste sind in Schritt 5 angehakt und lesbar benannt; den Namen kann man ändern. Unbekannte Spalten stehen eingeklappt unter **„Nicht geladen (nicht lesbar)“**, können aber angehakt werden. Ein Info-Hinweis nennt sie („7 Spalten nicht geladen, weil das Plugin sie nicht lesen kann: …“). **OSM:** bekannte Tags aus `other_tags` (z. B. Name, Geschosse, Höhe, Dachform, Baujahr, Adresse) werden eigene Spalten; unbekannte Tags werden wie unbekannte Spalten behandelt. |
+| E31 | **Dubletten: weiter fragen, aber mit Beispiel.** Objekte, die in einer Datei genau übereinanderliegen und sich in einzelnen Spalten unterscheiden, bleiben eine Entscheidung (CLAUDE.md). Der Hinweis nennt die Spalten mit **lesbarem Namen** und zeigt ein **echtes Beispiel** mit beiden Werten („Stelle 1: Nutzung = Wohnen / Gewerbe“); die Oberfläche kann auf die Stelle zoomen. Punkte, Linien und Flächen sind nie Dubletten voneinander (es wird nur innerhalb eines Layers und bei gleicher Geometrie verglichen). |
+| E32 | **PDF-Aufbau.** Immer dabei: Karte, Legende, Block „Datenquellen und Lizenzen“ (E28), Datum. **Wählbar:** Maßstabsleiste, Nordpfeil, Titel und Untertitel (selbst eintippen), Namen/Gruppe/Hochschule/Kurs, Umriss des Untersuchungsgebiets mit Puffer, Übersichtskarte zur Lage. **Formate:** A4, A3, A2, A1, A0, jeweils hoch und quer. **Keine Online-Hintergrundkarte;** stattdessen kann ein **Schwarzplan aus den geladenen Gebäuden** als Hintergrund zugeschaltet werden. Nicht im PDF: Kennzahlen-Tabelle, Prüfprotokoll. |
+| E33 | **Kartenstile für die Analysekarte:** **Schwarzplan** (Gebäude schwarz), **Nutzungskarte farbig** (je Kategorie eine Planfarbe), **Graustufen** (für Druck). **Pixel** passend zum Plugin-Stil nur, wenn es wenig Mehraufwand ist. Der Stil gilt für die Ergebnis-Layer in QGIS und für das PDF. |
+| E34 | **Erreichbarkeit mit wählbaren Startpunkten** (präzisiert E22 und E26): Startpunkte sind nicht nur Haltestellen. Wählbar sind **Kategorie und Unterart**: Gesundheit (Krankenhaus, Arztpraxis, Apotheke), Nahversorgung (Supermarkt, Bäckerei, Drogerie), Bildung und Betreuung (Schule, Kita, Hochschule), Freizeit und Grün (Spielplatz, Sportplatz, Park, Bibliothek), ÖPNV-Haltestellen. **Ergebnis wählbar:** Radien (300 m / 500 m) um die Startpunkte und/oder Gebäude eingefärbt nach Abstand zum nächsten Ziel. Bis zum Feature Freeze nur **Stufe 1 (Luftlinie)**; Fußweg und ÖV-Güteklassen danach. |
 
 Weiter gilt unverändert:
 
@@ -248,6 +266,10 @@ Schritt 6: Vorrang je Kategorie wählen (Windows) ─▶ Schritt 7–9 wie bishe
 | W8b Ausgabe GeoPackage/PDF | Windows | Speichern mit Vorschlag, Datenquelle Pflicht, Eingabedatei geschützt, 11 Felder, Geschosszahl als Ganzzahl | #26 |
 | M9 Recherche ALKIS-Dienste | Mac | alle 16 Länder offen; 11 im einheitlichen Format „ALKIS vereinfacht“; Katalog `sources_catalog.json`, Details in `STATUS_DATENPIPELINE.md`; daraus E28 (Lizenzen) | dieser PR |
 | Planentwurf soziale Daten | Mac | E22–E27 als Entwurf im Plan (Beschluss in Aufgabe 5) | #30 |
+| M12 Teil 1 „ALKIS vereinfacht“ | Mac | Profil für die Dienste von 11 Ländern | #38 |
+| W11 Herunterladen in QGIS | Windows | OSM-Download mit Ordnerwahl, Wiederholungen, Rohdatei, GeoPackage im Projekt-KBS; lesbare Namen „Straßen (Linien)/(Flächen)“ | #40 |
+| W13 Teil 1 „Mehr erfahren“ in Schritt 4 | Windows | Kurzfassung je Hinweis, Rest aufklappbar; Mausrad verstellt keine Auswahllisten | #39 |
+| G6 Vorschlag Schritt 4–6 | Windows | Vertragsfelder für verständliche Schritte (Umsetzung in F0) | #41 |
 
 **Entfallen:** M22 „Fläche aus der Geometrie in `area_m2`“ (Wunsch Person
 Mac). Die Flächenberechnung selbst braucht nur der Abgleich ALKIS ↔ OSM (E12)
@@ -263,8 +285,19 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 
 | Nr. | Aufgabe | Wer | Wartet auf |
 | --- | --- | --- | --- |
+| | **Etappe F – Feature Freeze, heute (19.11.) vor allem anderen** | | |
+| F0 | G11 Vertrag für Spalten, Hinweise und Dubletten (= G6 + E29–E31) | gemeinsam | – |
+| F1 | M23 Spalten lesen und lesbar benennen | Mac | F0 |
+| F2 | W14 Schritt 5 neu: Spaltenliste | Windows | F0, F1 |
+| F3 | M24 Dubletten mit Beispiel erklären | Mac | F0 |
+| F4 | W17 Dubletten-Dialog mit Beispiel und Zoom | Windows | F3 |
+| F5 | W18 PDF-Layout und Kartenstile (mit 14a Lizenzblock) | Windows | – |
+| F6 | M17 Teil 1: Startpunkte als OSM-Punkte | Mac | – |
+| F7 | M20 Erreichbarkeit Stufe 1: Luftlinie | Mac | F6 |
+| F8 | W16 Erreichbarkeit in der Benutzerführung | Windows | F7 |
+| F9 | G12 Plan nachziehen, Feature Freeze | gemeinsam | F0–F8 |
 | | **Etappe A – jetzt starten** | | |
-| 1 | G6 Vertrag erweitern | gemeinsam | – |
+| 1 | G6 Vertrag erweitern (→ in F0 aufgegangen) | gemeinsam | – |
 | 2 | M9 Recherche ALKIS-Dienste der Länder ✓ | Mac | – |
 | 3 | M10a OSM-Abfrage und Größenprüfung ✓ | Mac | – |
 | 4 | W14 Schritt 5 umbauen | Windows | Teil 2: 1 |
@@ -273,7 +306,7 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 | 7 | M6 Fehlende Werte melden | Mac | – |
 | | **Etappe B – Download und mehrere Quellen** | | |
 | 8 | W10 Schritt 3 „Daten laden“ umbauen (Teil 1 ✓ #33) | Windows | Teil 2: 3, 10 |
-| 9 | W11 Herunterladen in QGIS | Windows | 3 |
+| 9 | W11 Herunterladen in QGIS ✓ (OSM, #40) | Windows | 3 |
 | 10 | M10b ALKIS-Aufträge und Bundesland | Mac | 2 |
 | 11 | M12 ALKIS-Profile für die Dienst-Daten (Teil 1 ✓ „ALKIS vereinfacht“) | Mac | 2 |
 | 12 | M13 Mehrere Quellen in einem Lauf | Mac | 1 |
@@ -298,6 +331,91 @@ bleiben, damit Verweise in PRs und Commits weiter stimmen.
 Etappe D braucht den Beschluss aus Aufgabe 5 (G10). Die Recherche (6) und
 der Beschluss (5) laufen schon in Etappe A, damit Etappe D danach ohne
 Wartezeit starten kann.
+
+### Etappe F – Feature Freeze (19.11.2026)
+
+Nach dem Feature Freeze kommen keine neuen Funktionen mehr dazu, nur noch
+Fehlerbehebung und Test. **Kern** (muss heute fertig werden): F0, F1, F2,
+F3, F5. **Wenn die Zeit knapp wird, streichen in dieser Reihenfolge:**
+Pixel-Kartenstil → Übersichtskarte im PDF → F8 (Oberfläche Erreichbarkeit;
+die Rechnung aus F7 bleibt) → F4 (Dubletten-Text aus F3 genügt) → F6/F7.
+
+#### F0. G11 – Vertrag für Spalten, Hinweise und Dubletten *(gemeinsam)*
+
+- **Absicht:** Ein Vertrag für alles, was Schritt 4–6 und die
+  Attributtabelle brauchen. Liskas Vorschlag (G6, oben) plus E29–E31.
+- **Ziel:** Eigener PR nur für `contracts.py`, `tests/test_contracts.py` und
+  `PLAN.md` §3.4 (Kernfelder statt 11 Pflichtfelder). Neu, alles optional
+  mit leerem Standardwert: `ValidationIssue.details`, `.action`,
+  `.layer_id`; `ColumnInfo` (`layer_id`, `source_field`, `readable_name`,
+  `known`, `examples`, `suggested_target`, `confidence`); Entscheidung je
+  Spalte `"target:<kernfeld>"` / `"keep"` (mit Namen) / `"drop"`;
+  Dubletten-Beispiel (`example_text`, `reason`, `differences`);
+  `source_kind`.
+- **Wer:** Person Mac schreibt den Entwurf, Person Windows prüft und mergt.
+
+#### F1. M23 – Spalten lesen und lesbar benennen (E29, E30) *(Mac)*
+
+- **Ziel:** Namensliste je Profil in `mapping_rules.json` (ALKIS-Export,
+  ALKIS vereinfacht, OSM-Tags). Die Pipeline liefert `ColumnInfo` für jede
+  Spalte jedes Layers, die Kernfelder und die übernommenen Spalten mit ihren
+  Werten je Objekt, OSM-Tags aus `other_tags` als eigene Spalten und einen
+  Info-Hinweis zu nicht geladenen Spalten.
+- **Dateien:** `data_pipeline.py`, `mapping.py`, `mapping_rules.json`,
+  Tests.
+
+#### F2. W14 – Schritt 5 neu: Spaltenliste (E29, E30) *(Windows)*
+
+- **Ziel:** Oben die drei Zeilen „Was siehst du? / Was entscheidest du? /
+  Was passiert dann?“. Je Layer eine Liste: Häkchen, lesbarer Name
+  (änderbar), Beispielwerte. Auswahllisten nur noch für die Kernfelder.
+  „Nicht geladen (nicht lesbar)“ eingeklappt. `outputs.py` schreibt
+  Kernfelder plus gewählte Spalten in die Ergebnis-Layer.
+
+#### F3. M24 – Dubletten mit Beispiel erklären (E31) *(Mac)*
+
+- **Ziel:** Je Dubletten-Gruppe `example_text`, `reason` und `differences`
+  mit lesbaren Spaltennamen. Danach mit dem ALKIS-Export (`_kon`) in QGIS
+  prüfen, **welche** Spalten die vielen Dubletten verursachen (Person Mac
+  testet, Daten bleiben lokal) – ggf. Folgevorschlag.
+
+#### F4. W17 – Dubletten-Dialog mit Beispiel und Zoom (E31) *(Windows)*
+
+- **Ziel:** Schritt 6 zeigt je Layer den Satz, was „Zusammenführen“
+  bewirkt, das Beispiel aus F3 und einen Knopf, der auf die Stelle zoomt.
+
+#### F5. W18 – PDF-Layout und Kartenstile (E32, E33, E28) *(Windows)*
+
+- **Ziel:** Echtes Kartenlayout statt Text-PDF: Karte, Legende, Datum,
+  Block „Datenquellen und Lizenzen“ (übernimmt 14a); wählbar Maßstab,
+  Nordpfeil, Titel/Untertitel, Namen/Kurs, Gebietsumriss mit Puffer,
+  Übersichtskarte; Formate A4–A0 hoch/quer; Kartenstile Schwarzplan,
+  Nutzungskarte farbig, Graustufen (Pixel optional); Schwarzplan aus den
+  geladenen Gebäuden als Hintergrund zuschaltbar.
+
+#### F6. M17 Teil 1 – Startpunkte als OSM-Punkte (E22, E34) *(Mac)*
+
+- **Ziel:** Overpass-Abfrage (`sources_catalog.json`) holt auch Punkte;
+  `mapping_rules.json` ordnet sie den Kategorien und Unterarten aus E34 zu
+  (inkl. Krankenhaus, Drogerie, Hochschule, Park). Flächen-Objekte wie
+  Krankenhausgelände zählen über ihren Mittelpunkt.
+
+#### F7. M20 – Erreichbarkeit Stufe 1: Luftlinie (E26, E34) *(Mac)*
+
+- **Ziel:** QGIS-freie Funktion: für jedes Gebäude Abstand zum nächsten
+  gewählten Startpunkt (Kategorie/Unterart) in Metern und „im 300-m- /
+  500-m-Radius“ (ja/nein). Radien in einer Einstellungsdatei.
+
+#### F8. W16 – Erreichbarkeit in der Benutzerführung (E34) *(Windows)*
+
+- **Ziel:** Kategorie wählen, dann Häkchen bei Unterarten; Ergebnis
+  wählbar: Radien um die Startpunkte (QGIS-Puffer) und/oder Gebäude
+  eingefärbt nach Abstand (Werte aus F7).
+
+#### F9. G12 – Plan nachziehen, Feature Freeze *(gemeinsam)*
+
+- **Ziel:** §5 Erledigt und §6 aktualisieren, `PLAN.md`/`CLAUDE.md`
+  anpassen, gemeinsamer Test in QGIS, danach nur noch Fehlerbehebung.
 
 ### Etappe A – jetzt starten
 
@@ -339,6 +457,30 @@ sind; bis dahin bleibt der heutige Stand.
 (2) Kann die Pipeline Beispielwerte für *alle* Spalten liefern, ohne bei
 großen Layern langsam zu werden (z. B. nur die ersten 200 Zeilen ansehen)?
 (3) Gibt es Hinweise, für die „was tun“ schwer zu formulieren ist?
+
+##### Antwort Person Mac (19.11.2026)
+
+Der Vorschlag wird übernommen und mit E29–E31 zu **G11** (Etappe F)
+zusammengeführt.
+
+1. **Namen und Form passen.** `ColumnInfo` bekommt zusätzlich
+   `readable_name` (vorgeschlagener lesbarer Name aus der Namensliste, E30)
+   und `known` (steht in der Namensliste → in Schritt 5 angehakt; sonst unter
+   „Nicht geladen (nicht lesbar)“). `"target:<feld>"` gibt es nur noch für
+   die Kernfelder (E29). Rückweg bei `"keep"` zusätzlich mit dem Namen, den
+   die Nutzerin gewählt hat. Dubletten-Gruppen bekommen neben `example_text`
+   und `reason` auch `differences`: je abweichender Spalte der lesbare Name
+   und die Werte (für die Anzeige „Nutzung = Wohnen / Gewerbe“, E31).
+2. **Beispielwerte für alle Spalten: ja, ohne Mehraufwand.** Die Pipeline
+   liest beim Zuschnitt ohnehin jede Zeile im Gebiet; dabei werden je Spalte
+   die ersten 3 verschiedenen, nicht leeren Werte gemerkt. Eine Grenze von
+   200 Zeilen ist nicht nötig.
+3. **„Was tun“ ist schwer** nur bei: abweichendem Koordinatensystem (hängt
+   davon ab, wie die Datei in QGIS geladen wurde → „Datei in QGIS ins
+   Projekt-KBS umprojizieren und neu laden“), unsicheren Dubletten (→ „in
+   Schritt 6 entscheiden“) und Objekten ohne lesbare Geometrie (→ „nichts zu
+   tun, diese Objekte fehlen im Ergebnis“). Reine Infos bekommen `action`
+   leer.
 
 #### 2. M9 – Recherche: ALKIS-Dienste der 16 Bundesländer *(Mac)*
 
@@ -614,8 +756,8 @@ Jetzt mit Person Windows zu klären:
   den Abgleich. Vorschlag: `area_m2` vorerst nur aus der Quelle, `PLAN.md`
   §3.4 entsprechend anpassen. Später kann die Berechnung aus 15 das Feld mit
   wenig Aufwand füllen, falls es doch gebraucht wird.
-- **Gleiche Layernamen** bei Linien und Flächen (z. B. „Straßen“): Vorschlag,
-  dass die Oberfläche „– Linien“ / „– Flächen“ anhängt (siehe PR #29).
+- ~~**Gleiche Layernamen** bei Linien und Flächen~~ → **gelöst (PR #40):**
+  „Straßen (Linien)“ / „Straßen (Flächen)“.
 - **Übereinanderliegende Objekte aus einer Quelle** mit verschiedener ID
   (z. B. Straße und Radweg in OSM): überhaupt nachfragen? (siehe PR #29)
 
