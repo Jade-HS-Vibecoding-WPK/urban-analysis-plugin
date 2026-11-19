@@ -102,7 +102,7 @@ def test_unknown_columns_are_named_in_an_info_hint(result):
     hint = hints[0]
     assert hint.severity == "info" and hint.layer_id == "gebaeude"
     assert "xyz_intern" in hint.message and "1 Spalte" in hint.message
-    assert "Schritt 5" in hint.details
+    assert "Schritt 5" in hint.details and "xyz_intern" in hint.details
     assert hint.action == ""
     assert hint not in result.visible_issues()
 

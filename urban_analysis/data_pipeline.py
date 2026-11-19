@@ -522,6 +522,7 @@ class GeoPackageImporter:
                 severity="info",
                 rule="Namensliste der Quelle",
                 details=(
+                    f"Nicht übernommen: {', '.join(unknown)}. "
                     "Das Plugin übernimmt nur Spalten, für die es einen verständlichen Namen kennt. "
                     "Du kannst die anderen in Schritt 5 unter „Nicht geladen (nicht lesbar)“ "
                     "trotzdem dazuholen."
