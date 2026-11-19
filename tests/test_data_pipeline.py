@@ -552,12 +552,18 @@ def test_different_objects_at_the_same_place_need_confirmation(tmp_path):
     uncertain = next(issue for issue in result.issues if issue.code == "uncertain-duplicate")
     assert uncertain.requires_confirmation
     assert uncertain.severity == "warning"
-    assert uncertain.message.startswith(
+    # G11/E31: short text, what to do, and a real example under "Mehr erfahren"
+    assert uncertain.message == (
         "Gebäude: An einer Stelle liegen mehrere Objekte genau übereinander (2 Objekte). "
-        "Sie unterscheiden sich nur in Hausnummer und ALKIS-Objekt-ID – z. B. ein Haus mit mehreren Hausnummern."
+        "Sie unterscheiden sich nur in Hausnummer und ALKIS-Objekt-ID."
     )
-    assert uncertain.message.endswith("Sollen sie je Stelle zu einem Objekt zusammengefasst werden?")
-    assert "Alle wurden behalten" in uncertain.message
+    assert uncertain.action.startswith("In Schritt 6 entscheiden")
+    assert uncertain.layer_id == "gebaeude"
+    assert uncertain.details.startswith(
+        "Beispiel: Hier liegen 2 Einträge „Wohngebäude“ mit genau gleicher Form übereinander. "
+        "Unterschied: ALKIS-Objekt-ID „DENIAL1“ / „DENIAL3“; Hausnummer „39“ / „41“."
+    )
+    assert uncertain.details.endswith("Bis zu deiner Entscheidung bleiben alle Objekte erhalten.")
 
 
 def test_merge_confirmed_duplicates_keeps_first_record_per_group(tmp_path):
