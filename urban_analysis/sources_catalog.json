@@ -72,7 +72,7 @@
   },
 
   "laendergrenzen": {
-    "_hinweis": "Vereinfachte Ländergrenzen für den Bundesland-Vorschlag (E11). Datei wird einmal ins Plugin gelegt, nicht bei jedem Lauf geladen. Lizenz in M10b am Datensatz selbst bestätigen.",
+    "_hinweis": "Zurzeit nicht genutzt: Entscheidung 19.11.2026 (M10b), das Bundesland wählt die Nutzerin von Hand. Lizenz am 19.11.2026 auf der BKG-Produktseite bestätigt: dl-de/by-2.0, kostenfrei; Quellenvermerk und Veränderungshinweis Pflicht, auf Webseiten 'BKG' und 'dl-de/by-2-0' verlinken.",
     "produkt": "VG2500 (Verwaltungsgebiete 1:2 500 000)",
     "anbieter": "Bundesamt für Kartographie und Geodäsie (BKG)",
     "url": "https://daten.gdz.bkg.bund.de/produkte/vg/vg2500/aktuell/vg2500_01-01-2026.utm32s.gpkg.zip",
@@ -80,7 +80,18 @@
     "groesse_mb": 3.2,
     "crs": "EPSG:25832",
     "lizenz": "dl-de/by-2-0",
-    "quellenvermerk": "© GeoBasis-DE / BKG ({jahr})"
+    "quellenvermerk": "© BKG ({jahr}) dl-de/by-2-0, Datenquellen: https://sgx.geodatenzentrum.de/web_public/gdz/datenquellen/datenquellen_vg_nuts.pdf"
+  },
+
+  "alkis_abfrage": {
+    "_hinweis": "ALKIS-Download über WFS (M10b). Der NI-Dienst liefert höchstens 10 000 Objekte je Abfrage und kann nicht seitenweise laden (CountDefault 10000, ImplementsResultPaging FALSE, geprüft 19.11.2026). Deshalb wird das Download-Rechteck in Kacheln von etwa kachel_m geteilt; Objekte am Kachelrand kommen mehrfach und werden beim Zusammenfügen über die Objekt-ID entfernt. Liefert eine Kachel max_objekte_je_abfrage Objekte, ist sie wahrscheinlich abgeschnitten → sichtbarer Hinweis.",
+    "fertige_formate": ["ave"],
+    "kachel_m": 1000,
+    "max_objekte_je_abfrage": 10000,
+    "zeitlimit_s": 120,
+    "ebenen": ["gebaeude", "nutzung", "flurstuecke"],
+    "rohdatei": "alkis_{land}_{ebene}_{teil}_{datum}.gml",
+    "geopackage": "alkis_{land}_{datum}.gpkg"
   },
 
   "alkis_formate": {
@@ -307,6 +318,7 @@
       "lizenz": "dl-de/by-2-0",
       "quellenvermerk": "© GeoBasis-DE / LVermGeo ST",
       "geprueft": "2026-11-18",
+      "gesperrt": "Die Lizenz ist noch nicht bestätigt (E28).",
       "einschraenkung": "Der Dienst verweist auf die Kostenverordnung; laut Metadaten kostenfrei beim Online-Abruf. Lizenz in M10b auf der Seite des LVermGeo bestätigen (war am 18.11. nicht erreichbar)."
     },
     "SH": {

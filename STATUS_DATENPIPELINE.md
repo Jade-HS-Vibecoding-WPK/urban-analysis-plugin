@@ -348,14 +348,60 @@ liegt auf dem Cache-Branch (Kette F1 → F3 → F6 → Cache → F7).
   `extra_attributes` und kommen mit W14 in die Attributtabelle.
 - Tests: `tests/test_accessibility.py` (8).
 
+## M10b – ALKIS-Aufträge je Bundesland (19.11.2026)
+
+Branch `feature/pipeline-alkis-auftraege` (liegt auf F7).
+
+- **Entscheidung 19.11.2026 (ändert E11):** Das Bundesland wählt die
+  Nutzerin **von Hand** in Schritt 3; keine Ländergrenzen-Datei im Plugin.
+  Lizenz der BKG-Grenzen trotzdem geklärt (dl-de/by-2.0, Quellenvermerk im
+  Katalog korrigiert), falls wir später doch einen Vorschlag wollen.
+- `alkis_states()` → alle 16 Länder für die Auswahlliste, sortiert, mit
+  Status: **verfügbar** (BB, HH, HE, MV, NI, NW, RP, SN, SH, TH – Format
+  „ALKIS vereinfacht“ mit Profil), **kommt später** (BW, BY, BE, HB, SL –
+  eigenes Format, M12 Teil 2), **gesperrt** (ST – Lizenz, E28).
+- `plan_alkis_download(study_area_wkt, buffer_meters, lonlat_box, state)`
+  → `SourcePlan`: Größenprüfung wie bei OSM (E13), dann WFS-Aufträge für
+  **Gebäude, Nutzung und Flurstücke** (eigener Layer je Ebene); für nicht
+  verfügbare Länder eine Warnung („… kommt später / ist gesperrt … Das
+  Plugin verwendet OSM.“) und keine Aufträge. Nie Flurstücke in Bayern.
+- **Wichtig – Objekt-Grenze:** Der NI-WFS liefert höchstens **10 000
+  Objekte je Abfrage** und kann **nicht seitenweise** laden (live geprüft).
+  Donnerschwee allein hat über 13 000 Gebäude/Bauwerke. Deshalb teilt
+  `split_box` das Rechteck in Kacheln von etwa 1 km; jeder `DownloadRequest`
+  hat `layer_name`, `part`/`parts`, `max_features` (10 000) und `id_field`
+  (`oid`).
+- **WFS-Abfrage:** `wfs_getfeature_url` – Auswahl mit dem Rechteck in
+  EPSG:4326, Lieferung im KBS des Dienstes (`delivery_crs`, z. B. 25833 für
+  BB/MV/SN); QGIS rechnet ins Projekt-KBS um, die Pipeline nicht.
+- **Live geprüft (NI, Donnerschwee mit 500 m Puffer, 9,8 km²):** 16 Kacheln ×
+  3 Ebenen = 48 Abfragen in 25 s; größte Kachel 2 406 Objekte. Eindeutig
+  nach `oid`: 13 518 Gebäude/Bauwerke (13 757 mit Doppelten am Rand),
+  3 527 Nutzungsflächen (4 065), 7 558 Flurstücke (8 118).
+- **Für Person Windows (W11/W10 Teil 2):**
+  1. Schritt 3: Auswahlliste aus `alkis_states()` (Status und Hinweis
+     anzeigen; nur „verfügbar“ lädt ALKIS).
+  2. `plan_alkis_download(...)` mit demselben 4326-Rechteck wie bei OSM.
+  3. Jede Abfrage als GET laden (GML), Rohdatei `raw_file_name` unverändert
+     speichern.
+  4. Alle Teile eines `layer_name` in **einen** Layer des GeoPackage
+     `geopackage_name` im Projekt-KBS schreiben; Objekte, deren `id_field`
+     (`oid`) schon geschrieben wurde, auslassen.
+  5. Hat ein Teil `max_features` Objekte, sichtbare Warnung („Teil n ist
+     vermutlich unvollständig – Gebiet verkleinern“).
+  6. Datenquelle mit `attribution` vorausfüllen (E28).
+- **Gemeinsam (G12):** E11 im Plan ändern (Bundesland von Hand).
+- Tests: `tests/test_alkis_auftraege.py` (7).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 323 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 330 grün.
 
 ## Als Nächstes (Person Mac)
 
-Etappe F ist für Person Mac erledigt (F0, F1, F3, F6, F7 und E35). Offen:
-PRs nacheinander öffnen (F3, F6, Cache, F7 – jeweils nach dem Merge des
-vorherigen), gemeinsam G12 (Plan, E35, `CLAUDE.md`-Dateitabelle mit
-`osm_cache.py` und `accessibility.py`). Danach: M10b, M18, M6, M12 Teil 2.
+Etappe F ist für Person Mac erledigt (F0, F1, F3, F6, F7 und E35), dazu
+M10b. Offen: PRs nacheinander öffnen (F3 offen; dann F6, Cache, F7, M10b –
+jeweils nach dem Merge des vorherigen), gemeinsam G12 (Plan: E35, E11
+geändert; `CLAUDE.md`-Dateitabelle mit `osm_cache.py` und
+`accessibility.py`). Danach: M12 Teil 2 (BW, HB, BE, SL, BY), M18, M6.
