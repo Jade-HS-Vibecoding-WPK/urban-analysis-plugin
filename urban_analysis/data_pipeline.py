@@ -414,12 +414,16 @@ class GeoPackageImporter:
                     message=(
                         f"{_names([self.mapping_rules.layer_name(name) for name in layers_without_category])}: "
                         + (
-                            "Für diesen Layer ist unklar, was er darstellt (z. B. Gebäude oder "
-                            "Grünflächen). Er wird geladen, steht beim Kartenthema aber nicht zur Auswahl."
+                            "Für diesen Layer ist unklar, was er darstellt. Er wird geladen, "
+                            "steht beim Kartenthema aber nicht zur Auswahl."
                             if len(layers_without_category) == 1
-                            else "Für diese Layer ist unklar, was sie darstellen (z. B. Gebäude oder "
-                            "Grünflächen). Sie werden geladen, stehen beim Kartenthema aber nicht zur Auswahl."
+                            else "Für diese Layer ist unklar, was sie darstellen. Sie werden geladen, "
+                            "stehen beim Kartenthema aber nicht zur Auswahl."
                         )
+                    ),
+                    details=(
+                        "Das Plugin erkennt am Namen des Layers, ob er Gebäude, Straßen, "
+                        "Grünflächen oder Nutzungsflächen zeigt. Bei diesem Namen klappt das nicht."
                     ),
                     severity="warning",
                     rule="Kategorie aus Layername",
@@ -1107,8 +1111,13 @@ class GeoPackageImporter:
             ValidationIssue(
                 code="several-addresses",
                 message=(
-                    f"{display_name or layer.table_name}: {subject} mehrere Adressen "
-                    "(z. B. Eckhaus). Alle Adressen bleiben erhalten."
+                    f"{display_name or layer.table_name}: {subject} mehrere Adressen. "
+                    "Alle Adressen bleiben erhalten."
+                ),
+                details=(
+                    "Ein Eckhaus mit zwei Hausnummern steht in der Quelle zweimal mit gleicher "
+                    "Form. Das Plugin macht daraus ein Gebäude und schreibt beide Adressen "
+                    "hinein, getrennt mit „; “."
                 ),
                 severity="info",
                 rule="Gleiche Objekt-ID und Geometrie, nur Adresse verschieden",

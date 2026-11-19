@@ -391,7 +391,8 @@ def test_building_with_several_addresses_is_one_building(tmp_path):
     combined = next(issue for issue in result.issues if issue.code == "several-addresses")
     assert combined.severity == "info"
     assert not combined.requires_confirmation
-    assert combined.message == "Gebäude: 1 Gebäude hat mehrere Adressen (z. B. Eckhaus). Alle Adressen bleiben erhalten."
+    assert combined.message == "Gebäude: 1 Gebäude hat mehrere Adressen. Alle Adressen bleiben erhalten."
+    assert "Eckhaus" in combined.details
 
 
 def test_same_id_with_other_differences_is_not_combined(tmp_path):
