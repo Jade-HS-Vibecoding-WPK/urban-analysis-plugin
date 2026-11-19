@@ -1,4 +1,6 @@
-"""W16: accessibility settings in step 7 (QGIS-free parts)."""
+"""W16: accessibility settings in step 9 (QGIS-free parts)."""
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,7 +9,10 @@ from urban_analysis.accessibility_view import (
     AccessibilityChoice,
     RadiusError,
     choice_problem,
+    distance_columns,
+    guide_value,
     parse_radii,
+    radii_for,
     radii_text,
     ring_colors,
     ring_label,
@@ -44,7 +49,38 @@ def test_targets_whole_categories_or_single_kinds():
     ]
 
 
-def test_enabled_without_targets_is_explained():
-    assert choice_problem(AccessibilityChoice(enabled=False)) is None
-    assert "Ziel" in choice_problem(AccessibilityChoice(enabled=True))
-    assert choice_problem(AccessibilityChoice(enabled=True, targets={"Gesundheit": ()})) is None
+def test_without_targets_is_explained():
+    assert "Ziel" in choice_problem(AccessibilityChoice())
+    assert choice_problem(AccessibilityChoice(targets={"Gesundheit": ()})) is None
+
+
+def test_guide_values_per_target():
+    assert guide_value("ÖPNV-Haltestellen")[0] == (300, 500)
+    assert guide_value("ÖPNV-Haltestellen", ("Bahnhof", "Bahnhaltepunkt"))[0] == (600, 1000)
+    # mixed bus and rail: the value of the category
+    assert guide_value("ÖPNV-Haltestellen", ("Bahnhof", "Bushaltestelle"))[0] == (300, 500)
+    assert guide_value("Nahversorgung", ("Supermarkt",))[0] == (500, 1000)
+    radii, text = guide_value("Unbekannt")
+    assert radii == (300, 500) and "selbst" in text
+
+
+def test_own_radii_win_over_the_guide_value():
+    choice = AccessibilityChoice(targets={"Nahversorgung": (), "Gesundheit": ()},
+                                 radii={"Nahversorgung": (400,)})
+    assert radii_for(choice, "Nahversorgung") == (400,)
+    assert radii_for(choice, "Gesundheit") == (500, 1000)
+
+
+def test_distance_columns_only_of_buildings_with_object_id():
+    def record(category, object_id, extra):
+        return SimpleNamespace(attributes={"category": category, "object_id": object_id},
+                               extra_attributes=extra)
+
+    records = [
+        record("Gebäude", "b1", {"Abstand Supermarkt (m)": 120, "Supermarkt bis 300 m": "ja",
+                                 "Name": "Haus"}),
+        record("Gebäude", "", {"Abstand Supermarkt (m)": 50}),
+        record("Nahversorgung", "s1", {"Abstand Supermarkt (m)": 0}),
+    ]
+    assert distance_columns(records, ["Supermarkt"]) == {
+        "b1": {"Abstand Supermarkt (m)": 120, "Supermarkt bis 300 m": "ja"}}
