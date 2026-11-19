@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="de" data-stil="klassisch">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Urban Analysis – Live-Demo</title>
+<meta name="description" content="Live-Demo des QGIS-Plugins Urban Analysis: zum Durchklicken wie in QGIS, in den Stilen Klassisch und Pixel.">
+<style>
+  /* Farben wie im Plugin (urban_analysis/theme.py); der QGIS-Rahmen bleibt neutral grau */
+  :root, [data-stil="klassisch"] {
+    --accent: #2f6fb0; --accent-dark: #1b4672; --accent-light: #e6f0fa;
+    --dock-bg: #f6f7f9; --dock-line: #c9ced6; --text: #1f2328; --muted: #5b6470;
+    --radius: 4px; --font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  [data-stil="pixel"] {
+    --accent: #E8655A; --accent-dark: #B8463D; --accent-light: #F9DDD9;
+    --dock-bg: #D3E6DF; --dock-line: #1E3B38; --text: #1E3B38; --muted: #4F6B66;
+    --radius: 0; --font: "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #3c3f44; color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         display: flex; flex-direction: column; }
+  button { font: inherit; }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* Fensterleiste und Werkzeugleiste wie in QGIS */
+  .titlebar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: #2b2d31; color: #e8e9eb; }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; display: block; }
+  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .titlebar h1 { flex: 1; text-align: center; font-size: .85rem; font-weight: 500; margin: 0; color: #c9ccd1; }
+  .switch { display: inline-flex; border: 1px solid #5b6068; border-radius: 6px; overflow: hidden; }
+  .switch button { padding: 4px 11px; border: 0; background: #3c3f44; color: #e8e9eb; cursor: pointer; font-size: .8rem; }
+  .switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .toolbar { flex: none; display: flex; gap: 4px; padding: 5px 10px; background: #ececec; border-bottom: 1px solid #c4c4c4; overflow: hidden; }
+  .toolbar span { width: 22px; height: 22px; border-radius: 3px; background: linear-gradient(#fafafa, #dedede); border: 1px solid #c8c8c8; flex: none; }
+  .toolbar span.sep { width: 1px; background: #c4c4c4; border: 0; margin: 0 4px; }
+  .toolbar span.ua { background: var(--accent); border-color: var(--accent-dark); }
+
+  /* Arbeitsfläche: Kartenfenster links, Plugin-Dock rechts */
+  .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; background: #ececec; }
+  .canvas { position: relative; min-width: 0; display: grid; place-items: center; background: #fff; border-right: 1px solid #c4c4c4; overflow: hidden; }
+  .canvas img { max-width: 100%; max-height: 100%; display: block; object-fit: contain; }
+  .canvas .label { position: absolute; left: 10px; top: 10px; background: rgba(255,255,255,.92); border: 1px solid #c4c4c4; border-radius: 4px;
+                   padding: 3px 8px; font-size: .78rem; color: #333; }
+  .canvas .empty { color: #8a8f96; font-size: .95rem; text-align: center; padding: 20px; }
+  .canvas .empty b { display: block; font-size: 1.1rem; color: #5b6068; margin-bottom: 4px; }
+  .maptabs { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; }
+  .maptabs button { border: 1px solid #c4c4c4; background: rgba(255,255,255,.92); border-radius: 4px; padding: 3px 9px; font-size: .78rem; cursor: pointer; }
+  .maptabs button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent-dark); color: #fff; }
+
+  .dock { display: flex; flex-direction: column; min-height: 0; background: var(--dock-bg); border-left: 1px solid var(--dock-line); }
+  .dockhead { flex: none; font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 3px 8px; }
+  .shot { position: relative; flex: 1; min-height: 0; display: flex; justify-content: center; }
+  .shot img { height: 100%; max-height: calc(100vh - 130px); width: auto; display: block; }
+  /* klickbare Knöpfe im Bild: unten links „Zurück“, unten rechts der Hauptknopf */
+  .hot { position: absolute; bottom: 1.2%; height: 5.6%; border: 0; background: transparent; cursor: pointer; border-radius: var(--radius); }
+  .hot.back { left: 2%; width: 22%; }
+  .hot.next { right: 2%; width: 40%; }
+  .hot.next::after { content: ""; position: absolute; inset: -3px; border: 3px solid var(--accent); border-radius: inherit; animation: pulse 1.6s ease-out infinite; }
+  .hot:hover { background: rgba(0,0,0,.06); }
+  @keyframes pulse { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.12); } }
+  @media (prefers-reduced-motion: reduce) { .hot.next::after { animation: none; opacity: .7; } }
+
+  /* Statuszeile wie in QGIS, mit der Erklärung zum Schritt */
+  .status { flex: none; display: flex; align-items: center; gap: 12px; padding: 7px 12px; background: #ececec; border-top: 1px solid #c4c4c4; color: #333; }
+  .status .step { font-weight: 700; white-space: nowrap; color: var(--accent-dark); }
+  .status p { margin: 0; flex: 1; min-width: 0; }
+  .status nav { display: flex; gap: 6px; flex: none; }
+  .status nav button { border: 1px solid #b9b9b9; background: #fafafa; border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+  .status nav button.go { background: var(--accent); border-color: var(--accent-dark); color: #fff; }
+  .status nav button:disabled { opacity: .4; cursor: default; }
+  .status a { color: var(--accent-dark); }
+
+  /* Startbildschirm über dem Kartenfenster */
+  .intro { max-width: 520px; text-align: center; padding: 24px; color: #333; }
+  .intro h2 { font-size: 1.6rem; margin: 0 0 8px; }
+  .intro p { margin: 0 0 10px; }
+  .intro .go { margin-top: 6px; border: 0; border-radius: 6px; padding: 10px 20px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
+  .intro small { display: block; color: #777; margin-top: 14px; line-height: 1.5; }
+  .intro a { color: var(--accent-dark); }
+
+  @media (max-width: 860px) {
+    html, body { height: auto; }
+    .workspace { grid-template-columns: 1fr; }
+    .canvas { min-height: 260px; border-right: 0; border-bottom: 1px solid #c4c4c4; }
+    .shot img { height: auto; width: 100%; max-height: none; }
+    .toolbar { display: none; }
+    .status { flex-wrap: wrap; }
+    .maptabs { left: 10px; right: 10px; top: auto; bottom: 10px; flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="titlebar">
+  <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+  <h1>QGIS – Urban Analysis (Live-Demo)</h1>
+  <div class="switch" role="group" aria-label="Stil des Plugins">
+    <button type="button" data-set="klassisch" aria-pressed="true">Klassisch</button>
+    <button type="button" data-set="pixel" aria-pressed="false">Pixel</button>
+  </div>
+</div>
+<div class="toolbar" aria-hidden="true">
+  <span></span><span></span><span></span><span class="sep"></span><span></span><span></span><span></span><span></span>
+  <span class="sep"></span><span></span><span></span><span class="sep"></span><span class="ua" title="Urban Analysis"></span>
+</div>
+
+<div class="workspace">
+  <section class="canvas" id="canvas" aria-label="Kartenfenster"></section>
+  <aside class="dock" aria-label="Plugin Urban Analysis">
+    <div class="dockhead">Urban Analysis</div>
+    <div class="shot" id="shot"></div>
+  </aside>
+</div>
+
+<div class="status">
+  <span class="step" id="stepno"></span>
+  <p id="caption"></p>
+  <nav aria-label="Blättern"><button type="button" id="prev">‹ Zurück</button><button type="button" class="go" id="next">Weiter ›</button></nav>
+</div>
+
+<script>
+(function () {
+  var REPO = "https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin";
+  // Jede Seite: Plugin-Bild (ohne Stil-Endung), nur-ein-Stil, Kartenfenster, Erklärung
+  var MAP = { bild: "09-karte-nutzung", label: "Kartenfenster" };
+  var PAGES = [
+    { step: 1, shot: "01-kbs", canvas: null, text: "Projekt-KBS: ein Koordinatensystem in Metern wählen, z. B. EPSG:25832. Das Plugin rechnet nie heimlich um." },
+    { step: 2, shot: "02-gebiet", canvas: null, text: "Untersuchungsgebiet: Layer nehmen, Polygon zeichnen oder Rechteck mit zwei Klicks; dazu der Puffer. Die Größe steht sofort da." },
+    { step: 3, shot: "03-daten", canvas: null, text: "Daten laden: OpenStreetMap, ALKIS des Bundeslands und eigene Dateien – auch mehrere zugleich." },
+    { step: 3, shot: "03-laden", canvas: null, text: "Beim Laden zeigt das Plugin den Fortschritt – klassisch als Balken, im Pixel-Stil zieht der Hase die Angel ein." },
+    { step: 3, shot: "03-wartung", only: "pixel", canvas: null, text: "Ehrlich statt still: Ist ein Dienst in Wartung, sagt das Plugin das und nennt einen Ausweg." },
+    { step: 4, shot: "04-pruefen", canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Layer prüfen: Was ist angekommen, was fehlt? Warnungen und Infos auf einen Blick." },
+    { step: 4, shot: "04-infos", canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Jeder Hinweis sagt in einem Satz, was los ist – und was zu tun ist." },
+    { step: 5, shot: "05-spalten", canvas: { bild: "09-tabelle", label: "Attributtabelle – Gebäude" }, text: "Attributzuordnung: links das Ergebnis – die aufgeräumte Attributtabelle mit lesbaren Namen, Objekt-ID vorne, Herkunft hinten." },
+    { step: 6, shot: "06-quellen", canvas: { bild: "09-karte-schwarzplan", label: "Gebäude aus ALKIS und OSM" }, text: "Harmonisierung: Dasselbe Haus aus ALKIS und OSM? Je Kategorie die Quelle wählen – danach die unsicheren Dubletten." },
+    { step: 7, shot: "07-thema", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Kartenthema: eines von sieben Themen wählen, die passenden Layer sind vorausgewählt." },
+    { step: 7, shot: "07-mobilitaet", only: "klassisch", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Anderes Thema, andere Vorauswahl: bei Mobilität & Erschließung Straßen, Wege, Bahn und Haltestellen." },
+    { step: 8, shot: "08-ausgabe", canvas: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"]], label: "Ergebnis-Layer" },
+      text: "Ausgabe: Kartenstil wählen und die Ergebnis-Layer erzeugen – oben rechts im Kartenfenster umschalten." },
+    { step: 8, shot: "08-erreichbarkeit", canvas: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, text: "Erreichbarkeit: Abstand jedes Gebäudes zum nächsten Ziel, als Luftlinie, mit Ringen um die Ziele." },
+    { step: 8, shot: "08-speichern", canvas: { tabs: [["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Karte für das PDF" },
+      text: "Speichern: PDF von A4 bis A0 mit passendem Maßstab, dazu ein GeoPackage mit allen Ergebnis-Layern." },
+    { step: 8, shot: "08-fertig", canvas: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
+      text: "Fertig – alles gespeichert. Die Quellenvermerke stehen automatisch in Tabelle und PDF." }
+  ];
+  var NAMES = { klassisch: "Klassisch", pixel: "Pixel" };
+  var root = document.documentElement, canvas = document.getElementById("canvas"), shot = document.getElementById("shot");
+  var stil = "klassisch", page = -1, tab = 0;
+  try { stil = localStorage.getItem("ua-stil") || stil; } catch (e) {}
+  if (!NAMES[stil]) stil = "klassisch";
+
+  function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + ".jpg"; }
+
+  function renderIntro() {
+    canvas.innerHTML = '<div class="intro"><h2>Urban Analysis</h2>' +
+      "<p>Ein QGIS-Plugin, das von der leeren Karte zu einer sauberen Bestandsanalyse führt – Schritt für Schritt.</p>" +
+      "<p>Klick dich durch wie im Plugin: einfach rechts im Plugin auf den <b>blau umrandeten Knopf</b> klicken. Oben wechselst du den Stil.</p>" +
+      '<button type="button" class="go" id="start">Demo starten</button>' +
+      '<small>Daten: © OpenStreetMap-Mitwirkende, ODbL · © GeoBasis-DE/LGLN 2026, CC BY 4.0 · Plugin: Apache 2.0 · ' +
+      'Mit KI-Programmierassistenten entwickelt, vom Team geprüft · <a href="' + REPO + '">Code &amp; Download</a></small></div>';
+    document.getElementById("start").addEventListener("click", forward);
+    shot.innerHTML = '<img src="' + img("01-kbs", stil) + '" alt="Das Plugin-Fenster, Stil ' + NAMES[stil] + '">' +
+                     '<button type="button" class="hot next" aria-label="Demo starten"></button>';
+    shot.querySelector(".next").addEventListener("click", forward);
+    document.getElementById("stepno").textContent = "Start";
+    document.getElementById("caption").textContent = "Eine Demo in Screenshots aus QGIS – Donnerschwee, Oldenburg.";
+  }
+
+  function renderCanvas(c) {
+    if (!c) {
+      canvas.innerHTML = '<div class="empty"><b>Kartenfenster</b>Noch keine Daten geladen – das Plugin führt dich dorthin.</div>';
+      return;
+    }
+    if (c.tabs) {
+      var t = c.tabs[Math.min(tab, c.tabs.length - 1)];
+      var html = '<img src="' + img(t[1]) + '" alt="' + t[0] + '"><span class="label">' + c.label + '</span><div class="maptabs" role="group" aria-label="Ansicht im Kartenfenster">';
+      c.tabs.forEach(function (x, i) { html += '<button type="button" data-tab="' + i + '" aria-pressed="' + (x === t) + '">' + x[0] + "</button>"; });
+      canvas.innerHTML = html + "</div>";
+      canvas.querySelectorAll("[data-tab]").forEach(function (b) {
+        b.addEventListener("click", function () { tab = +b.getAttribute("data-tab"); renderCanvas(c); });
+      });
+      return;
+    }
+    canvas.innerHTML = '<img src="' + img(c.bild) + '" alt="' + c.label + '"><span class="label">' + c.label + "</span>";
+  }
+
+  function render() {
+    if (page < 0) { renderIntro(); updateButtons(); return; }
+    var p = PAGES[page], s = p.only || stil;
+    renderCanvas(p.canvas);
+    shot.innerHTML = '<img src="' + img(p.shot, s) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[s] + '">' +
+      '<button type="button" class="hot back" aria-label="Zurück"></button>' +
+      (page < PAGES.length - 1 ? '<button type="button" class="hot next" aria-label="Weiter"></button>' : "");
+    shot.querySelector(".back").addEventListener("click", back);
+    var n = shot.querySelector(".next");
+    if (n) n.addEventListener("click", forward);
+    document.getElementById("stepno").textContent = "Schritt " + p.step + " von 8";
+    document.getElementById("caption").innerHTML = p.text + (p.only && p.only !== stil ? " <i>(nur im Stil " + NAMES[p.only] + " aufgenommen)</i>" : "") +
+      (page === PAGES.length - 1 ? ' · <a href="' + REPO + '">Code &amp; Download auf GitHub</a>' : "");
+    updateButtons();
+  }
+
+  function updateButtons() {
+    document.getElementById("prev").disabled = page < 0;
+    document.getElementById("next").disabled = page >= PAGES.length - 1;
+  }
+  function forward() { if (page < PAGES.length - 1) { page++; tab = 0; render(); } }
+  function back() { if (page >= 0) { page--; tab = 0; render(); } }
+
+  function setStil(s) {
+    stil = s; root.setAttribute("data-stil", s);
+    document.querySelectorAll(".switch button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-set") === s)); });
+    try { localStorage.setItem("ua-stil", s); } catch (e) {}
+    render();
+  }
+
+  document.querySelectorAll(".switch button").forEach(function (b) { b.addEventListener("click", function () { setStil(b.getAttribute("data-set")); }); });
+  document.getElementById("prev").addEventListener("click", back);
+  document.getElementById("next").addEventListener("click", forward);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowRight") forward();
+    if (e.key === "ArrowLeft") back();
+  });
+  window.addEventListener("load", function () {
+    PAGES.forEach(function (p) { [p.only || "klassisch", p.only ? null : "pixel"].forEach(function (s) { if (s) new Image().src = img(p.shot, s); }); });
+  });
+
+  root.setAttribute("data-stil", stil);
+  document.querySelectorAll(".switch button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-set") === stil)); });
+  render();
+})();
+</script>
+</body>
+</html>
