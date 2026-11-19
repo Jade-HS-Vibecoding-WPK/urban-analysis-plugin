@@ -393,10 +393,27 @@ Branch `feature/pipeline-alkis-auftraege` (liegt auf F7).
 - **Gemeinsam (G12):** E11 im Plan ändern (Bundesland von Hand).
 - Tests: `tests/test_alkis_auftraege.py` (7).
 
+## M25 – Themenkatalog und Einordnung (19.11.2026, PR #64)
+
+- `topics_catalog.json` (sieben Themen, Klassen mit Regeln für OSM und
+  ALKIS, Stufen, Grenzen, Tipps) und `topics.py` (`topic_catalog()`,
+  `classify_topics()`); Tests `tests/test_topics.py` (22).
+- Overpass holt zusätzlich `craft`, `heritage`, `historic`, `office`,
+  `tourism` (`nur_fuer_themen`).
+- **Größe live geprüft** (Donnerschwee, ca. 1,7 × 1,9 km, ohne Puffer):
+  alt 3,04 MB / 20 963 Knoten / 3 697 Wege, neu 3,06 MB / 21 004 Knoten /
+  3 697 Wege → **+0,6 %**, kein Problem. Im Gebiet: 26× `tourism`,
+  13× `office`, 8× `craft`, keine `heritage`/`historic` (für Geschichte &
+  Stadtbild in G14 ein Gebiet mit Altstadt testen). Overpass gab einmal 502
+  (überlastet), beim zweiten Versuch ging es.
+- Offen: Niedersachsen-Cache kennt die neuen Schlüssel noch nicht;
+  ALKIS-Gebäudefunktionen in G14 mit echten Daten prüfen; Aufruf von
+  `classify_topics()` in Schritt 7 baut Person Windows (W19).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 330 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 423 grün.
 
 ## Als Nächstes (Person Mac)
 

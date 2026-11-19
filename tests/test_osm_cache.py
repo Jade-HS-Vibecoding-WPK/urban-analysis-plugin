@@ -60,7 +60,10 @@ def test_plan_lists_small_and_big_tiles_and_missing_keys():
     big = [url for url in plan.tile_urls if "/osm-gross/12/" in url]
     assert len(small) == len(tiles) and all(url.startswith(base) for url in plan.tile_urls)
     assert big == [base + f"osm-gross/12/{tiles[0][0] >> 3}/{tiles[0][1] >> 3}.json.gz"]
-    assert plan.missing_keys == ("barrier", "building:part", "power")
+    # M25: the topic keys are not in this cache manifest yet, so they are named too.
+    assert plan.missing_keys == (
+        "barrier", "building:part", "power", "craft", "heritage", "historic", "office", "tourism"
+    )
     assert plan.attribution.startswith("© OpenStreetMap-Mitwirkende")
     assert manifest_url(CATALOG).endswith("/daten/manifest.json")
 
@@ -88,7 +91,7 @@ def test_elements_become_gdal_like_layers():
     elements = [
         {"type": "node", "id": 1, "lat": 53.1, "lon": 8.2,
          "tags": {"shop": "supermarket", "name": 'Markt "Mitte"', "opening_hours": "Mo-Sa"}},
-        {"type": "node", "id": 2, "lat": 53.1, "lon": 8.2, "tags": {"office": "company"}},  # not asked for
+        {"type": "node", "id": 2, "lat": 53.1, "lon": 8.2, "tags": {"vending": "parcel"}},  # not asked for
         {"type": "way", "id": 10, "geometry": ring(8.2, 53.1), "tags": {"building": "house", "building:levels": "2"}},
         {"type": "way", "id": 11, "geometry": ring(8.3, 53.1), "tags": {"highway": "residential"}},
         {"type": "way", "id": 12, "geometry": ring(8.4, 53.1), "tags": {"highway": "pedestrian", "area": "yes"}},
@@ -149,6 +152,7 @@ def test_hint_names_the_missing_features_readably():
     assert issue.message == (
         "OSM-Daten kommen aus dem Niedersachsen-Cache (Stand 17.11.2026), weil der OSM-Server "
         "nicht geantwortet hat. Nicht enthalten: Hecken, Zäune und Mauern, Gebäudeteile, "
-        "Stromleitungen und -anlagen."
+        "Stromleitungen und -anlagen, Handwerksbetriebe, Denkmalschutz, Historische Orte, Büros, "
+        "Tourismus und Aussichtspunkte."
     )
     assert "2 große Fläche(n)" in issue.details
