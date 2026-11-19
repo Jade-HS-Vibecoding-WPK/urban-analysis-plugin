@@ -512,6 +512,47 @@ def sources_text(data_source, day):
     )
 
 
+# Legend too long for the panel: first smaller text in one column, columns
+# only when needed - (columns, text size factor), tried in this order.
+LEGEND_STEPS = ((1, 1.0), (1, 0.85), (1, 0.72), (2, 0.72), (1, 0.6), (2, 0.6), (2, 0.5),
+                (3, 0.5), (3, 0.42))
+LEGEND_CUT_TITLE = "Legende (gekürzt – für alle Einträge ein größeres Papierformat wählen)"
+
+
+def fit_legend(legend, width, height, factor=1.0):
+    """Make the legend fit into width × height (mm): smaller text and more
+    columns step by step.  Returns False if even the smallest step is too
+    big (the caller then says so in the title)."""
+    from qgis.core import QgsLayoutUtils, QgsLegendRenderer, QgsLegendStyle
+
+    def content_size():
+        """Real size of the legend content in mm (not the frame size)."""
+        context = QgsLayoutUtils.createRenderContextForLayout(legend.layout(), None)
+        return QgsLegendRenderer(legend.model(), legend.legendSettings()).minimumSize(context)
+
+    styles = (QgsLegendStyle.Title, QgsLegendStyle.Group, QgsLegendStyle.Subgroup,
+              QgsLegendStyle.SymbolLabel)
+    base = {}
+    for kind in styles:
+        size = legend.rstyle(kind).textFormat().size()
+        base[kind] = size * factor if size > 0 else 10 * factor
+    symbol_w, symbol_h = legend.symbolWidth() * factor, legend.symbolHeight() * factor
+    for columns, shrink in LEGEND_STEPS:
+        for kind in styles:
+            text_format = legend.rstyle(kind).textFormat()
+            text_format.setSize(base[kind] * shrink)
+            legend.rstyle(kind).setTextFormat(text_format)
+        legend.setSymbolWidth(symbol_w * shrink)
+        legend.setSymbolHeight(symbol_h * shrink)
+        legend.setColumnCount(columns)
+        legend.setSplitLayer(True)
+        legend.setEqualColumnWidth(True)
+        size = content_size()
+        if size.height() <= height and size.width() <= width:
+            return True
+    return False
+
+
 def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
                    title, subtitle="", data_source="", page="A4", orientation="quer",
                    scale=None, north_arrow=True, project=None, day=None, grey_outside=False):
@@ -613,10 +654,14 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend.model().setRootGroup(root)
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)
-    legend.setResizeToContents(False)
     legend.setReferencePoint(QgsLayoutItemLegend.UpperLeft)  # starts at the top, not centred
     bottom_reserved = 42 * factor
-    place(legend, px, y, pw, max(20.0, py + ph - y - bottom_reserved))
+    legend_h = max(20.0, py + ph - y - bottom_reserved)
+    place(legend, px, y, pw, legend_h)
+    if not fit_legend(legend, pw, legend_h, factor):
+        legend.setTitle(LEGEND_CUT_TITLE)  # never cut silently
+    legend.setResizeToContents(False)
+    place(legend, px, y, pw, legend_h)
 
     base_y = py + ph - bottom_reserved
     if north_arrow:
