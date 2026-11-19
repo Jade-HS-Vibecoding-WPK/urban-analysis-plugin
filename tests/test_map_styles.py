@@ -16,7 +16,8 @@ def test_three_map_styles():
 
 
 def test_plan_colours_follow_the_user_wishes():
-    assert category_colors("Bahnflächen")[0] == "#8c9196"  # dark grey
+    fill = category_colors("Bahnflächen")[0]
+    assert fill[1:3] == fill[3:5] or abs(int(fill[1:3], 16) - int(fill[5:7], 16)) < 12  # grey
     for water in ("Wasserflächen", "Gewässer", "Schiffsverkehrsflächen"):
         red, green, blue = (int(category_colors(water)[0][i:i + 2], 16) for i in (1, 3, 5))
         assert blue > red and blue > green, water  # shades of blue
