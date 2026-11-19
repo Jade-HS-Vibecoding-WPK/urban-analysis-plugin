@@ -31,6 +31,16 @@ from .data_pipeline import (
     apply_data_source,
     default_column_decisions,
 )
+from .accessibility_view import (
+    AccessibilityChoice,
+    RadiusError,
+    build_layers as build_accessibility_layers,
+    calculate as calculate_accessibility,
+    choice_problem,
+    parse_radii,
+    radii_text,
+    ring_colors,
+)
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import (
     DownloadCanceled,
@@ -317,6 +327,18 @@ STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5")
                 "drop": ("#f1f2f4", "#b5bcc4")}
 
 
+ACCESS_SECTION_LABEL = "Erreichbarkeit (zusätzlich)"
+ACCESS_ENABLE_LABEL = "Erreichbarkeit berechnen"
+ACCESS_INTRO = ("Wie weit ist es von jedem Gebäude zum nächsten Ziel (Luftlinie)? Ergebnis: "
+                "Abstand je Gebäude in der Attributtabelle und Radien um die Ziele in der Karte.")
+ACCESS_TARGETS_HINT = ("Ganze Kategorien ankreuzen (z. B. „ÖPNV-Haltestellen“) oder aufklappen "
+                       "und einzelne Arten wählen (z. B. nur „Supermarkt“). Mehrere Ziele sind möglich.")
+ACCESS_NO_TARGETS = ("In den geladenen Daten gibt es keine Ziele wie Haltestellen, Supermärkte "
+                     "oder Arztpraxen. Diese kommen aus OpenStreetMap – bitte in Schritt 3 "
+                     "„OpenStreetMap“ laden.")
+ACCESS_RADII_HINT = ("Mehrere Radien mit Komma trennen. Jeder Radius wird als gestrichelte "
+                     "Linie um die Ziele gezeichnet; gemessen wird die Luftlinie.")
+ACCESS_FILL_LABEL = "Flächen einfärben (Deckkraft 15 %)"
 STEP5_QUESTION = (
     "Deine Daten haben viele Spalten. Sollen sie automatisch zugeordnet werden? "
     "Danach siehst du das Ergebnis als Tabelle und kannst bei Bedarf noch ändern."
@@ -552,6 +574,7 @@ def run_signature(flow, draft, paths):
         result.selected_topic, result.study_area_wkt, result.buffer_meters,
         result.output, sorted((flow.duplicate_decisions or {}).items()),
         suggestions, sorted((k, str(v)) for k, v in draft.items()),
+        repr(getattr(flow, "accessibility", None)), repr(getattr(flow, "column_values", None)),
         sorted((k, str(v)) for k, v in paths.items()),
     ))
 
@@ -1064,7 +1087,12 @@ def _create_dock(plugin):
         QgsSettings,
         QgsTask,
     )
-    from qgis.gui import QgsDockWidget, QgsMapLayerComboBox, QgsProjectionSelectionWidget
+    from qgis.gui import (
+        QgsColorButton,
+        QgsDockWidget,
+        QgsMapLayerComboBox,
+        QgsProjectionSelectionWidget,
+    )
     from qgis.PyQt.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, QTimer
 
     from .ui.widgets.pixel_button import PixelButton
@@ -1101,6 +1129,8 @@ def _create_dock(plugin):
         QAbstractSpinBox,
         QTableWidget,
         QTableWidgetItem,
+        QTreeWidget,
+        QTreeWidgetItem,
         QApplication,
         QButtonGroup,
         QCheckBox,
@@ -2761,6 +2791,146 @@ def _create_dock(plugin):
         page.widgets.update(
             topic=topic_input, categories=category_list, confirm_missing=confirm_missing
         )
+        build_accessibility(page)
+
+    # 7b Erreichbarkeit (W16): second map theme, in three small steps
+    def build_accessibility(page):
+        flow = workflow()
+        choice = getattr(flow, "accessibility", None) or AccessibilityChoice()
+        try:
+            from .accessibility import target_choices
+            available = target_choices(flow.result.harmonized_records)
+        except Exception:  # settings missing: no targets, said below
+            available = {}
+        panel = collapsible(page, "access", ACCESS_SECTION_LABEL, None, opened=choice.enabled)
+        intro = QLabel(ACCESS_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        panel.addWidget(intro)
+        enabled = QCheckBox(ACCESS_ENABLE_LABEL)
+        enabled.setChecked(choice.enabled)
+        panel.addWidget(enabled)
+        details = QWidget()
+        details_layout = QVBoxLayout(details)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        panel.addWidget(details)
+
+        def step_heading(text):
+            label = QLabel(f"<b>{text}</b>")
+            label.setWordWrap(True)
+            details_layout.addWidget(label)
+
+        # ① targets: whole categories or single kinds (subtypes)
+        step_heading("① Ziele wählen")
+        tree = QTreeWidget()
+        tree.setHeaderHidden(True)
+        if available:
+            hint = QLabel(ACCESS_TARGETS_HINT)
+            hint.setWordWrap(True)
+            set_role(hint, "hint")
+            details_layout.addWidget(hint)
+            for category, kinds in available.items():
+                total = sum(count for _kind, count in kinds)
+                parent = QTreeWidgetItem([f"{category} ({total})"])
+                parent.setData(0, Qt.UserRole, category)
+                parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
+                chosen = choice.targets.get(category)
+                parent.setCheckState(0, Qt.Unchecked)
+                for kind, count in kinds:
+                    child = QTreeWidgetItem([f"{kind} ({count})"])
+                    child.setData(0, Qt.UserRole, kind)
+                    child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
+                    on = chosen is not None and (not chosen or kind in chosen)
+                    child.setCheckState(0, Qt.Checked if on else Qt.Unchecked)
+                    parent.addChild(child)
+                tree.addTopLevelItem(parent)
+            rows = sum(1 + top.childCount() for top in
+                       (tree.topLevelItem(i) for i in range(tree.topLevelItemCount())))
+            tree.setMinimumHeight(min(rows, 12) * 22 + 8)
+            tree.setMaximumHeight(max(tree.topLevelItemCount(), 3) * 26 + 120)
+            details_layout.addWidget(tree)
+        else:
+            none = QLabel(ACCESS_NO_TARGETS)
+            none.setWordWrap(True)
+            set_role(none, "warning")
+            details_layout.addWidget(none)
+
+        # ② radii: own values, always drawn as dashed lines
+        step_heading("② Radien in Metern")
+        radii = QLineEdit(radii_text(choice.radii))
+        radii.setPlaceholderText("z. B. 300, 500")
+        details_layout.addWidget(radii)
+        radii_hint = QLabel(ACCESS_RADII_HINT)
+        radii_hint.setWordWrap(True)
+        set_role(radii_hint, "hint")
+        details_layout.addWidget(radii_hint)
+
+        # ③ display: fill between the rings (15 %), colours per ring
+        step_heading("③ Darstellung")
+        fill = QCheckBox(ACCESS_FILL_LABEL)
+        fill.setChecked(choice.fill)
+        details_layout.addWidget(fill)
+        colors_box = QWidget()
+        colors_layout = QHBoxLayout(colors_box)
+        colors_layout.setContentsMargins(INDENT_PX, 0, 0, 0)
+        details_layout.addWidget(colors_box)
+        page.widgets["access_colors"] = []
+
+        def refresh_colors(*_args):
+            _clear_layout(colors_layout)
+            try:
+                values = parse_radii(radii.text())
+            except RadiusError:
+                values = choice.radii
+            current = [b.color().name() for b in page.widgets["access_colors"]] or list(choice.colors)
+            buttons = []
+            for radius, color in zip(values, ring_colors(values, current)):
+                box = QWidget()
+                box_layout = QVBoxLayout(box)
+                box_layout.setContentsMargins(0, 0, 4, 0)
+                button = QgsColorButton()
+                button.setColor(QColor(color))
+                button.setFixedWidth(46)
+                button.setToolTip(f"Farbe für den Ring bis {radius} m")
+                box_layout.addWidget(button)
+                caption = QLabel(f"bis {radius} m")
+                set_role(caption, "hint")
+                box_layout.addWidget(caption)
+                colors_layout.addWidget(box)
+                buttons.append(button)
+            colors_layout.addStretch()
+            page.widgets["access_colors"] = buttons
+            colors_box.setVisible(fill.isChecked())
+
+        radii.editingFinished.connect(refresh_colors)
+        fill.toggled.connect(lambda on: colors_box.setVisible(on))
+        refresh_colors()
+        details.setEnabled(enabled.isChecked())
+        enabled.toggled.connect(details.setEnabled)
+        page.widgets.update(access_enabled=enabled, access_tree=tree, access_radii=radii,
+                            access_fill=fill, access_available=bool(available))
+
+    def accessibility_from(page):
+        """Read the step-7 accessibility settings (raises RadiusError)."""
+        widgets = page.widgets
+        targets = {}
+        tree = widgets["access_tree"]
+        for index in range(tree.topLevelItemCount()):
+            parent = tree.topLevelItem(index)
+            state = parent.checkState(0)
+            if state == Qt.Checked:
+                targets[parent.data(0, Qt.UserRole)] = ()  # whole category
+            elif state == Qt.PartiallyChecked:
+                targets[parent.data(0, Qt.UserRole)] = tuple(
+                    parent.child(i).data(0, Qt.UserRole) for i in range(parent.childCount())
+                    if parent.child(i).checkState(0) == Qt.Checked)
+        return AccessibilityChoice(
+            enabled=widgets["access_enabled"].isChecked(),
+            targets=targets,
+            radii=parse_radii(widgets["access_radii"].text()),
+            fill=widgets["access_fill"].isChecked(),
+            colors=tuple(button.color().name() for button in widgets["access_colors"]),
+        )
 
     def validate_topic(page):
         category_list = page.widgets["categories"]
@@ -2777,6 +2947,16 @@ def _create_dock(plugin):
             )
         except ValueError as error:
             return reject(str(error))
+        try:
+            choice = accessibility_from(page)
+        except RadiusError as error:
+            open_sections(page, ["access"])
+            return reject(str(error))
+        problem = choice_problem(choice)
+        if problem:
+            open_sections(page, ["access"])
+            return reject(problem)
+        workflow().accessibility = choice
         return True
 
     # 8 Ausgabe: QGIS layers always; GeoPackage/PDF with a save location each
@@ -3036,6 +3216,11 @@ def _create_dock(plugin):
                 flow.result.harmonized_records = apply_column_decisions(
                     flow.result.harmonized_records, flow.result.columns,
                     getattr(flow, "column_decisions", None))
+            access = getattr(flow, "accessibility", None)
+            access_issues, access_targets = [], {}
+            if access is not None and access.enabled:  # W16: distances (pipeline M20)
+                (flow.result.harmonized_records, access_issues,
+                 access_targets) = calculate_accessibility(flow.result.harmonized_records, access)
             flow.result.harmonized_records = apply_data_source(
                 flow.result.harmonized_records, output.data_source)
         except ValueError as error:
@@ -3058,6 +3243,17 @@ def _create_dock(plugin):
                 key=lambda item: -draw_rank(categories.get(item[0]))))
             group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
             dock.last_group_name = group.name()
+            if access_targets:
+                # targets and dashed radii on top, one sub-group per target
+                access_layers = {}
+                for label, layers in build_accessibility_layers(
+                        access_targets, access, flow.result.project_crs):
+                    sub = group.insertGroup(0, label)
+                    for layer in layers:
+                        QgsProject.instance().addMapLayer(layer, False)
+                        sub.addLayer(layer)
+                        access_layers[layer.id()] = layer
+                layer_objects = {**access_layers, **layer_objects}
         finally:
             QApplication.restoreOverrideCursor()
         dock.last_run_signature = signature
@@ -3071,6 +3267,8 @@ def _create_dock(plugin):
         QTimer.singleShot(0, dock.fit_wrapped_labels)
         dock.primary_button.setText(RERUN_ACTION)
         text = result_layers_text(reports)
+        for issue in access_issues:  # e.g. "79 % höchstens 300 m vom nächsten Ziel"
+            text += "\n" + issue.message
         if saved:
             text += "\nGespeichert: " + ", ".join(path.name for _kind, path in saved) + "."
         if failures:
