@@ -53,6 +53,7 @@ from .osm_download import (
     DownloadError,
     ensure_project_crs,
     lonlat_box,
+    run_alkis_download,
     run_download,
     unique_path,
 )
@@ -62,6 +63,7 @@ from .outputs import (
     PAGE_SIZES_MM,
     SCALES,
     build_result_layers,
+    data_source_text,
     export_map_pdf,
     format_count,
     scale_label,
@@ -176,9 +178,7 @@ PAGE_ACTIONS = (
     UI_LABELS["start_processing"],
 )
 
-# Step 3 (W10): sources OSM / ALKIS / own file.  OSM and ALKIS are
-# placeholders until M10 (sources.py: suggest_state, download jobs) and W11
-# (download in QGIS); only "Eigene Datei" loads data for now.
+# Step 3 (W10, M13): sources OSM / ALKIS / own file, several in one run.
 SOURCE_OSM_LABEL = "OpenStreetMap (OSM)"
 SOURCE_ALKIS_LABEL = "ALKIS (amtliche Daten)"
 SOURCE_OWN_LABEL = "Eigene Datei"
@@ -187,46 +187,39 @@ SOURCE_OSM_HINT = (
     "Quellenvermerk: © OpenStreetMap-Mitwirkende (ODbL)."
 )
 SOURCE_ALKIS_HINT = (
-    "Amtliches Liegenschaftskataster deines Bundeslands. Ob das Land ALKIS frei "
-    "anbietet, prüft das Plugin, sobald der Quellen-Katalog fertig ist."
+    "Amtliches Liegenschaftskataster deines Bundeslands: Gebäude und tatsächliche "
+    "Nutzung, direkt vom Dienst des Landes. Nicht jedes Land bietet ALKIS frei an – "
+    "die Liste zeigt, wo es geht."
 )
+PARCELS_LABEL = "Auch Flurstücke laden"
+PARCELS_HINT = "Flurstücke machen den Download deutlich größer und werden für die Karte selten gebraucht."
 CHOOSE_STATE_ITEM = "Bundesland wählen …"
-# Placeholder until M10 suggests the state from the study area (E11).
-GERMAN_STATES = (
-    "Baden-Württemberg", "Bayern", "Berlin", "Brandenburg", "Bremen", "Hamburg",
-    "Hessen", "Mecklenburg-Vorpommern", "Niedersachsen", "Nordrhein-Westfalen",
-    "Rheinland-Pfalz", "Saarland", "Sachsen", "Sachsen-Anhalt",
-    "Schleswig-Holstein", "Thüringen",
-)
 LOCAL_DATA_HINT = (
     "Eine GeoPackage-Datei (.gpkg) von deinem Rechner, z. B. eine eigene "
-    "Kartierung oder ein eigener ALKIS-Export. Pro Durchlauf wird eine Datei geladen."
+    "Kartierung oder ein eigener ALKIS-Export."
 )
 CHOOSE_SOURCE_MESSAGE = (
     "Bitte mindestens eine Quelle ankreuzen: „OpenStreetMap“, „ALKIS“ oder "
     "„Eigene Datei“."
 )
 CHOOSE_STATE_MESSAGE = "Für ALKIS bitte das Bundesland wählen."
-DOWNLOAD_PENDING_MESSAGE = (
-    "Das Herunterladen von ALKIS-Daten wird in einem späteren Schritt "
-    "angeschlossen. Bitte vorerst „OpenStreetMap“ oder „Eigene Datei“ verwenden."
-)
-ONE_SOURCE_MESSAGE = (
-    "Mehrere Quellen in einem Durchlauf kommen in einem späteren Schritt. Bitte "
-    "vorerst nur eine Quelle ankreuzen: „OpenStreetMap“ oder „Eigene Datei“."
+STATE_NOT_READY_MESSAGE = (
+    "ALKIS für {name} {status}: {note}\n"
+    "Was tun: „ALKIS“ abwählen und mit OpenStreetMap arbeiten oder einen eigenen "
+    "ALKIS-Export als „Eigene Datei“ laden."
 )
 LAST_DOWNLOAD_FOLDER_SETTING = "urban_analysis/last_download_folder"
-DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die OSM-Daten wählen"
+DOWNLOAD_FOLDER_TITLE = "Bitte Speicherort für die heruntergeladenen Daten wählen"
 CHOOSE_FOLDER_ACTION = "Speicherort wählen"
 
 
 def folder_chosen_text(folder):
     """Info after choosing the download folder (button now 'Daten laden')."""
     return (f"Speicherort gewählt: {short_folder(folder)}. "
-            "Jetzt auf „Daten laden“ klicken, um die OSM-Daten herunterzuladen.")
+            "Jetzt auf „Daten laden“ klicken, um die Daten herunterzuladen.")
 DOWNLOAD_FOLDER_HINT = (
-    "Zuerst unten „Speicherort wählen“: In diesem Ordner werden die OSM-Daten "
-    "gespeichert (z. B. dein Projektordner). Danach „Daten laden“."
+    "Zuerst unten „Speicherort wählen“: In diesem Ordner werden die heruntergeladenen "
+    "Daten gespeichert (z. B. dein Projektordner). Danach „Daten laden“."
 )
 DOWNLOAD_NO_FOLDER_MESSAGE = "Kein Ordner gewählt – es wurde nichts heruntergeladen."
 DOWNLOAD_TOO_LARGE_MESSAGE = (
@@ -683,22 +676,68 @@ def issue_icon_key(flow, issue):
 
 
 def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_data):
-    """Check the step-3 sources.  Returns None (go on: load the file or keep
-    the loaded data) or (kind, text) with kind 'error' or 'info'."""
+    """Check the step-3 sources (several at once, M13).  ``state`` is the
+    chosen ``sources.StateInfo`` or None.  Returns None (go on) or
+    (kind, text) with kind 'error' or 'info'."""
+    from .sources import STATE_BLOCKED, STATE_READY
+
     if not (osm or alkis or own):
         return None if has_data else ("error", CHOOSE_SOURCE_MESSAGE)
-    if alkis and not state:
+    if alkis and state is None:
         return ("error", CHOOSE_STATE_MESSAGE)
     if (osm or alkis) and download_km2 is not None and is_oversized(download_km2):
         return ("error", DOWNLOAD_TOO_LARGE_MESSAGE.format(
             size=format_km2(download_km2), limit=MAX_DOWNLOAD_TEXT))
-    if alkis:
-        return ("info", DOWNLOAD_PENDING_MESSAGE)  # until M10b, never silent
-    if osm and own:
-        return ("error", ONE_SOURCE_MESSAGE)  # until M13 (several sources)
-    if own and path is None and not has_data:
+    if alkis and state.status != STATE_READY:
+        status = "ist gesperrt" if state.status == STATE_BLOCKED else "kommt später"
+        return ("error", STATE_NOT_READY_MESSAGE.format(
+            name=state.name, status=status, note=state.note))
+    if own and path is None:
         return ("error", CHOOSE_FILE_MESSAGE)
-    return None  # OSM: download (W11); own file: load it
+    return None  # download OSM/ALKIS, load the own file, all in one run
+
+
+SOURCES_TITLE = "Gleiche Objekte aus mehreren Quellen"
+SOURCES_INTRO = (
+    "Manche Objekte gibt es in ALKIS und in OSM, z. B. dasselbe Gebäude. Wähle je "
+    "Kategorie, welche Quelle bleibt – die andere Fassung wird weggelassen. Objekte, "
+    "die es nur in einer Quelle gibt, bleiben immer erhalten."
+)
+UNCERTAIN_SOURCES_HINT = (
+    "Unsicher heißt: Die Flächen weichen um mehr als 20 % ab – es könnten auch "
+    "verschiedene Objekte sein. Ohne Häkchen bleiben bei diesen Paaren beide erhalten."
+)
+
+
+def source_title_text(category, count, kinds):
+    """'Gebäude: 812 in ALKIS und OSM'."""
+    return f"{category}: {format_count(count)} in {' und '.join(kinds)}"
+
+
+def source_choice_hint_text(choice):
+    """What happens with the choice, with the counts."""
+    certain = choice.group_count - choice.uncertain_count
+    return (f"{format_count(certain)} sichere Paare werden auf die gewählte Quelle reduziert"
+            + (f", {format_count(choice.uncertain_count)} sind unsicher." if choice.uncertain_count
+               else "."))
+
+
+def uncertain_sources_label(count):
+    return f"Auch die {format_count(count)} unsicheren Fälle so entscheiden"
+
+
+def sources_applied_text(removed):
+    if not removed:
+        return "Quellen abgeglichen: Es wurde nichts weggelassen."
+    return (f"Quellen abgeglichen: {format_count(removed)} doppelte Objekte aus der jeweils "
+            "anderen Quelle weggelassen.")
+
+
+def state_item_text(state):
+    """Entry of the state list: 'Niedersachsen' or 'Bayern (kommt später)'."""
+    from .sources import STATE_READY
+
+    return state.name if state.status == STATE_READY else f"{state.name} ({state.status})"
 
 
 def output_slug(text):
@@ -1255,6 +1294,7 @@ def _create_dock(plugin):
             self.last_group_name = None
             self.step9_tab = "output"  # open area of the last step
             self.last_access_lines = []  # result of the last accessibility run
+            self.sources = []  # SourceFile of the last load (licence block, E28)
             self.download_feedback = None  # QgsFeedback of a running OSM download
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -1676,6 +1716,7 @@ def _create_dock(plugin):
                 self.next_message = None
                 self.step9_tab = "output"
                 self.last_access_lines = []
+                self.sources = []
                 self.last_group_name = None
                 for page in self.pages:
                     if page.rebuild:
@@ -2092,13 +2133,22 @@ def _create_dock(plugin):
         question.setWordWrap(True)
         page.layout.addWidget(question)
 
-        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT),
-                      hint_label(DOWNLOAD_FOLDER_HINT))
+        source_choice(page, "osm", SOURCE_OSM_LABEL, hint_label(SOURCE_OSM_HINT))
+
+        from .sources import alkis_states
 
         state = QComboBox()
-        state.addItem(CHOOSE_STATE_ITEM)
-        state.addItems(GERMAN_STATES)
-        source_choice(page, "alkis", SOURCE_ALKIS_LABEL, hint_label(SOURCE_ALKIS_HINT), state)
+        state.addItem(CHOOSE_STATE_ITEM, None)
+        try:
+            states = alkis_states()
+        except Exception as error:  # catalog broken: said, not hidden
+            states = []
+            dock.show_message(f"Die Liste der Bundesländer fehlt: {error_text(error)}")
+        for info in states:
+            state.addItem(state_item_text(info), info)
+        parcels = QCheckBox(PARCELS_LABEL)
+        source_choice(page, "alkis", SOURCE_ALKIS_LABEL, hint_label(SOURCE_ALKIS_HINT), state,
+                      parcels, hint_label(PARCELS_HINT))
 
         choose_button = QPushButton("Datei wählen …")
         set_role(choose_button, "secondary")
@@ -2106,25 +2156,33 @@ def _create_dock(plugin):
         file_info = hint_label("Noch keine Datei gewählt.")
         source_choice(page, "own", SOURCE_OWN_LABEL, hint_label(LOCAL_DATA_HINT),
                       choose_button, file_info)
+        folder_hint = hint_label(DOWNLOAD_FOLDER_HINT)
+        page.layout.addWidget(folder_hint)
 
         page.widgets.update(
-            state=state, choose_button=choose_button, file_info=file_info, path=None,
-            download_folder=None,
+            state=state, parcels=parcels, choose_button=choose_button, file_info=file_info,
+            path=None, download_folder=None,
         )
         choose_button.clicked.connect(lambda: choose_file(page))
 
+        def downloads():
+            return page.widgets["osm"].isChecked() or page.widgets["alkis"].isChecked()
+
         def action_text():
             """'Speicherort wählen' first for downloads, then 'Daten laden'."""
-            if page.widgets["osm"].isChecked() and page.widgets.get("download_folder") is None:
+            if downloads() and page.widgets.get("download_folder") is None:
                 return CHOOSE_FOLDER_ACTION
             return UI_LABELS["load_data"]
 
         def refresh_action(*_args):
+            folder_hint.setVisible(downloads() and page.widgets.get("download_folder") is None)
             if dock.pages and dock.pages[dock.current] is page:
                 dock.primary_button.setText(action_text())
 
         page.widgets["action_text"] = action_text
         page.widgets["osm"].toggled.connect(refresh_action)
+        page.widgets["alkis"].toggled.connect(refresh_action)
+        refresh_action()
 
     def choose_file(page):
         """Open the system file dialog and remember the chosen GeoPackage."""
@@ -2146,13 +2204,10 @@ def _create_dock(plugin):
 
     def validate_data(page):
         widgets = page.widgets
-        state = widgets["state"]
+        osm, alkis, own = (widgets[key].isChecked() for key in ("osm", "alkis", "own"))
+        state = widgets["state"].currentData() if alkis else None
         problem = source_choice_problem(
-            osm=widgets["osm"].isChecked(),
-            alkis=widgets["alkis"].isChecked(),
-            state=state.currentText() if state.currentIndex() > 0 else None,
-            own=widgets["own"].isChecked(),
-            path=widgets["path"],
+            osm=osm, alkis=alkis, state=state, own=own, path=widgets["path"],
             download_km2=dock.settings.get("download_km2"),
             has_data=plugin.workflow is not None,
         )
@@ -2160,28 +2215,26 @@ def _create_dock(plugin):
             kind, text = problem
             dock.show_message(text, kind=kind)
             return False
-        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
-            if widgets["osm"].isChecked() or widgets["own"].isChecked():
-                return reject(MISSING_AREA_MESSAGE)
-        if widgets["osm"].isChecked():
-            if widgets.get("download_folder") is None:
-                # first click: only choose the folder, the button then says "Daten laden"
-                folder = QFileDialog.getExistingDirectory(
-                    dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
-                if not folder:
-                    dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
-                    return False
-                QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
-                widgets["download_folder"] = folder
-                dock.primary_button.setText(UI_LABELS["load_data"])
-                dock.show_message(folder_chosen_text(folder), kind="info")
-                return False
-            start_osm_download(widgets["download_folder"])
-            return False  # the page changes when download and import are done
-        if not widgets["own"].isChecked() or widgets["path"] is None:
+        if not (osm or alkis or own):
             return True  # data already loaded (earlier run or Python console)
-        start_import(widgets["path"])
-        return False  # the page changes when the background import is done
+        if not {"project_crs", "study_area_wkt", "buffer_meters"} <= set(dock.settings):
+            return reject(MISSING_AREA_MESSAGE)
+        if (osm or alkis) and widgets.get("download_folder") is None:
+            # first click: only choose the folder, the button then says "Daten laden"
+            folder = QFileDialog.getExistingDirectory(
+                dock, DOWNLOAD_FOLDER_TITLE, str(download_folder()))
+            if not folder:
+                dock.show_message(DOWNLOAD_NO_FOLDER_MESSAGE, kind="info")
+                return False
+            QgsSettings().setValue(LAST_DOWNLOAD_FOLDER_SETTING, folder)
+            widgets["download_folder"] = folder
+            dock.primary_button.setText(UI_LABELS["load_data"])
+            dock.show_message(folder_chosen_text(folder), kind="info")
+            return False
+        start_load(osm=osm, state=state, parcels=widgets["parcels"].isChecked(),
+                   own_path=widgets["path"] if own else None,
+                   folder=widgets.get("download_folder"))
+        return False  # the page changes when downloads and import are done
 
     def download_folder():
         """Folder suggested in the folder dialog (E14/E18): the last one, else
@@ -2192,36 +2245,117 @@ def _create_dock(plugin):
         home = QgsProject.instance().homePath()
         return Path(home) if home and Path(home).is_dir() else Path.home()
 
-    def start_osm_download(folder):
-        """W11: plan with sources.py, download into ``folder`` in the
-        background, then load the GeoPackage like an own file."""
-        settings = dict(dock.settings)
+    def plan_downloads(osm, state, parcels):
+        """OSM and ALKIS jobs from sources.py.  Returns (osm_request,
+        alkis_requests, notes) or raises ValueError with the reason."""
+        import copy
+
+        from .sources import load_catalog, plan_alkis_download
+
+        settings = dock.settings
         project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
         context = QgsProject.instance().transformContext()
         geometry = QgsGeometry.fromWkt(settings["study_area_wkt"])
-        try:
-            box = lonlat_box(geometry, settings["buffer_meters"], project_crs, context)
+        box = lonlat_box(geometry, settings["buffer_meters"], project_crs, context)
+        osm_request, alkis_jobs, notes = None, [], []
+        if osm:
             plan = plan_osm_download(settings["study_area_wkt"], settings["buffer_meters"], box)
+            errors = [issue.message for issue in plan.issues if issue.severity == "error"]
+            if errors or not plan.requests:
+                raise ValueError("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
+            osm_request = plan.requests[0]
+        if state is not None:
+            catalog = copy.deepcopy(load_catalog())
+            if not parcels:
+                layers = catalog["alkis_abfrage"]["ebenen"]
+                catalog["alkis_abfrage"]["ebenen"] = [name for name in layers if name != "flurstuecke"]
+            plan = plan_alkis_download(settings["study_area_wkt"], settings["buffer_meters"], box,
+                                       state.code, catalog=catalog)
+            errors = [issue.message for issue in plan.issues if issue.severity == "error"]
+            if errors or not plan.requests:
+                raise ValueError("\n".join(errors) or "Für dieses Gebiet gibt es keinen ALKIS-Auftrag.")
+            notes.extend(issue.message for issue in plan.issues)
+            alkis_jobs = plan.requests
+        return osm_request, alkis_jobs, notes
+
+    def start_load(*, osm, state, parcels, own_path, folder):
+        """M13: download OSM and/or ALKIS, add the own file, import everything
+        in one run (import_sources) and compare the sources (match_sources).
+        Runs as one QGIS background task with a busy bar."""
+        from .data_pipeline import SourceFile
+        from .source_matching import match_sources
+
+        settings = dict(dock.settings)
+        try:
+            osm_request, alkis_jobs, notes = plan_downloads(osm, state, parcels)
         except Exception as error:  # catalog broken, CRS cannot be converted …
-            dock.show_message(f"Der OSM-Download konnte nicht vorbereitet werden: {error_text(error)}")
+            dock.show_message(f"Der Download konnte nicht vorbereitet werden: {error_text(error)}")
             return
-        errors = [issue.message for issue in plan.issues if issue.severity == "error"]
-        if errors or not plan.requests:
-            dock.show_message("\n".join(errors) or "Für dieses Gebiet gibt es keinen OSM-Auftrag.")
-            return
-        request = plan.requests[0]
+        project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
+        context = QgsProject.instance().transformContext()
         feedback = QgsFeedback()
         dock.download_feedback = feedback
-        status = {"text": None}  # hint from the worker thread (retry countdown)
-        dock.set_busy("OSM-Daten werden geladen …")
+        status = {"text": None}  # hint from the worker thread
+        info = {"converted": None, "notes": list(notes)}
+        phases = [kind for kind, wanted in (("osm", osm_request), ("alkis", alkis_jobs),
+                                            ("own", own_path)) if wanted] + ["import"]
+        dock.set_busy("Daten werden geladen …")
 
         def run(task):
             def report(text):
                 status["text"] = text
                 task.setProgress(task.progress() + 0.001)  # wakes the panel up
 
-            return run_download(request, folder, project_crs, context, feedback,
-                                task.isCanceled, report, task.setProgress)
+            def part(index):
+                """progress(percent of this phase) -> overall task progress."""
+                share = 100 / len(phases)
+                return lambda percent: task.setProgress(index * share + percent * share / 100)
+
+            sources = []
+            for index, phase in enumerate(phases):
+                if task.isCanceled():
+                    raise ImportCanceled()
+                if phase == "osm":
+                    path = run_download(osm_request, folder, project_crs, context, feedback,
+                                        task.isCanceled, report, part(index))
+                    sources.append(SourceFile(path, "OSM", "OpenStreetMap", osm_request.licence,
+                                              osm_request.licence_url, osm_request.attribution))
+                elif phase == "alkis":
+                    path, found = run_alkis_download(alkis_jobs, folder, project_crs, context,
+                                                     feedback, task.isCanceled, report, part(index))
+                    info["notes"].extend(found)
+                    first = alkis_jobs[0]
+                    sources.append(SourceFile(path, "ALKIS", f"ALKIS {state.name}", first.licence,
+                                              first.licence_url, first.attribution))
+                elif phase == "own":
+                    report(f"Lade „{own_path.name}“ …")
+                    used, changed = ensure_project_crs(
+                        own_path, project_crs, context,
+                        Path(tempfile.gettempdir()) / "urban_analysis")
+                    if changed:
+                        info["converted"] = (used, changed)
+                    sources.append(SourceFile(used, "Eigene Datei", own_path.name))
+                else:
+                    report("Daten werden zugeschnitten und vereinheitlicht …")
+                    importer = GeoPackageImporter()
+                    result = importer.import_sources(
+                        sources,
+                        project_crs=settings["project_crs"],
+                        study_area_wkt=settings["study_area_wkt"],
+                        buffer_meters=settings["buffer_meters"],
+                        progress=cancel_aware_progress(
+                            task.isCanceled,
+                            lambda percent, p=part(index): p(percent)),
+                    )
+                    if len({source.source_kind for source in sources}) > 1:
+                        report("Gleiche Objekte aus verschiedenen Quellen werden gesucht …")
+                        records, matches, issues = match_sources(result.harmonized_records)
+                        result.harmonized_records = records
+                        result.issues.extend(issues)
+                    else:
+                        matches = []
+                    return result, sources, matches
+            return None
 
         def progress_changed(percent):
             if dock.closing:
@@ -2230,13 +2364,13 @@ def _create_dock(plugin):
                 dock.busy_text = status["text"]
             dock.set_busy_progress(percent)
 
-        def finished(exception, result=None):
+        def finished(exception, outcome=None):
             dock.import_task = None
             dock.download_feedback = None
             if dock.closing:
                 return
             try:
-                if isinstance(exception, DownloadCanceled) or dock.cancel_requested:
+                if isinstance(exception, (DownloadCanceled, ImportCanceled)) or dock.cancel_requested:
                     dock.clear_busy("cancel")
                     dock.show_message(CANCELED_MESSAGE, kind="info")
                     return
@@ -2244,98 +2378,48 @@ def _create_dock(plugin):
                     dock.clear_busy("error")
                     if isinstance(exception, (DownloadError, OSError)):
                         dock.show_message(str(exception))
+                    elif isinstance(exception, (GeoPackageImportError, ValueError)) and own_path:
+                        dock.show_message(import_error_text(own_path.name, exception, own_path))
                     else:
                         dock.show_unexpected_error(UI_LABELS["load_data"], exception)
                     return
-                dock.clear_busy("cancel")
-                # Datenquelle in step 8 pre-filled with the OSM attribution (E28)
-                if not dock.output_draft.get("source"):
-                    dock.output_draft["source"] = request.attribution
-                start_import(Path(result))
-            except Exception as error:  # show every program error visibly
-                dock.show_unexpected_error(UI_LABELS["load_data"], error)
-
-        task = QgsTask.fromFunction("Urban Analysis: OSM-Daten laden", run, on_finished=finished)
-        task.progressChanged.connect(progress_changed)
-        dock.import_task = task
-        QgsApplication.taskManager().addTask(task)
-
-    def start_import(path):
-        """Run the pipeline (S1) as a QGIS background task with a busy bar."""
-        settings = dict(dock.settings)
-        dock.input_paths.add(Path(path))  # protected from being overwritten in step 8
-        dock.set_busy(f"Lade „{path.name}“ … Das kann bei großen Dateien etwas dauern.")
-        project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
-        context = QgsProject.instance().transformContext()
-        converted = {"path": None, "layers": []}  # copy in the project CRS, if needed
-
-        def run_import(task):
-            # Layers in another CRS: convert a copy first (originals stay as they are)
-            used, changed = ensure_project_crs(
-                path, project_crs, context, Path(tempfile.gettempdir()) / "urban_analysis")
-            if changed:
-                converted.update(path=used, layers=changed)
-            if task.isCanceled():
-                raise ImportCanceled()
-            importer = GeoPackageImporter()
-            options = {}
-            if pipeline_reports_progress(importer):
-                # fraction 0..1 from the pipeline -> task progress 0..100;
-                # stops the pipeline when 'Laden abbrechen' was pressed
-                options["progress"] = cancel_aware_progress(task.isCanceled, task.setProgress)
-            if task.isCanceled():
-                raise ImportCanceled()
-            return importer.import_file(
-                used,
-                project_crs=settings["project_crs"],
-                study_area_wkt=settings["study_area_wkt"],
-                buffer_meters=settings["buffer_meters"],
-                **options,
-            )
-
-        def finished(exception, result=None):
-            dock.import_task = None
-            if dock.closing:
-                return
-            try:
-                if isinstance(exception, ImportCanceled) or dock.cancel_requested:
-                    # stopped by the user (also if the pipeline finished anyway)
+                if outcome is None:
                     dock.clear_busy("cancel")
                     dock.show_message(CANCELED_MESSAGE, kind="info")
                     return
-                if exception is not None:
-                    dock.clear_busy("error")
-                    if isinstance(exception, DownloadError):
-                        dock.show_message(str(exception))
-                    elif isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
-                        dock.show_message(import_error_text(path.name, exception, path))
-                    else:
-                        dock.show_unexpected_error(UI_LABELS["load_data"], exception)
-                    return
-                if result is None:
-                    dock.clear_busy("cancel")
-                    dock.show_message(CANCELED_MESSAGE, kind="info")
-                    return
+                result, sources, matches = outcome
                 dock.clear_busy("done")
                 plugin.start_workflow(result)
+                plugin.workflow.source_matches = matches
+                dock.sources = sources
+                for source in sources:
+                    dock.input_paths.add(Path(source.path))  # never overwritten later
+                if own_path:
+                    dock.input_paths.add(Path(own_path))
+                # Datenquelle pre-filled with the attributions of the sources (E28)
+                attributions = [source.attribution for source in sources if source.attribution]
+                if attributions and not dock.output_draft.get("source"):
+                    dock.output_draft["source"] = "; ".join(attributions)
                 dock.show_page(3)
-                text = (f"„{path.name}“ geladen: {len(result.layers)} Layer. "
+                names = ", ".join(source.label for source in sources)
+                text = (f"Geladen: {names} – {len(result.layers)} Layer. "
                         "Bitte die Prüfhinweise ansehen.")
-                if converted["path"] is not None:
-                    dock.input_paths.add(Path(converted["path"]))
-                    text += (f"\n{len(converted['layers'])} Layer lagen in einem anderen CRS und "
-                             f"wurden als Kopie nach {settings['project_crs']} umgerechnet "
-                             f"({Path(converted['path']).name}); die Originaldatei ist unverändert.")
-                dock.show_message(text, kind="info")
+                if matches:
+                    text += (f"\n{len(matches)} Objekte kommen in mehreren Quellen vor – "
+                             "in Schritt 6 wählst du je Kategorie die Quelle.")
+                if info["converted"] is not None:
+                    used, changed = info["converted"]
+                    text += (f"\n{len(changed)} Layer der eigenen Datei lagen in einem anderen CRS "
+                             f"und wurden als Kopie nach {settings['project_crs']} umgerechnet "
+                             f"({Path(used).name}); die Originaldatei ist unverändert.")
+                for note in info["notes"]:
+                    text += "\n" + note
+                dock.show_message(text, kind="warning" if info["notes"] else "info")
             except Exception as error:  # show every program error visibly
                 dock.show_unexpected_error(UI_LABELS["load_data"], error)
 
-        task = QgsTask.fromFunction(
-            f"Urban Analysis: {path.name} laden", run_import, on_finished=finished
-        )
-        task.progressChanged.connect(
-            lambda percent: dock.set_busy_progress(percent) if not dock.closing else None
-        )
+        task = QgsTask.fromFunction("Urban Analysis: Daten laden", run, on_finished=finished)
+        task.progressChanged.connect(progress_changed)
         dock.import_task = task
         QgsApplication.taskManager().addTask(task)
 
@@ -2705,11 +2789,13 @@ def _create_dock(plugin):
     # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
     def build_harmonization(page):
         flow = workflow()
+        has_sources = build_source_choice(page)
         layers = flow.duplicate_layers()
         if not layers:
-            none = QLabel(NO_DUPLICATES_TEXT)
-            none.setWordWrap(True)
-            page.layout.addWidget(none)
+            if not has_sources:
+                none = QLabel(NO_DUPLICATES_TEXT)
+                none.setWordWrap(True)
+                page.layout.addWidget(none)
             return
         intro = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION_STEP6)
         intro.setWordWrap(True)
@@ -2728,6 +2814,82 @@ def _create_dock(plugin):
                 layer_icon_key(flow, layer.table_name),
                 opened=layer.table_name not in flow.duplicate_decisions)
             panel.addWidget(duplicate_card(flow, layer))
+
+    # 6a (W12, M14): same objects from ALKIS and OSM - one source per category
+    def build_source_choice(page):
+        """Returns True if there was something to choose."""
+        flow = workflow()
+        matches = getattr(flow, "source_matches", None) or []
+        if not matches:
+            return False
+        from .source_matching import priority_choices
+
+        choices = priority_choices(matches)
+        if getattr(flow, "source_priority", None) is None:
+            flow.source_priority = {c.category: c.suggested_source for c in choices}
+            flow.source_uncertain_ok = set()
+        heading = QLabel(f"<b>{SOURCES_TITLE}</b>")
+        heading.setWordWrap(True)
+        page.layout.addWidget(heading)
+        intro = QLabel(SOURCES_INTRO)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+        for number, choice in enumerate(choices):
+            panel = collapsible(
+                page, f"src_{number}",
+                source_title_text(choice.category, choice.group_count, choice.source_kinds),
+                icon_key(category=choice.category), opened=True)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 2, 0, 0)
+            group = QButtonGroup(page.widget)
+            for kind in choice.source_kinds:
+                text = kind + (" (Vorschlag)" if kind == choice.suggested_source else "")
+                button = QRadioButton(text)
+                button.setCursor(Qt.PointingHandCursor)
+                button.setChecked(flow.source_priority.get(choice.category) == kind)
+                button.toggled.connect(
+                    lambda on, c=choice.category, k=kind: on and flow.source_priority.__setitem__(c, k))
+                group.addButton(button)
+                row.addWidget(button)
+            row.addStretch()
+            panel.addLayout(row)
+            page.widgets[f"src_group_{number}"] = group  # keep the group alive
+            explain = QLabel(source_choice_hint_text(choice))
+            explain.setWordWrap(True)
+            set_role(explain, "hint")
+            panel.addWidget(explain)
+            if choice.uncertain_count:
+                uncertain = QCheckBox(uncertain_sources_label(choice.uncertain_count))
+                uncertain.setChecked(choice.category in flow.source_uncertain_ok)
+                uncertain.toggled.connect(
+                    lambda on, c=choice.category: (flow.source_uncertain_ok.add(c) if on
+                                                   else flow.source_uncertain_ok.discard(c)))
+                panel.addWidget(uncertain)
+                note = QLabel(UNCERTAIN_SOURCES_HINT)
+                note.setWordWrap(True)
+                set_role(note, "hint")
+                panel.addWidget(note)
+        return True
+
+    def apply_sources(flow):
+        """Keep, per matched group, only the chosen source.  Starts each time
+        from the records before the first choice, so going back and choosing
+        again works.  Returns the number of removed objects or None."""
+        matches = getattr(flow, "source_matches", None) or []
+        if not matches:
+            return None
+        from .source_matching import apply_source_priority
+
+        base = getattr(flow, "records_before_sources", None)
+        if base is None:
+            base = flow.result.harmonized_records
+            flow.records_before_sources = base
+        uncertain_ok = getattr(flow, "source_uncertain_ok", set())
+        confirmed = [m.group_id for m in matches if not m.certain and m.category in uncertain_ok]
+        kept = apply_source_priority(base, flow.source_priority or {}, matches, confirmed)
+        flow.result.harmonized_records = kept
+        return len(base) - len(kept)
 
     def duplicate_card(flow, layer):
         card = QWidget()
@@ -2805,10 +2967,14 @@ def _create_dock(plugin):
                 "Bitte für jeden Layer „Behalten“ oder „Zusammenführen“ wählen. "
                 "Noch offen: " + ", ".join(readable_names().layer(name) for name in open_layers)
             )
-        if not flow.duplicate_layers():
-            return True
-        removed = flow.apply_duplicate_decisions()
-        dock.next_message = duplicates_applied_text(removed)
+        texts = []
+        if flow.duplicate_layers():
+            texts.append(duplicates_applied_text(flow.apply_duplicate_decisions()))
+        dropped = apply_sources(flow)
+        if dropped is not None:
+            texts.append(sources_applied_text(dropped))
+        if texts:
+            dock.next_message = "\n".join(texts)
         return True
 
     # 7 Kartenthema
@@ -3471,9 +3637,20 @@ def _create_dock(plugin):
             area_hint(area, LAYERS_FIRST_HINT)
         area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
 
+    def current_used_sources(flow):
+        """The sources that really delivered objects (E28), [] if unknown."""
+        if not dock.sources:
+            return []
+        from .data_pipeline import used_sources
+
+        return used_sources(dock.sources, flow.result.harmonized_records)
+
     def write_map_pdf(flow, path, layers):
         """PDF map with the settings of 'Speichern'."""
         draft = dock.output_draft
+        used = current_used_sources(flow)
+        source = (data_source_text(used, flow.result.output.data_source) if used
+                  else flow.result.output.data_source)
         return export_map_pdf(
             path, layers=layers,
             grey_outside=draft.get("grey_outside", True),
@@ -3482,7 +3659,7 @@ def _create_dock(plugin):
             crs_authid=flow.result.project_crs,
             title=draft.get("pdf_title") or flow.result.selected_topic or "Siedlungsstruktur",
             subtitle=draft.get("pdf_subtitle", ""),
-            data_source=flow.result.output.data_source,
+            data_source=source,
             page=draft.get("pdf_page", "A3"),
             orientation=draft.get("pdf_orientation", "auto"),
             scale=draft.get("pdf_scale") or None,
@@ -3514,7 +3691,8 @@ def _create_dock(plugin):
         visible = [node.layer() for node in nodes if node.isVisible()]
         jobs = []
         if geopackage:
-            jobs.append(("geopackage", lambda path: write_result_geopackage(path, all_layers)))
+            used = current_used_sources(flow)
+            jobs.append(("geopackage", lambda path: write_result_geopackage(path, all_layers, used)))
         if pdf:
             if not visible:
                 return reject(REMAKE_NO_LAYERS_MESSAGE)

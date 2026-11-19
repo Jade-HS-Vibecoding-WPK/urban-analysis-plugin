@@ -97,12 +97,28 @@ def result_layer_names(descriptors: Iterable[LayerDescriptor], readable=None) ->
     of a technical id."""
     descriptors = list(descriptors)
     names = {d.layer_id: result_layer_name(d, readable) for d in descriptors}
-    counts: Dict[str, int] = {}
-    for name in names.values():
-        counts[name] = counts.get(name, 0) + 1
+
+    def doubled():
+        counts: Dict[str, int] = {}
+        for name in names.values():
+            counts[name] = counts.get(name, 0) + 1
+        return {name for name, count in counts.items() if count > 1}
+
+    # several sources (M13): 'Gebäude (ALKIS)', 'Gebäude (OSM)'
+    kinds = {getattr(d, "source_kind", "") for d in descriptors} - {""}
+    if len(kinds) > 1:
+        twice = doubled()
+        for d in descriptors:
+            if names[d.layer_id] in twice and getattr(d, "source_kind", ""):
+                names[d.layer_id] = f"{names[d.layer_id]} ({d.source_kind})"
+    twice = doubled()
     for d in descriptors:
-        if counts[names[d.layer_id]] > 1 and geometry_word(d):
-            names[d.layer_id] = f"{names[d.layer_id]} ({geometry_word(d)})"
+        if names[d.layer_id] in twice and geometry_word(d):
+            name = names[d.layer_id]
+            if name.endswith(")"):  # 'Straßen (OSM)' -> 'Straßen (OSM, Linien)'
+                names[d.layer_id] = f"{name[:-1]}, {geometry_word(d)})"
+            else:
+                names[d.layer_id] = f"{name} ({geometry_word(d)})"
     used = set()
     for d in descriptors:  # still the same name: the layer id keeps them apart
         if names[d.layer_id] in used:
@@ -331,7 +347,7 @@ def unique_layer_names(names: Iterable[str]) -> List[str]:
     return unique
 
 
-def write_result_geopackage(path, layers: Sequence[object]) -> str:
+def write_result_geopackage(path, layers: Sequence[object], used_sources=()) -> str:
     """Write the result layers into one new GeoPackage (W8b).
 
     Each layer keeps its readable name as GeoPackage layer name.  An existing
@@ -363,7 +379,43 @@ def write_result_geopackage(path, layers: Sequence[object]) -> str:
         error, message = written[0], written[1]
         if error != QgsVectorFileWriter.NoError:
             raise RuntimeError(f"Layer „{name}“: {message or 'unbekannter Fehler'}")
+    if used_sources:
+        _write_sources_table(target, used_sources, set(names))
     return str(target)
+
+
+SOURCES_TABLE = "Datenquellen und Lizenzen"
+
+
+def _write_sources_table(target, used_sources, taken) -> None:
+    """Table without geometry in the GeoPackage: one row per used source (E28)."""
+    from qgis.core import (
+        QgsCoordinateTransformContext, QgsFeature, QgsField, QgsVectorFileWriter, QgsVectorLayer,
+    )
+    from qgis.PyQt.QtCore import QMetaType
+
+    meta = getattr(QMetaType, "Type", QMetaType)
+    table = QgsVectorLayer("None", SOURCES_TABLE, "memory")
+    columns = ("Quelle", "Quellenvermerk", "Lizenz", "Link", "Objekte")
+    table.dataProvider().addAttributes(
+        [QgsField(name, meta.Int if name == "Objekte" else meta.QString) for name in columns])
+    table.updateFields()
+    rows = []
+    for source in used_sources:
+        feature = QgsFeature(table.fields())
+        feature.setAttributes([source.name, source.attribution, source.licence,
+                               source.licence_url, int(source.record_count)])
+        rows.append(feature)
+    table.dataProvider().addFeatures(rows)
+    options = QgsVectorFileWriter.SaveVectorOptions()
+    options.driverName = "GPKG"
+    options.fileEncoding = "UTF-8"
+    options.layerName = SOURCES_TABLE if SOURCES_TABLE not in taken else f"{SOURCES_TABLE} (Plugin)"
+    options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+    written = QgsVectorFileWriter.writeAsVectorFormatV3(
+        table, str(target), QgsCoordinateTransformContext(), options)
+    if written[0] != QgsVectorFileWriter.NoError:
+        raise RuntimeError(f"Tabelle „{SOURCES_TABLE}“: {written[1] or 'unbekannter Fehler'}")
 
 
 # --- F5 / W18: real map PDF with a QGIS print layout -------------------------
@@ -405,6 +457,36 @@ def layout_frames(width, height, orientation="quer"):
         "map": (margin, margin, width - 2 * margin, map_h),
         "panel": (margin, 2 * margin + map_h, width - 2 * margin, panel_h),
     }
+
+
+def licence_lines(used_sources):
+    """One line per used source (``data_pipeline.UsedSource``) for the block
+    'Datenquellen und Lizenzen': attribution, licence and link."""
+    import re
+
+    def plain(text):  # 'CC-BY-4.0' -> 'ccby', 'ODbL-1.0' -> 'odbl'
+        return re.sub(r"\d+$", "", re.sub(r"[^a-z0-9]", "", text.casefold()))
+
+    lines = []
+    for source in used_sources:
+        line = source.attribution or source.name
+        if source.licence and plain(source.licence) not in re.sub(r"[^a-z0-9]", "", line.casefold()):
+            line += f", {source.licence}"
+        if source.licence_url:
+            line += f" ({source.licence_url})"
+        lines.append(line)
+    return lines
+
+
+def data_source_text(used_sources, typed=""):
+    """Text for 'Datenquellen und Lizenzen': the used sources with licence,
+    plus what the user typed if it says something else."""
+    lines = licence_lines(used_sources)
+    typed = (typed or "").strip()
+    auto = "; ".join(source.attribution for source in used_sources if source.attribution)
+    if typed and typed != auto and typed not in lines:
+        lines.append(typed)
+    return "\n".join(lines) or typed
 
 
 def sources_text(data_source, day):
