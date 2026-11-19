@@ -204,13 +204,34 @@ Setzt E29/E30 mit dem Vertrag aus G11 (#43) um.
   Spalten fehlen – die dann nachtragen.
 - Tests: `tests/test_columns.py` (10).
 
+## F3 / M24 – Dubletten mit Beispiel erklären (19.11.2026)
+
+Setzt E31 mit dem Vertrag aus G11 um. Baut auf F1 auf (Branch
+`feature/pipeline-dubletten-beispiel` liegt auf `feature/pipeline-spalten`).
+
+- **`PipelineResult.duplicate_groups`:** je Gruppe übereinanderliegender
+  Objekte eine `DuplicateGroupInfo` mit `reason` („gleiche Form“ oder
+  „gleiche Form und gleiche Objekt-ID“), `differences` (abweichende
+  Spalten mit lesbarem Namen und Werten, leere Werte als „(leer)“) und
+  `example_text`, z. B. „Hier liegen 2 Einträge „Gebäudeteil“ mit genau
+  gleicher Form übereinander. Unterschied: Baumaterial „glass“ / „(leer)“;
+  Höhe (m) „18“ / „4“.“ Die Adresse steht nur dabei, wenn alle Einträge
+  dieselbe haben. Schlüsselspalten (`gfk`) werden hinter ihrem lesbaren
+  Zwilling (`gfk__bez`) versteckt, OSM-`other_tags` wird weggelassen.
+- **Hinweis `uncertain-duplicate`:** kurzer Text („An 4 Stellen … Sie
+  unterscheiden sich nur in …“), `action` („In Schritt 6 entscheiden …“),
+  `details` mit dem ersten echten Beispiel des Layers, `layer_id`.
+- **Für W17 (Schritt 6):** `describe_duplicate_groups(records)` kann auch
+  nach Entscheidungen neu aufgerufen werden.
+- Tests: `tests/test_duplicate_groups.py` (6).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 297 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 303 grün.
 
 ## Als Nächstes (Person Mac)
 
-Feature Freeze (`ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6, Etappe F): F3 M24
-Dubletten mit Beispiel · F6 M17 Teil 1 Startpunkte · F7 M20 Luftlinie.
+Feature Freeze (`ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6, Etappe F):
+F6 M17 Teil 1 Startpunkte · F7 M20 Luftlinie.
 Danach: M10b, M18, M6, M12 Teil 2.
