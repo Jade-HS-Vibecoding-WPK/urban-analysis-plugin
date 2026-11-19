@@ -36,18 +36,22 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
 ### Der Ablauf in 8 Schritten
 
 1. **Projekt-KBS** – Koordinatensystem in Metern wählen (z. B. EPSG:25832).
-2. **Untersuchungsgebiet** – Fläche in QGIS wählen oder zeichnen, Puffer festlegen.
-   Die Größe wird gleich angezeigt (Warnung ab 25 km², kein Download über 50 km²).
+2. **Untersuchungsgebiet** – Fläche in QGIS wählen, ein Polygon zeichnen oder ein
+   Rechteck mit zwei Klicks aufziehen; Puffer festlegen. Die Größe wird gleich angezeigt
+   (Warnung ab 25 km², kein Download über 50 km²).
 3. **Daten laden** – OpenStreetMap, ALKIS deines Bundeslands und/oder eigene Dateien,
    auch mehrere zugleich.
 4. **Layer prüfen** – Was ist angekommen, was fehlt? Hinweise mit Erklärung.
 5. **Attributzuordnung** – Vorschau der späteren Attributtabelle mit lesbaren
-   Spaltennamen; je Spalte „Kernfeld“, „Behalten“ oder „Ignorieren“.
-6. **Harmonisierung** – Dopplungen und gleiche Objekte aus verschiedenen Quellen;
-   je Kategorie wählst du die Quelle (das Plugin schlägt eine vor).
-7. **Kartenthema** – ein oder mehrere Kartenthemen wählen und darin einzelne Klassen an-
-   und abwählen (siehe unten).
-8. **Verarbeitung** – Ergebnis-Layer erzeugen, Erreichbarkeit berechnen, speichern.
+   Spaltennamen und Beispielwerten. „Essentielle“ Spalten (z. B. Objekt-ID, Kategorie)
+   sind immer dabei; alle anderen: „Behalten“ oder „Nicht übernehmen“.
+6. **Harmonisierung** – in zwei Teilen: erst gleiche Objekte aus mehreren Quellen
+   (je Kategorie wählst du die Quelle, das Plugin schlägt eine vor), dann unsichere
+   Dubletten.
+7. **Kartenthema** – Thema aus der Liste wählen; die passenden Layer sind vorausgewählt
+   und lassen sich einzeln an- und abwählen (siehe unten).
+8. **Verarbeitung** – Ergebnis-Layer erzeugen, Erreichbarkeit berechnen, Quellenangabe
+   je Datenquelle prüfen, speichern.
 
 ### Ergebnisse
 
@@ -58,7 +62,9 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
 - **Erreichbarkeit:** Abstand jedes Gebäudes zum nächsten Ziel (z. B. Nahversorgung,
   Bildung, Haltestellen oder eigene Ziele), mit Ringen um die Ziele (Standard 300 m
   und 500 m).
-- **PDF-Karte** mit Legende, Nordpfeil, Maßstab und Quellen.
+- **PDF-Karte** von A4 bis A0 mit Legende, Nordpfeil, Maßstab und Quellen. Das Plugin
+  schlägt einen passenden Maßstab für das Blattformat vor (z. B. „A3 quer: 1:5.000“);
+  der Puffer lässt sich ein- und ausblenden.
 - **GeoPackage** mit allen Ergebnis-Layern.
 
 ### Zwei Oberflächen-Stile
@@ -89,9 +95,9 @@ Sieben allgemeine Themen, die zu jeder Analyseaufgabe und jedem Gebiet passen:
 | Grün, Wasser & Klima | Grünflächen, Wald, Gewässer, Bäume und Baumreihen, versiegelte Flächen (Näherung) |
 | Geschichte & Stadtbild | Baudenkmale, Denkmäler, historische Orte, Aussichtspunkte, markante Gebäude |
 
-- **Baukasten:** Klassen einzeln an- und abwählen, mehrere Themen überlagern (z. B. für
-  eine Synthese). Ein Objekt kann in mehreren Themen vorkommen – ein Café ist Nutzung
-  und Treffpunkt.
+- **Baukasten:** Je Thema sind passende Layer vorausgewählt (Gebäude und Straßen immer
+  zur Orientierung); jeder Layer lässt sich an- und abwählen. Ein Objekt kann in
+  mehreren Themen vorkommen – ein Café ist Nutzung und Treffpunkt.
 - **OSM und ALKIS:** Die Zuordnung nutzt beide Quellen.
 - **Ehrlich:** Je Thema steht dabei, was die Daten nicht zeigen (z. B. Leerstand,
   Aufenthaltsqualität), mit Tipps für bessere Daten. Fehlt eine Klasse im Gebiet, sagt
