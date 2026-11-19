@@ -71,6 +71,11 @@ from .osm_download import (
 )
 from .sources import plan_osm_download
 from .outputs import (
+    COLUMN_ORDER_FRONT,
+    COLUMN_ORDER_ORIGIN,
+    COLUMN_ORDER_PROPERTIES,
+    COLUMN_ORDER_WHAT,
+    COLUMN_ORDER_WHERE,
     GEOMETRY_KINDS,
     GEOMETRY_WORDS,
     add_result_layers,
@@ -322,14 +327,14 @@ SAME_RUN_QUESTION = (
 # Step 5 (W14, E29/E30): columns of the input layers
 STEP5_GUIDE = (
     "Was siehst du? Alle Spalten deiner Daten, je Layer, mit lesbarem Namen und Beispielen.",
-    "Was entscheidest du? Je Spalte: in ein Kernfeld übernehmen (z. B. Adresse), "
-    "als eigene Spalte behalten oder weglassen.",
+    "Was entscheidest du? Essentielle Spalten (z. B. Objekt-ID) bleiben immer; alle "
+    "anderen behältst du als eigene Spalte oder lässt sie weg.",
     "Was passiert dann? Die Ergebnis-Layer enthalten genau diese Spalten. Die "
     "Vorauswahl passt meistens – du musst nur ändern, was du anders willst.",
 )
 STEP5_SHORT_GUIDE = (
     "So sieht deine Attributtabelle am Ende aus. Klick auf ein Etikett: "
-    "Kernfeld → Behalten → Ignoriert. Die Vorauswahl passt meistens."
+    "Behalten ↔ Nicht übernehmen. Die Vorauswahl passt meistens."
 )
 MORE_COLUMNS_LABEL ="Nicht geladen (nicht lesbar)"
 COLUMN_KEEP_HELP = "Die Spalte kommt unter ihrem lesbaren Namen in die Ergebnis-Layer."
@@ -340,10 +345,17 @@ COLUMNS_SAVED_TEXT = "Spaltenauswahl übernommen. Sie gilt bei „Verarbeitung s
 PREVIEW_ROWS = 3
 PILL_WIDTH = 92
 PREVIEW_HEADING = "Vorschau Ergebnis-Tabelle"
-COLUMNS_HEADING = "Spalten – Klick auf das Etikett wechselt: Kernfeld → Behalten → Ignoriert"
-STATE_LEGEND = ("ⓘ Kernfeld = Pflichtfeld für Karte und Legende · Behalten = eigene "
-                "Spalte · Ignoriert = wird nicht übernommen")
-STATE_LABELS = {"target": "● Kernfeld", "keep": "● Behalten", "drop": "○ Ignoriert"}
+COLUMNS_HEADING = "Spalten – Klick auf das Etikett wechselt: Behalten ↔ Nicht übernehmen"
+STATE_LEGEND = ("ⓘ Essentiell = braucht jeder Layer, bleibt immer · Behalten = eigene "
+                "Spalte · Nicht übernehmen = kommt nicht ins Ergebnis")
+STATE_LABELS = {"target": "🔒 Essentiell", "keep": "● Behalten", "drop": "○ Nicht übernehmen"}
+# Step 5: up to this many different example values per column (whole table)
+EXAMPLE_ROWS = 3
+EMPTY_COLUMN_TEXT = "– leer –"
+EMPTY_COLUMN_HINT = "Die Spalte ist in der ganzen Tabelle leer – sie erscheint nicht im Ergebnis."
+ESSENTIAL_HINT = ("Essentiell: Diese Spalte braucht jeder Ergebnis-Layer (z. B. Objekt-ID, "
+                  "Objektart, Kategorie, Quelle). Das Plugin füllt sie automatisch und behält "
+                  "sie immer.")
 # (fill, border) per state – green core field, blue kept, grey ignored
 STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5"),
                 "drop": ("#f1f2f4", "#b5bcc4")}
@@ -400,23 +412,54 @@ AUTO_COLUMNS_HINT = ("Wichtige Spalten werden übernommen, technische und fast l
 MANUAL_COLUMNS_HINT = ("Gleiche Vorauswahl, aber alle Tabellen sind aufgeklappt, damit du "
                        "jede Spalte prüfen kannst.")
 STEP5_TABLE_GUIDE = (
-    "So sieht deine Attributtabelle am Ende aus. Farbig = wird übernommen, weiß = "
-    "bleibt draußen. Zum Ändern auf eine Spaltenüberschrift klicken."
+    "So sieht deine Attributtabelle am Ende aus. <b>Grün = essentiell</b>: diese Spalten "
+    "braucht jeder Layer, sie stehen vorne und bleiben immer. Blau = behalten, weiß = nicht "
+    "übernommen – zum Ändern auf eine Spaltenüberschrift klicken. Die Beispielwerte stammen "
+    "aus der ganzen Tabelle; eine Zeile ist kein echtes Objekt."
 )
+# Order of the essential columns = order in the result layers (outputs.result_columns)
+ESSENTIAL_ORDER = (COLUMN_ORDER_FRONT + COLUMN_ORDER_WHAT + COLUMN_ORDER_WHERE
+                   + COLUMN_ORDER_PROPERTIES + COLUMN_ORDER_ORIGIN)
 
 
-def ordered_columns(columns, values):
-    """Table order: core fields, then kept, then left-out columns."""
+def ordered_columns(columns, values, examples=None):
+    """Table order: essential columns (in the order of the result layer),
+    then kept, then left-out columns; inside a group empty columns last."""
     rank = {"target": 0, "keep": 1, "drop": 2}
-    return sorted(columns, key=lambda c: rank[state_of(values.get((c.layer_id, c.source_field)))])
+
+    def key(column):
+        value = values.get((column.layer_id, column.source_field))
+        state = state_of(value)
+        field_name = value.split(":", 1)[1] if state == "target" else ""
+        order = ESSENTIAL_ORDER.index(field_name) if field_name in ESSENTIAL_ORDER else 99
+        empty = examples is not None and not examples.get(column.source_field)
+        return rank[state], order if state == "target" else 0, empty
+
+    return sorted(columns, key=key)
 
 
 def column_title(column, value):
-    """Header of a column: core field name for core fields, else the readable name."""
+    """Header of a column: '🔒 Objekt-ID' for essential columns, else the readable name."""
     name = column.readable_name or column.source_field
     if state_of(value) == "target":
-        return core_field_name(value.split(":", 1)[1])
+        return "🔒 " + core_field_name(value.split(":", 1)[1])
     return name
+
+
+def column_examples(records, limit=EXAMPLE_ROWS):
+    """{(table, source field): up to ``limit`` different, non-empty values}
+    from ALL objects of each table (not only the first rows)."""
+    examples = {}
+    for record in records:
+        table = record.source_layer or record.layer_id
+        for field_name, value in (getattr(record, "source_attributes", None) or {}).items():
+            if value in (None, ""):
+                continue
+            found = examples.setdefault((table, field_name), [])
+            text = str(value)
+            if len(found) < limit and text not in found:
+                found.append(text)
+    return examples
 
 
 def state_of(value):
@@ -459,11 +502,12 @@ def preview_columns(columns, values):
 
 
 def counts_text(columns, values):
-    """'4 Kernfelder · 3 behalten · 8 ignoriert'."""
+    """'4 essentiell · 3 behalten · 8 nicht übernommen'."""
     counts = {"target": 0, "keep": 0, "drop": 0}
     for column in columns:
         counts[state_of(values.get((column.layer_id, column.source_field), "drop"))] += 1
-    return f"{counts['target']} Kernfelder · {counts['keep']} behalten · {counts['drop']} ignoriert"
+    return (f"{counts['target']} essentiell · {counts['keep']} behalten · "
+            f"{counts['drop']} nicht übernommen")
 
 
 def column_choices():
@@ -586,21 +630,21 @@ def column_summary(columns, decisions):
 def summary_lines(summary):
     """Overview lines of one layer in step 5 (automatic mode)."""
     lines = [
-        "Kernfelder: " + (", ".join(summary["target"]) or "–"),
+        "Essentiell: " + (", ".join(summary["target"]) or "–"),
         "Behalten: " + (", ".join(summary["keep"]) or "–"),
     ]
     count = len(summary["drop"])
-    lines.append(f"Ignoriert: {count} technische {'Spalte' if count == 1 else 'Spalten'}")
+    lines.append(f"Nicht übernommen: {count} technische {'Spalte' if count == 1 else 'Spalten'}")
     return lines
 
 
 def column_header_text(layer_name, columns, decisions):
-    """'Gebäude – 4 Kernfelder, 6 behalten, 12 nicht geladen'."""
+    """'Gebäude – 4 essentiell, 6 behalten, 12 nicht geladen'."""
     counts = {"target": 0, "keep": 0, "drop": 0}
     for column in columns:
         decision = decisions.get((column.layer_id, column.source_field))
         counts[decision.action if decision else "drop"] += 1
-    return (f"{layer_name} – {counts['target']} Kernfelder, {counts['keep']} behalten, "
+    return (f"{layer_name} – {counts['target']} essentiell, {counts['keep']} behalten, "
             f"{counts['drop']} nicht geladen")
 
 
@@ -2842,12 +2886,12 @@ def _create_dock(plugin):
         by_layer = {}
         for column in flow.result.columns:
             by_layer.setdefault(column.layer_id, []).append(column)
-        records_by_layer = {}
-        for record in flow.result.harmonized_records:
-            table = record.source_layer or record.layer_id
-            rows = records_by_layer.setdefault(table, [])
-            if len(rows) < PREVIEW_ROWS:
-                rows.append(record)
+        # examples from ALL objects of a table, so every column shows values
+        examples = column_examples(flow.result.harmonized_records)
+        # own files: the plugin may not know which column is e.g. the Objekt-ID
+        own_tables = {record.source_layer or record.layer_id
+                      for record in flow.result.harmonized_records
+                      if getattr(record, "source_kind", "") in ("Eigene Datei", "")}
 
         # Part 1: one question first – automatic or own choice
         if getattr(flow, "column_phase", "ask") == "ask":
@@ -2900,22 +2944,24 @@ def _create_dock(plugin):
             panel.addWidget(counts)
             table = QTableWidget()
             panel.addWidget(table)
-            fill_table(table, ordered_columns(columns, values), values,
-                       records_by_layer.get(layer_id, []), counts)
+            layer_examples = {column.source_field: examples.get((layer_id, column.source_field), [])
+                              for column in columns}
+            fill_table(table, ordered_columns(columns, values, layer_examples), values,
+                       layer_examples, counts, own=layer_id in own_tables)
         guard_wheel(page.widget)
 
     def state_legend():
         """Small colour key above the tables."""
         box = QWidget()
-        row = QHBoxLayout(box)
+        row = QGridLayout(box)  # two per line: one line would be cut in narrow panels
         row.setContentsMargins(0, 2, 0, 2)
-        for state in ("target", "keep", "drop"):
+        for number, state in enumerate(("target", "keep", "drop")):
             chip = QLabel(STATE_LABELS[state])
             fill, border = STATE_COLORS[state]
             chip.setStyleSheet(f"background: {fill}; border: 1px solid {border}; "
                                "border-radius: 9px; padding: 1px 8px;")
-            row.addWidget(chip)
-        row.addStretch()
+            row.addWidget(chip, number // 2, number % 2)
+        row.setColumnStretch(2, 1)
         return box
 
     def link_button(text):
@@ -2926,27 +2972,39 @@ def _create_dock(plugin):
                              "background: transparent; text-decoration: underline;")
         return button
 
-    def fill_table(table, columns, values, records, counts):
+    def fill_table(table, columns, values, examples, counts, own=False):
         """All columns of a layer like the QGIS attribute table: coloured =
-        taken over (green core field, blue kept), white = left out.  A click on
-        a column header opens a small menu to change it."""
+        taken over (green essential, blue kept), white = left out.  Each
+        column shows example values from the whole table.  A click on a
+        column header opens a small menu to change it."""
         table.clear()
         table.setColumnCount(len(columns))
-        table.setRowCount(len(records))
+        rows = max([len(examples.get(c.source_field) or ()) for c in columns] + [1])
+        table.setRowCount(rows)
         for index, column in enumerate(columns):
             value = values[(column.layer_id, column.source_field)]
             state = state_of(value)
-            header = QTableWidgetItem(column_title(column, value))
+            shown = examples.get(column.source_field) or []
+            title = column_title(column, value) + ("" if shown else " (leer)")
+            header = QTableWidgetItem(title)
             header.setIcon(state_icon(state))
-            header.setToolTip(f"Spalte in den Daten: {column.source_field}\n"
-                              f"{choice_help(value) or ''}\nKlick: ändern")
+            if state == "target":
+                tip = ESSENTIAL_HINT
+            else:
+                tip = f"{choice_help(value) or ''}\nKlick: ändern"
+            if not shown:
+                tip += "\n" + EMPTY_COLUMN_HINT
+            header.setToolTip(f"Spalte in den Daten: {column.source_field}\n{tip}")
             table.setHorizontalHeaderItem(index, header)
             fill = QColor(STATE_COLORS[state][0] if state != "drop" else "#ffffff")
-            for row, record in enumerate(records):
-                raw = (getattr(record, "source_attributes", None) or {}).get(column.source_field)
-                cell = QTableWidgetItem("–" if raw in (None, "") else str(raw))
+            for row in range(rows):
+                if row < len(shown):
+                    text = shown[row]
+                else:
+                    text = EMPTY_COLUMN_TEXT if not shown and row == 0 else ""
+                cell = QTableWidgetItem(text)
                 cell.setBackground(fill)
-                if state == "drop":
+                if state == "drop" or not shown:
                     cell.setForeground(QColor("#9aa3ae"))
                 table.setItem(row, index, cell)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -2969,23 +3027,35 @@ def _create_dock(plugin):
         def clicked(index):
             column = columns[index]
             key = (column.layer_id, column.source_field)
+            essential = state_of(values[key]) == "target"
             menu = QMenu(table)
-            core = menu.addMenu("● Kernfeld …")
-            for field_name in CORE_FIELDS:
-                action = core.addAction(core_field_name(field_name))
-                action.setToolTip(choice_help(f"target:{field_name}") or "")
-                action.triggered.connect(lambda _c=False, f=field_name: choose(key, f"target:{f}"))
-            menu.addAction("● Behalten (eigene Spalte)").triggered.connect(
-                lambda _c=False: choose(key, "keep"))
-            menu.addAction("○ Nicht übernehmen").triggered.connect(
-                lambda _c=False: choose(key, "drop"))
+            if essential:
+                info = menu.addAction("🔒 Essentiell – bleibt immer im Ergebnis")
+                info.setEnabled(False)
+            else:
+                menu.addAction("● Behalten (eigene Spalte)").triggered.connect(
+                    lambda _c=False: choose(key, "keep"))
+                menu.addAction("○ Nicht übernehmen").triggered.connect(
+                    lambda _c=False: choose(key, "drop"))
+            if own:
+                # own file: the plugin may not know e.g. which column is the Objekt-ID
+                menu.addSeparator()
+                core = menu.addMenu("🔒 Als essentielle Spalte …")
+                for field_name in CORE_FIELDS:
+                    action = core.addAction(core_field_name(field_name))
+                    action.setToolTip(choice_help(f"target:{field_name}") or "")
+                    action.triggered.connect(lambda _c=False, f=field_name: choose(key, f"target:{f}"))
+                if essential:
+                    menu.addAction("Doch nicht essentiell (eigene Spalte)").triggered.connect(
+                        lambda _c=False: choose(key, "keep"))
             header = table.horizontalHeader()
             x = header.sectionViewportPosition(index)
             menu.exec_(header.mapToGlobal(header.rect().topLeft()) + QPoint(x, header.height()))
 
         def choose(key, value):
             values[key] = value
-            fill_table(table, columns, values, records, counts)
+            columns[:] = ordered_columns(columns, values, examples)
+            fill_table(table, columns, values, examples, counts, own)
             counts.setText(counts_text(columns, values))
             dock.clear_message()
 

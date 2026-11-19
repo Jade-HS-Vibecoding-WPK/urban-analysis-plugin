@@ -30,7 +30,7 @@ def test_preselection_core_keep_drop():
     values = [decision_value(decisions[("gebaeude", c.source_field)]) for c in COLUMNS]
     assert values == ["target:object_id", "keep", "drop"]
     assert column_header_text("Gebäude", COLUMNS, decisions) == (
-        "Gebäude – 1 Kernfelder, 1 behalten, 1 nicht geladen")
+        "Gebäude – 1 essentiell, 1 behalten, 1 nicht geladen")
 
 
 def test_overview_lines_and_always_kept_columns():
@@ -43,7 +43,7 @@ def test_overview_lines_and_always_kept_columns():
     assert decision_value(decisions[("gebaeude", "baujahr")]) == "keep"  # always kept
     lines = summary_lines(column_summary(columns, decisions))
     assert lines[1] == "Behalten: Geschosszahl, Baujahr"
-    assert lines[2] == "Ignoriert: 1 technische Spalte"
+    assert lines[2] == "Nicht übernommen: 1 technische Spalte"
 
 
 def test_objects_are_cut_at_the_border_for_drawing():
@@ -70,7 +70,7 @@ def test_label_click_cycles_and_preview_order():
     headers = [(h, s) for h, s, _f in preview_columns(COLUMNS, values)]
     assert [s for _h, s in headers] == ["target", "keep"]  # core fields first
     assert headers[1][0] == "Geschosszahl"
-    assert counts_text(COLUMNS, values) == "1 Kernfelder · 1 behalten · 1 ignoriert"
+    assert counts_text(COLUMNS, values) == "1 essentiell · 1 behalten · 1 nicht übernommen"
 
 
 def test_better_preselection_keeps_pipeline_ids_and_drops_empty_columns():
@@ -119,3 +119,36 @@ def test_kept_columns_become_fields_without_clashes():
                SimpleNamespace(extra_attributes={"Dachform": "Satteldach"})]
     assert extra_field_names(records) == {
         "Geschosszahl": "Geschosszahl", "source": "Quelle: source", "Dachform": "Dachform"}
+
+
+def test_examples_come_from_the_whole_table_not_only_the_first_rows():
+    from urban_analysis.guided_dialog import column_examples
+
+    records = [SimpleNamespace(layer_id="gebaeude", source_layer=None,
+                               source_attributes={"oid": f"DENI{i}", "baujahr": None})
+               for i in range(50)]
+    records[40].source_attributes["baujahr"] = "1912"
+    records[45].source_attributes["baujahr"] = "1912"  # same value only once
+    records[49].source_attributes["baujahr"] = "1960"
+    examples = column_examples(records)
+    assert examples[("gebaeude", "oid")] == ["DENI0", "DENI1", "DENI2"]
+    assert examples[("gebaeude", "baujahr")] == ["1912", "1960"]
+
+
+def test_essential_columns_come_first_in_the_order_of_the_result_layer():
+    from urban_analysis.guided_dialog import column_title, ordered_columns
+
+    columns = [
+        ColumnInfo("gebaeude", "anzahlgs", "Geschosszahl"),
+        ColumnInfo("gebaeude", "gfk", "Gebäudefunktion"),
+        ColumnInfo("gebaeude", "leer", "Leer"),
+        ColumnInfo("gebaeude", "oid", "Objekt-ID"),
+        ColumnInfo("gebaeude", "tech", "Technik"),
+    ]
+    values = {("gebaeude", "anzahlgs"): "keep", ("gebaeude", "gfk"): "target:object_type",
+              ("gebaeude", "leer"): "keep", ("gebaeude", "oid"): "target:object_id",
+              ("gebaeude", "tech"): "drop"}
+    examples = {"anzahlgs": ["2"], "gfk": ["Wohnhaus"], "leer": [], "oid": ["DENI1"], "tech": ["x"]}
+    order = [c.source_field for c in ordered_columns(columns, values, examples)]
+    assert order == ["oid", "gfk", "anzahlgs", "leer", "tech"]  # empty kept column at the end
+    assert column_title(columns[3], "target:object_id").startswith("🔒 ")
