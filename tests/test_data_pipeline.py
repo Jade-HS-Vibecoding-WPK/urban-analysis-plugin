@@ -1205,7 +1205,9 @@ def test_osm_areas_get_categories_and_readable_object_types(tmp_path):
         3: ("multipolygons_gruen", "Grünflächen", "Park"),
         4: ("multipolygons_flaechen", "Nutzungsflächen", "Wohnbaufläche"),
         5: ("multipolygons_wasser", "Wasserflächen", "Gewässer"),
-        6: ("multipolygons_sonstige", "Sonstige OSM-Flächen", None),
+        # "shop" is taken out of other_tags as a column (E30), so the
+        # bakery gets a readable object type; the category stays the same.
+        6: ("multipolygons_sonstige", "Sonstige OSM-Flächen", "Geschäft"),
         7: ("multipolygons_strassen", "Straßen", "Stellplatz"),
         8: ("multipolygons_gruen", "Grünflächen", "Hecke"),
         9: ("multipolygons_flaechen", "Nutzungsflächen", "Schulgelände"),

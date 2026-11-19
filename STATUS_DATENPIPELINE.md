@@ -172,13 +172,45 @@ so speichert W11) und der Spalte `oid`.
 
 Offen (Teil 2): Profile für BW, HB, Berlin, Saarland, Bayern.
 
+## F1 / M23 – Spalten lesen und lesbar benennen (19.11.2026)
+
+Setzt E29/E30 mit dem Vertrag aus G11 (#43) um.
+
+- **`PipelineResult.columns`:** je Eingabe-Layer und Spalte eine
+  `ColumnInfo` (ohne Geometrie und Zeilennummer) mit lesbarem Namen, bis zu
+  3 Beispielwerten und dem vorgeschlagenen Kernfeld.
+- **Bekannt oder nicht:** Bei ALKIS und OSM ist eine Spalte bekannt, wenn sie
+  in der Namensliste `field_labels` in `mapping_rules.json` steht (jetzt auch
+  ALKIS-vereinfacht-Flurstücke und viele OSM-Merkmale) oder ein Kernfeld
+  füllt. OSM-`other_tags` gilt als nicht bekannt (enthält die unlesbaren
+  Tags). **Eigene Dateien ohne Profil behalten alle Spalten.**
+- **Hinweis** `columns-not-loaded` (Info, je Layer, mit `layer_id` und
+  `details`): nennt die nicht übernommenen Spalten.
+- **OSM:** Mehr Tags werden aus `other_tags` als Spalten ausgepackt (Name,
+  PLZ, Ort, Höhe, Dachform, Baujahr, Oberfläche, Höchstgeschwindigkeit,
+  Rollstuhl …). Nebenwirkung: Flächen mit z. B. `shop` nur in `other_tags`
+  bekommen jetzt eine Objektart („Geschäft“); die Kategorie ändert sich nicht.
+- **Werte je Objekt:** `HarmonizedRecord.extra_attributes` = übernommene
+  Spalten mit lesbarem Namen. Der Import füllt sie mit der Vorauswahl.
+- **Für Schritt 5 (W14):** `default_column_decisions(columns)` liefert die
+  Vorauswahl; `apply_column_decisions(records, columns, decisions)` setzt die
+  Entscheidungen um (umbenennen, dazuholen, weglassen, anderes Kernfeld).
+  Doppelte Namen oder Kernfelder geben einen `ValueError` mit verständlichem
+  Text. Aufruf **nach** `apply_attribute_decisions`.
+- **Für die Ausgabe (W14, `outputs.py`):** Kernfelder aus `attributes`, dazu
+  die Spalten aus `extra_attributes` schreiben.
+- **Offen:** Die Namensliste für den eigenen ALKIS-Export (`_kon`) kennt nur
+  die Spalten aus den Tests. Beim QGIS-Test zeigt der neue Hinweis, welche
+  Spalten fehlen – die dann nachtragen.
+- Tests: `tests/test_columns.py` (10).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 18.11.2026 abends: 262 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 297 grün.
 
 ## Als Nächstes (Person Mac)
 
-Reihenfolge laut `ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6: 10 M10b
-ALKIS-Aufträge und Bundesland · 6 M18 Recherche GTFS/Zensus · 7 M6 fehlende
-Werte · M12 Teil 2 (weitere Länderformate).
+Feature Freeze (`ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6, Etappe F): F3 M24
+Dubletten mit Beispiel · F6 M17 Teil 1 Startpunkte · F7 M20 Luftlinie.
+Danach: M10b, M18, M6, M12 Teil 2.
