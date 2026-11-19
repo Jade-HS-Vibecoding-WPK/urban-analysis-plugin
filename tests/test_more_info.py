@@ -17,6 +17,14 @@ def test_abbreviations_do_not_end_the_summary():
     assert more == "Mehr dazu im Protokoll."
 
 
+def test_abbreviation_in_brackets_does_not_cut_the_summary():
+    short, more = split_summary(
+        "Gebäude: 471 Gebäude haben mehrere Adressen (z. B. Eckhäuser). Sie werden zusammengefasst."
+    )
+    assert short == "Gebäude: 471 Gebäude haben mehrere Adressen (z. B. Eckhäuser)."
+    assert more == "Sie werden zusammengefasst."
+
+
 def test_one_sentence_has_nothing_more():
     assert split_summary("Alles in Ordnung.") == ("Alles in Ordnung.", "")
 
