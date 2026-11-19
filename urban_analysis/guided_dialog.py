@@ -34,18 +34,21 @@ from .data_pipeline import (
 )
 from .accessibility_view import (
     GUIDE_NOTE,
+    MAX_RADIUS_M,
     AccessibilityChoice,
+    OwnTarget,
+    OwnTargetMarkers,
     RadiusError,
     add_columns_to_layer,
     build_layers as build_accessibility_layers,
     calculate as calculate_accessibility,
     choice_problem,
+    create_target_pick_tool,
     distance_columns,
     guide_value,
-    parse_radii,
-    radii_for,
+    own_target_label,
     radii_text,
-    ring_colors,
+    rings_with_guide,
 )
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import (
@@ -340,12 +343,10 @@ LAYERS_ACTION = "Layer erzeugen"
 LAYERS_AGAIN_ACTION = "Layer neu erzeugen"
 ACCESS_ACTION = "Analyse starten"
 SAVE_ACTION = "Speichern"
-LAYERS_INTRO = ("Hier entstehen die Ergebnis-Layer in QGIS (eine neue Gruppe). Deine "
-                "Eingangsdaten bleiben unverändert.")
-LAYERS_NEXT_HINT = ("Optional weiter mit „Erreichbarkeit“, dann „Speichern“ – die Knöpfe "
-                    "oben sind jederzeit anwählbar.")
-LAYERS_FIRST_HINT = ("Noch keine Ergebnis-Layer: Sie werden beim Klick unten automatisch "
-                     "zuerst erzeugt (Einstellungen unter „Ausgabe“).")
+LAYERS_INTRO = "Legt die Ergebnis-Layer als neue Gruppe in QGIS an; deine Daten bleiben unverändert."
+LAYERS_NEXT_HINT = "Jetzt sind „Erreichbarkeit“ und „Speichern“ oben anwählbar."
+LAYERS_FIRST_TOOLTIP = "Erst unter „Ausgabe“ die Layer erzeugen."
+NEEDS_LAYERS_MESSAGE = "Bitte zuerst unter „Ausgabe“ auf „Layer erzeugen“ klicken."
 SAVE_INTRO = ("Gespeichert wird der aktuelle Stand in QGIS: das GeoPackage mit allen Layern "
               "der Ergebnis-Gruppe (auch der Erreichbarkeit), das PDF mit den gerade "
               "sichtbaren Layern in ihrer Reihenfolge. Erneut speichern überschreibt die "
@@ -357,6 +358,13 @@ ACCESS_INTRO = ("Wie weit ist es von jedem Gebäude zum nächsten Ziel (Luftlini
                 "Abstand je Gebäude in der Attributtabelle und Radien um die Ziele in der Karte. "
                 "Die Ziele werden als eigene Punkte mit ihrer ganzen Attributtabelle kopiert.")
 ACCESS_RADII_GUIDE = "Radien je Ziel in Metern (vorgeschlagen: Richtwert)"
+OWN_TARGETS_HINT = ("Eigene Ziele setzen, z. B. einen geplanten Standort: „Punkt setzen“ und in "
+                    "die Karte klicken, oder „Objekt anklicken“ und z. B. ein Gebäude wählen. "
+                    "Sie werden zusammen als Ziel „Eigene Ziele“ ausgewertet.")
+OWN_POINT_INSTRUCTIONS = ("Linksklick in die Karte setzt ein eigenes Ziel. Rechtsklick oder Esc "
+                          "beendet.")
+OWN_OBJECT_INSTRUCTIONS = ("Linksklick auf ein Objekt (z. B. ein Gebäude) nimmt es als eigenes "
+                           "Ziel. Rechtsklick oder Esc beendet.")
 ACCESS_TARGETS_HINT = ("Ganze Kategorien ankreuzen (z. B. „ÖPNV-Haltestellen“) oder aufklappen "
                        "und einzelne Arten wählen (z. B. nur „Supermarkt“). Mehrere Ziele sind möglich.")
 ACCESS_NO_TARGETS = ("In den geladenen Daten gibt es keine Ziele wie Haltestellen, Supermärkte "
@@ -736,6 +744,15 @@ def sources_applied_text(removed):
         return "Quellen abgeglichen: Es wurde nichts weggelassen."
     return (f"Quellen abgeglichen: {format_count(removed)} doppelte Objekte aus der jeweils "
             "anderen Quelle weggelassen.")
+
+
+GEOMETRY_ORDER = {"point": 0, "line": 1, "polygon": 2}
+
+
+def layer_order_key(kind, rank):
+    """Sort key for the result layers (top first): points, lines, areas;
+    inside each the higher draw rank of the category first."""
+    return (GEOMETRY_ORDER.get(kind, 3), -rank)
 
 
 def state_item_text(state):
@@ -1155,6 +1172,7 @@ def _create_dock(plugin):
         Qgis,
         QgsApplication,
         QgsCoordinateReferenceSystem,
+        QgsCoordinateTransform,
         QgsFeedback,
         QgsGeometry,
         QgsProject,
@@ -1223,6 +1241,7 @@ def _create_dock(plugin):
         QRadioButton,
         QScrollArea,
         QSizePolicy,
+        QSpinBox,
         QToolButton,
         QVBoxLayout,
         QWidget,
@@ -1301,6 +1320,7 @@ def _create_dock(plugin):
             self.last_access_lines = []  # result of the last accessibility run
             self.sources = []  # SourceFile of the last load (licence block, E28)
             self.download_marker = None  # grey dashed download rectangle (E17)
+            self.own_markers = None  # own accessibility targets in the map
             self.download_feedback = None  # QgsFeedback of a running OSM download
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -1417,8 +1437,15 @@ def _create_dock(plugin):
             outer.addWidget(self.classic_header)
             self._show_header(ui_style.current())
             outer.addWidget(content, 1)
+            # Fixed area above the scrolling page (last step: its area buttons)
+            self.sticky = QWidget()
+            self.sticky_layout = QVBoxLayout(self.sticky)
+            self.sticky_layout.setContentsMargins(8, 6, 8, 0)
+            self.sticky.hide()
+
             layout.addLayout(header)
             layout.addLayout(busy_row)
+            layout.addWidget(self.sticky)
             layout.addWidget(scroll, 1)
             layout.addWidget(self.message_scroll)
             layout.addLayout(buttons)
@@ -1540,6 +1567,9 @@ def _create_dock(plugin):
                 self.step9_tab = "output"  # 'Ausgabe' is open first
             if index not in (1, 2):
                 self.hide_download_box()  # only while area and download are chosen
+            _clear_layout(self.sticky_layout)  # the page fills it again if needed
+            self.sticky.hide()
+            self.hide_own_markers()
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -1748,6 +1778,41 @@ def _create_dock(plugin):
             if self.download_marker is not None:
                 self.download_marker.hide()
 
+        def show_own_markers(self, geometries, crs):
+            """Own accessibility targets as markers (canvas CRS)."""
+            canvas = plugin.iface.mapCanvas()
+            if self.own_markers is None:
+                self.own_markers = OwnTargetMarkers(canvas)
+            canvas_crs = canvas.mapSettings().destinationCrs()
+            shown = []
+            for geometry in geometries:
+                if crs != canvas_crs:
+                    geometry.transform(QgsCoordinateTransform(crs, canvas_crs, QgsProject.instance()))
+                shown.append(geometry)
+            self.own_markers.show(shown)
+
+        def hide_own_markers(self):
+            if self.own_markers is not None:
+                self.own_markers.hide()
+
+        def start_picking(self, mode, on_pick, on_finished):
+            """Map tool for own accessibility targets (point or object)."""
+            canvas = plugin.iface.mapCanvas()
+            self.stop_drawing()
+
+            def picked(geometry, attributes):
+                on_pick(geometry, attributes, canvas.mapSettings().destinationCrs())
+
+            def finished(message, keep=False):
+                if not keep:
+                    self.stop_drawing()
+                on_finished(message)
+
+            self.previous_map_tool = canvas.mapTool()
+            self.draw_tool = create_target_pick_tool(canvas, mode, picked, finished)
+            canvas.setMapTool(self.draw_tool)
+            canvas.setFocus()
+
         def start_drawing(self, on_finished, on_canceled, shape="polygon"):
             """Activate the polygon or rectangle drawing tool in the QGIS map."""
             canvas = plugin.iface.mapCanvas()
@@ -1791,6 +1856,9 @@ def _create_dock(plugin):
             if self.download_marker is not None:
                 self.download_marker.remove()
                 self.download_marker = None
+            if self.own_markers is not None:
+                self.own_markers.remove()
+                self.own_markers = None
 
     dock = GuidedDock()
 
@@ -3049,6 +3117,8 @@ def _create_dock(plugin):
     def build_accessibility(page):
         flow = workflow()
         choice = getattr(flow, "accessibility", None) or AccessibilityChoice()
+        if getattr(flow, "own_targets", None) is None:
+            flow.own_targets = list(choice.own_targets)
         try:
             from .accessibility import target_choices
             available = target_choices(flow.result.harmonized_records)
@@ -3065,8 +3135,8 @@ def _create_dock(plugin):
             label.setWordWrap(True)
             details_layout.addWidget(label)
 
-        # ① targets: whole categories or single kinds (subtypes)
-        step_heading("① Ziele wählen")
+        # ① targets from the data: whole categories or single kinds (subtypes)
+        step_heading("① Ziele aus den Daten")
         tree = QTreeWidget()
         tree.setHeaderHidden(True)
         if available:
@@ -3100,103 +3170,193 @@ def _create_dock(plugin):
             set_role(none, "warning")
             details_layout.addWidget(none)
 
-        # ② radii per chosen target: suggested from the guide values
-        step_heading("② " + ACCESS_RADII_GUIDE)
-        radii_box = QWidget()
-        radii_layout = QVBoxLayout(radii_box)
-        radii_layout.setContentsMargins(0, 0, 0, 0)
-        details_layout.addWidget(radii_box)
-        radii_hint = QLabel(ACCESS_RADII_HINT + " " + GUIDE_NOTE)
-        radii_hint.setWordWrap(True)
-        set_role(radii_hint, "hint")
-        details_layout.addWidget(radii_hint)
-        page.widgets["access_radii"] = {}  # category -> line edit
-        own_radii = dict(choice.radii)  # typed values survive a rebuild of the rows
+        # ② own targets: set points or pick objects in the map
+        step_heading("② Eigene Ziele (optional)")
+        own_hint = QLabel(OWN_TARGETS_HINT)
+        own_hint.setWordWrap(True)
+        set_role(own_hint, "hint")
+        details_layout.addWidget(own_hint)
+        own_buttons = QWidget()
+        own_row = QHBoxLayout(own_buttons)
+        own_row.setContentsMargins(0, 0, 0, 0)
+        point_button = QPushButton("Punkt setzen")
+        object_button = QPushButton("Objekt anklicken")
+        for button, mode in ((point_button, "point"), (object_button, "object")):
+            set_role(button, "secondary")
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _c=False, m=mode: start_target_pick(page, m))
+            own_row.addWidget(button)
+        own_row.addStretch()
+        details_layout.addWidget(own_buttons)
+        own_list = QWidget()
+        own_list_layout = QVBoxLayout(own_list)
+        own_list_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.addWidget(own_list)
+        page.widgets["access_own_list"] = own_list_layout
+        refresh_own_targets(page)
 
-        def chosen_targets():
-            return tree_targets(tree)
+        # ③ rings: tick how many, set each radius and colour
+        step_heading("③ Ringe (Radius in Metern, Luftlinie)")
+        rings_box = QWidget()
+        rings_layout = QVBoxLayout(rings_box)
+        rings_layout.setContentsMargins(0, 0, 0, 0)
+        rings_layout.setSpacing(2)
+        details_layout.addWidget(rings_box)
+        ring_widgets = []
+        for number, (on, metres, color) in enumerate(choice.rings, start=1):
+            row_box = QWidget()
+            row = QHBoxLayout(row_box)
+            row.setContentsMargins(0, 0, 0, 0)
+            tick = QCheckBox(f"Ring {number}")
+            tick.setChecked(on)
+            spin = QSpinBox()
+            spin.setRange(1, MAX_RADIUS_M)
+            spin.setSingleStep(50)
+            spin.setSuffix(" m")
+            spin.setValue(int(metres))
+            spin.setEnabled(on)
+            spin.setToolTip("Radius dieses Rings in Metern (Luftlinie)")
+            color_button = QgsColorButton()
+            color_button.setColor(QColor(color))
+            color_button.setFixedWidth(46)
+            color_button.setToolTip(f"Farbe für Ring {number}")
+            tick.toggled.connect(spin.setEnabled)
+            row.addWidget(tick)
+            row.addWidget(spin)
+            row.addWidget(color_button)
+            row.addStretch()
+            rings_layout.addWidget(row_box)
+            ring_widgets.append((tick, spin, color_button))
+        page.widgets["access_rings"] = ring_widgets
+        guide_box = QWidget()
+        guide_layout = QVBoxLayout(guide_box)
+        guide_layout.setContentsMargins(0, 4, 0, 0)
+        details_layout.addWidget(guide_box)
+        note = QLabel(GUIDE_NOTE)
+        note.setWordWrap(True)
+        set_role(note, "hint")
+        details_layout.addWidget(note)
 
-        def remember_radii():
-            for category, line in page.widgets["access_radii"].items():
-                own_radii[category] = line.text()
+        def apply_guide(guide_radii):
+            rings = rings_with_guide(ring_values(page), guide_radii)
+            for (tick, spin, _color), (on, metres, _c) in zip(ring_widgets, rings):
+                tick.setChecked(on)
+                spin.setValue(int(metres))
+            dock.show_message(f"Richtwert übernommen: {radii_text(guide_radii)} m.", kind="info")
 
-        def refresh_radii(*_args):
-            remember_radii()
-            _clear_layout(radii_layout)
-            lines = {}
-            targets = chosen_targets()
-            if not targets:
-                none = QLabel("Erst oben ein Ziel ankreuzen.")
-                set_role(none, "hint")
-                radii_layout.addWidget(none)
-            for category, subtypes in targets.items():
+        def refresh_guides(*_args):
+            _clear_layout(guide_layout)
+            for category, subtypes in tree_targets(tree).items():
                 guide_radii, guide_text = guide_value(category, subtypes)
-                label = QLabel(f"{', '.join(subtypes) if subtypes else category}:")
-                label.setWordWrap(True)
-                radii_layout.addWidget(label)
-                typed = own_radii.get(category)
-                text = typed if isinstance(typed, str) else radii_text(typed or guide_radii)
-                line = QLineEdit(text)
-                line.setPlaceholderText(radii_text(guide_radii))
-                line.editingFinished.connect(refresh_colors)
-                radii_layout.addWidget(line)
-                guide = QLabel(f"Richtwert {radii_text(guide_radii)} m – {guide_text}")
-                guide.setWordWrap(True)
-                set_role(guide, "hint")
-                radii_layout.addWidget(guide)
-                lines[category] = line
-            page.widgets["access_radii"] = lines
-            refresh_colors()
+                line = QWidget()
+                line_layout = QHBoxLayout(line)
+                line_layout.setContentsMargins(0, 0, 0, 0)
+                name = ", ".join(subtypes) if subtypes else category
+                text = QLabel(f"Richtwert {name}: {radii_text(guide_radii)} m – {guide_text}")
+                text.setWordWrap(True)
+                set_role(text, "hint")
+                take = QPushButton("übernehmen")
+                set_role(take, "secondary")
+                take.setCursor(Qt.PointingHandCursor)
+                take.setToolTip("Die Ringe auf diesen Richtwert setzen")
+                take.clicked.connect(lambda _c=False, r=guide_radii: apply_guide(r))
+                line_layout.addWidget(text, 1)
+                line_layout.addWidget(take, 0, Qt.AlignmentFlag.AlignTop)
+                guide_layout.addWidget(line)
             QTimer.singleShot(0, dock.fit_wrapped_labels)
 
-        # ③ display: fill between the rings (15 %), colours per ring
-        step_heading("③ Darstellung")
+        # ④ display: fill between the rings with a chosen opacity
+        step_heading("④ Darstellung")
+        fill_row_box = QWidget()
+        fill_row = QHBoxLayout(fill_row_box)
+        fill_row.setContentsMargins(0, 0, 0, 0)
         fill = QCheckBox(ACCESS_FILL_LABEL)
         fill.setChecked(choice.fill)
-        details_layout.addWidget(fill)
-        colors_box = QWidget()
-        colors_layout = QHBoxLayout(colors_box)
-        colors_layout.setContentsMargins(INDENT_PX, 0, 0, 0)
-        details_layout.addWidget(colors_box)
-        page.widgets["access_colors"] = []
+        opacity = QSpinBox()
+        opacity.setRange(0, 100)
+        opacity.setSingleStep(5)
+        opacity.setSuffix(" %")
+        opacity.setValue(int(round(choice.opacity * 100)))
+        opacity.setToolTip("Deckkraft der Flächen zwischen den Ringen")
+        opacity.setEnabled(choice.fill)
+        fill.toggled.connect(opacity.setEnabled)
+        fill_row.addWidget(fill)
+        fill_row.addWidget(QLabel("Deckkraft"))
+        fill_row.addWidget(opacity)
+        fill_row.addStretch()
+        details_layout.addWidget(fill_row_box)
 
-        def refresh_colors(*_args):
-            # as many colours as the target with the most radii
-            values = ()
-            for line in page.widgets["access_radii"].values():
-                try:
-                    found = parse_radii(line.text())
-                except RadiusError:
-                    continue
-                if len(found) > len(values):
-                    values = found
-            values = values or (300, 500)
-            current = [b.color().name() for b in page.widgets["access_colors"]] or list(choice.colors)
-            _clear_layout(colors_layout)
-            buttons = []
-            for number, color in enumerate(ring_colors(values, current), start=1):
-                box = QWidget()
-                box_layout = QVBoxLayout(box)
-                box_layout.setContentsMargins(0, 0, 4, 0)
-                button = QgsColorButton()
-                button.setColor(QColor(color))
-                button.setFixedWidth(46)
-                button.setToolTip(f"Farbe für den {number}. Ring von innen")
-                box_layout.addWidget(button)
-                caption = QLabel(f"{number}. Ring")
-                set_role(caption, "hint")
-                box_layout.addWidget(caption)
-                colors_layout.addWidget(box)
-                buttons.append(button)
-            colors_layout.addStretch()
-            page.widgets["access_colors"] = buttons
-            colors_box.setVisible(fill.isChecked())
-
-        fill.toggled.connect(lambda on: colors_box.setVisible(on))
         if available:
-            tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_radii))
-        refresh_radii()
-        page.widgets.update(access_tree=tree, access_fill=fill, access_available=bool(available))
+            tree.itemChanged.connect(lambda *_args: QTimer.singleShot(0, refresh_guides))
+        refresh_guides()
+        page.widgets.update(access_tree=tree, access_fill=fill, access_opacity=opacity,
+                            access_available=bool(available))
+        show_own_markers()
+
+    def ring_values(page):
+        return tuple((tick.isChecked(), spin.value(), color.color().name())
+                     for tick, spin, color in page.widgets["access_rings"])
+
+    def refresh_own_targets(page):
+        """The list of own targets with 'entfernen' per entry."""
+        layout = page.widgets.get("access_own_list")
+        if layout is None:
+            return
+        _clear_layout(layout)
+        targets = workflow().own_targets
+        for index, target in enumerate(targets):
+            line = QWidget()
+            line_layout = QHBoxLayout(line)
+            line_layout.setContentsMargins(0, 0, 0, 0)
+            text = QLabel(f"• {target.label}")
+            text.setWordWrap(True)
+            remove = QPushButton("entfernen")
+            set_role(remove, "secondary")
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.clicked.connect(lambda _c=False, i=index: remove_own_target(page, i))
+            line_layout.addWidget(text, 1)
+            line_layout.addWidget(remove)
+            layout.addWidget(line)
+        if not targets:
+            none = QLabel("Noch keine eigenen Ziele.")
+            set_role(none, "hint")
+            layout.addWidget(none)
+        show_own_markers()
+        QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+    def remove_own_target(page, index):
+        targets = workflow().own_targets
+        if 0 <= index < len(targets):
+            del targets[index]
+        refresh_own_targets(page)
+
+    def show_own_markers():
+        if dock.step9_tab != "access" or dock.current != len(dock.pages) - 1:
+            dock.hide_own_markers()
+            return
+        geometries = [QgsGeometry.fromWkt(target.wkt) for target in workflow().own_targets]
+        dock.show_own_markers(geometries, target_crs())
+
+    def start_target_pick(page, mode):
+        """'Punkt setzen' / 'Objekt anklicken': map tool until right click or Esc."""
+        project_crs = QgsCoordinateReferenceSystem(workflow().result.project_crs)
+
+        def picked(geometry, attributes, canvas_crs):
+            if canvas_crs != project_crs:
+                geometry.transform(QgsCoordinateTransform(canvas_crs, project_crs, QgsProject.instance()))
+            targets = workflow().own_targets
+            label = own_target_label(len(targets) + 1, attributes)
+            targets.append(OwnTarget(geometry.asWkt(), label, attributes))
+            refresh_own_targets(page)
+            dock.show_message(f"Eigenes Ziel hinzugefügt: {label}. Weitere setzen oder mit "
+                              "Rechtsklick/Esc beenden.", kind="info")
+
+        def finished(message):
+            dock.show_message(message or "Eigene Ziele: fertig.", kind="info")
+
+        dock.show_message(OWN_POINT_INSTRUCTIONS if mode == "point" else OWN_OBJECT_INSTRUCTIONS,
+                          kind="info")
+        dock.start_picking(mode, picked, finished)
 
     def tree_targets(tree):
         """{category: subtypes} of the ticked targets (empty = whole category)."""
@@ -3213,19 +3373,14 @@ def _create_dock(plugin):
         return targets
 
     def accessibility_from(page):
-        """Read the accessibility settings of step 9 (raises RadiusError)."""
+        """Read the accessibility settings of the last step."""
         widgets = page.widgets
-        radii = {}
-        for category, line in widgets["access_radii"].items():
-            try:
-                radii[category] = parse_radii(line.text())
-            except RadiusError as error:
-                raise RadiusError(f"{category}: {error}")
         return AccessibilityChoice(
             targets=tree_targets(widgets["access_tree"]),
-            radii=radii,
+            rings=ring_values(page),
             fill=widgets["access_fill"].isChecked(),
-            colors=tuple(button.color().name() for button in widgets["access_colors"]),
+            opacity=widgets["access_opacity"].value() / 100,
+            own_targets=list(workflow().own_targets),
         )
 
     def validate_topic(page):
@@ -3391,9 +3546,18 @@ def _create_dock(plugin):
         return QgsProject.instance().layerTreeRoot().findGroup(dock.last_group_name)
 
     def build_summary(page):
-        """Last step: a row of buttons (always selectable), below the chosen area."""
+        """Last step: a row of buttons fixed below the progress (does not
+        scroll), below it the chosen area.  'Erreichbarkeit' and 'Speichern'
+        stay grey until the layers exist ('Ausgabe' first)."""
+        has_layers = result_group() is not None
+        if not has_layers:
+            dock.step9_tab = "output"
         tab = dock.step9_tab
-        row = QHBoxLayout()
+        if tab != "access":
+            dock.hide_own_markers()
+        _clear_layout(dock.sticky_layout)
+        row_box = QWidget()
+        row = QHBoxLayout(row_box)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         for key, text in STEP9_TABS:
@@ -3402,9 +3566,13 @@ def _create_dock(plugin):
             button.setChecked(key == tab)
             button.setCursor(Qt.PointingHandCursor)
             set_role(button, "choice")
+            if key != "output" and not has_layers:
+                button.setEnabled(False)
+                button.setToolTip(LAYERS_FIRST_TOOLTIP)
             button.clicked.connect(lambda _checked=False, k=key: switch_step9_tab(page, k))
             row.addWidget(button)
-        page.layout.addLayout(row)
+        dock.sticky_layout.addWidget(row_box)
+        dock.sticky.show()
         panel = QFrame()
         set_role(panel, "panel")
         panel_layout = QVBoxLayout(panel)
@@ -3426,6 +3594,7 @@ def _create_dock(plugin):
     def rebuild_last_step(page):
         page.build()
         make_texts_selectable(page.widget)
+        dock.scroll.verticalScrollBar().setValue(0)
         QTimer.singleShot(0, dock.fit_wrapped_labels)
 
     def remember_accessibility(page):
@@ -3443,7 +3612,7 @@ def _create_dock(plugin):
         area.layout.addWidget(label)
 
     def area_button(area, page, text, action, context):
-        """The own main button of an area (at its end)."""
+        """The own main button of an area."""
         button = PixelButton(text, "primary")
         button.setCursor(Qt.PointingHandCursor)
 
@@ -3456,19 +3625,18 @@ def _create_dock(plugin):
 
         button.clicked.connect(clicked)
         row = QHBoxLayout()
-        row.setContentsMargins(0, 8, 0, 0)
+        row.setContentsMargins(0, 8, 0, 4)
         row.addStretch()
         row.addWidget(button)
         area.layout.addLayout(row)
         return button
 
-    # Ausgabe: map style, data source, 'Layer erzeugen'
+    # Ausgabe: map style, data source, 'Layer erzeugen' (button at the top)
     def build_layers_area(area):
         flow = workflow()
         names = readable_names()
         draft = output_draft()
         group = result_group()
-        area_hint(area, LAYERS_INTRO)
         area.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
@@ -3476,25 +3644,29 @@ def _create_dock(plugin):
         source = QLineEdit(draft["source"])
         source.textChanged.connect(lambda text: draft.__setitem__("source", text))
         source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
+        source.setToolTip(DATA_SOURCE_HINT)
         area.layout.addWidget(source)
-        area_hint(area, DATA_SOURCE_HINT)
-        if dock.last_reports is not None and group is not None:
-            area_hint(area, DONE_TITLE, "status")
-            area.layout.addWidget(summary_card(
-                "Angelegte Ergebnis-Layer",
-                result_rows(dock.last_reports,
-                            {d.layer_id: d.category for d in flow.result.layers})))
-            area_hint(area, done_hint_text(group.name()))
-        else:
-            area.layout.addWidget(summary_card(
-                "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
-            area.layout.addWidget(summary_card(
-                "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
         area_button(area, area_page(area), LAYERS_AGAIN_ACTION if group is not None else LAYERS_ACTION,
                     create_layers_clicked, LAYERS_ACTION)
+        if dock.last_reports is not None and group is not None:
+            area_hint(area, DONE_TITLE + " " + done_hint_text(group.name()), "status")
+            details = collapsible(area, "layers_done",
+                                  f"Angelegte Ergebnis-Layer ({len(dock.last_reports)})")
+            details.addWidget(summary_card("Angelegte Ergebnis-Layer", result_rows(
+                dock.last_reports, {d.layer_id: d.category for d in flow.result.layers})))
+            return
+        area_hint(area, LAYERS_INTRO)
+        planned = planned_layer_rows(flow, names)
+        details = collapsible(area, "layers_planned",
+                              f"Diese Ergebnis-Layer werden angelegt ({len(planned)})")
+        details.addWidget(summary_card("Diese Ergebnis-Layer werden angelegt", planned))
+        basics = collapsible(area, "layers_basics", "Grundlagen (Gebiet, CRS, Quelle)")
+        basics.addWidget(summary_card(
+            "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
 
     def area_page(area):
-        return dock.pages[dock.current]
+        # the last step (dock.current is still the previous page while it is built)
+        return dock.pages[-1]
 
     def create_layers_clicked(page):
         if make_layers(ask_same=True) is None:
@@ -3502,13 +3674,21 @@ def _create_dock(plugin):
         rebuild_last_step(page)
         dock.show_message(result_layers_text(dock.last_reports) + "\n" + LAYERS_NEXT_HINT, kind="info")
 
+    def geometry_kind(layer):
+        """'point', 'line' or 'polygon' of a QGIS layer."""
+        kind = layer.geometryType()
+        if kind == Qgis.GeometryType.Point:
+            return "point"
+        if kind == Qgis.GeometryType.Line:
+            return "line"
+        return "polygon"
+
     def ensure_layers():
-        """The result group; created first if there is none yet, so every
-        area works on its own.  None if that failed (message shown)."""
+        """The result group of 'Layer erzeugen', or None with a message."""
         group = result_group()
-        if group is not None:
-            return group
-        return make_layers(ask_same=False)
+        if group is None:
+            reject(NEEDS_LAYERS_MESSAGE)
+        return group
 
     def make_layers(ask_same):
         """Build the result layers and add them to QGIS as a new group."""
@@ -3561,9 +3741,11 @@ def _create_dock(plugin):
             style = draft.get("map_style", DEFAULT_MAP_STYLE)
             for layer_id, layer in layer_objects.items():
                 apply_style(layer, categories.get(layer_id), style)
+            # points on top, then lines, then areas; inside each the usual rank
             layer_objects = dict(sorted(
                 layer_objects.items(),
-                key=lambda item: -draw_rank(categories.get(item[0]))))
+                key=lambda item: layer_order_key(
+                    geometry_kind(item[1]), draw_rank(categories.get(item[0])))))
             group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
         finally:
             QApplication.restoreOverrideCursor()
@@ -3582,20 +3764,15 @@ def _create_dock(plugin):
         if dock.last_access_lines:
             area.layout.addWidget(summary_card("Ergebnis der letzten Analyse",
                                                [(None, line) for line in dock.last_access_lines]))
-        if result_group() is None:
-            area_hint(area, LAYERS_FIRST_HINT)
         area_button(area, area_page(area), ACCESS_ACTION, run_accessibility, ACCESS_ACTION)
 
     def run_accessibility(page):
         """'Analyse starten': distances into the buildings of the map, targets
         (copies with attribute table) and dashed radii as sub-groups."""
         flow = workflow()
-        if not page.widgets.get("access_available"):
-            return reject(ACCESS_NO_TARGETS)
-        try:
-            choice = accessibility_from(page)
-        except RadiusError as error:
-            return reject(str(error))
+        choice = accessibility_from(page)
+        if not page.widgets.get("access_available") and not choice.own_targets:
+            return reject(ACCESS_NO_TARGETS + " " + OWN_TARGETS_HINT)
         problem = choice_problem(choice)
         if problem:
             return reject(problem)
@@ -3679,8 +3856,6 @@ def _create_dock(plugin):
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
         if dock.last_saved:
             area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
-        if result_group() is None:
-            area_hint(area, LAYERS_FIRST_HINT)
         area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
 
     def current_used_sources(flow):

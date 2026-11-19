@@ -1,18 +1,19 @@
-"""Accessibility in the guidance (W16, E26, E34): its own area in step 9.
+"""Accessibility in the guidance (W16, E26, E34): its own area in the last step.
 
 The calculation (distance as the crow flies) is ``accessibility.py`` of
 Person Mac.  This module turns the user's choices into ``TargetChoice``
 objects and draws the result in QGIS: the targets as points (copies of the
-loaded objects with their whole attribute table) and, per radius, a dashed
-ring around them; the area between two rings can be filled with 15 %
-opacity.  The helpers at the top are QGIS-free.
+loaded objects with their whole attribute table) and, per ring, a dashed
+line around them; the area between two rings can be filled with a chosen
+opacity.  Own targets (set in the map or picked from a layer) form the extra
+target "Eigene Ziele".  The helpers at the top are QGIS-free.
 
-Radii are suggested per target from usual planning values ("Richtwerte",
-see ``GUIDE_VALUES``); the user can always change them.
+Radii are shared by all targets (rings with tick boxes); the usual planning
+values per target ("Richtwerte", ``GUIDE_VALUES``) are shown as hints.
 """
 
 from dataclasses import dataclass, field, replace
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Tuple
 
 DEFAULT_RADII = (300, 500)
 # preset ring colours (inside → outside): green, yellow, red, then more
@@ -21,6 +22,12 @@ FILL_OPACITY = 0.15
 MAX_RADII = 5
 MAX_RADIUS_M = 5000
 RING_FIELD = "Radius"
+# rings of the form: (ticked, metres, colour); the user changes all three
+DEFAULT_RINGS = tuple(
+    (on, metres, color) for (on, metres), color in zip(
+        ((True, 300), (True, 500), (False, 1000), (False, 1500), (False, 2000)), DEFAULT_COLORS))
+OWN_TARGETS = "Eigene Ziele"
+OWN_LAYER_PREFIX = "eigene_ziele"
 
 # Usual planning values (air distance, no binding norm).  Key: category or
 # subtype; a subtype value wins if all chosen subtypes share it.
@@ -46,15 +53,36 @@ class RadiusError(ValueError):
 
 
 @dataclass
+class OwnTarget:
+    """A target set by the user: a point or a picked object (WKT in the project CRS)."""
+
+    wkt: str
+    label: str
+    attributes: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class AccessibilityChoice:
-    """What the user set in step 9 'Erreichbarkeitsanalyse' (kept on the workflow)."""
+    """What the user set under 'Erreichbarkeit' (kept on the workflow)."""
 
     # category -> chosen subtypes; an empty tuple means the whole category
     targets: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
-    # category -> own radii; missing categories use the guide value
-    radii: Dict[str, Tuple[int, ...]] = field(default_factory=dict)
+    rings: Tuple[Tuple[bool, int, str], ...] = DEFAULT_RINGS
     fill: bool = True
-    colors: Tuple[str, ...] = DEFAULT_COLORS[:2]
+    opacity: float = FILL_OPACITY
+    own_targets: List[OwnTarget] = field(default_factory=list)
+
+    def active_rings(self):
+        """Ticked rings, inside → outside: ((metres, colour), …)."""
+        return tuple(sorted((metres, color) for on, metres, color in self.rings if on))
+
+    @property
+    def radii(self):
+        return tuple(metres for metres, _color in self.active_rings())
+
+    @property
+    def colors(self):
+        return tuple(color for _metres, color in self.active_rings())
 
 
 def parse_radii(text):
@@ -80,6 +108,30 @@ def radii_text(radii):
     return ", ".join(str(radius) for radius in radii)
 
 
+def rings_problem(rings):
+    """First problem of the ring settings as user text, or None."""
+    active = [metres for on, metres, _color in rings if on]
+    if not active:
+        return "Bitte mindestens einen Ring ankreuzen."
+    if any(not 0 < metres <= MAX_RADIUS_M for metres in active):
+        return f"Radien müssen zwischen 1 und {MAX_RADIUS_M} m liegen."
+    if len(set(active)) != len(active):
+        return "Zwei angekreuzte Ringe haben denselben Radius. Bitte einen ändern oder abwählen."
+    return None
+
+
+def rings_with_guide(rings, guide_radii):
+    """Rings after 'Richtwert übernehmen': the first rings get the guide
+    values and are ticked, the others are unticked; colours stay."""
+    result = []
+    for index, (_on, metres, color) in enumerate(rings):
+        if index < len(guide_radii):
+            result.append((True, int(guide_radii[index]), color))
+        else:
+            result.append((False, metres, color))
+    return tuple(result)
+
+
 def guide_value(category, subtypes=()):
     """(radii, explanation) for a target: the subtype value if all chosen
     subtypes share one, else the category value, else the default."""
@@ -89,12 +141,6 @@ def guide_value(category, subtypes=()):
     if category in GUIDE_VALUES:
         return GUIDE_VALUES[category]
     return DEFAULT_RADII, "Kein Richtwert bekannt – bitte selbst festlegen."
-
-
-def radii_for(choice, category):
-    """The radii used for one target category."""
-    own = choice.radii.get(category)
-    return own if own else guide_value(category, choice.targets.get(category, ()))[0]
 
 
 def ring_colors(radii, colors=()):
@@ -120,10 +166,53 @@ def ring_label(inner, outer):
 
 def choice_problem(choice):
     """First problem of the accessibility settings as user text, or None."""
-    if not choice.targets:
+    if not choice.targets and not choice.own_targets:
         return ("Bitte mindestens ein Ziel ankreuzen, z. B. „ÖPNV-Haltestellen“ oder "
-                "einzelne Arten wie „Supermarkt“.")
-    return None
+                "einzelne Arten wie „Supermarkt“, oder eigene Ziele in der Karte setzen.")
+    return rings_problem(choice.rings)
+
+
+def own_target_label(number, attributes):
+    """'Eigenes Ziel 3' or the name of a picked object."""
+    for key in ("Name", "name", "Bezeichnung"):
+        if attributes.get(key):
+            return str(attributes[key])
+    return f"Eigenes Ziel {number}"
+
+
+def own_layer_id(wkt):
+    """Own points and picked areas go into different layers (one geometry type each)."""
+    head = wkt.strip().upper()
+    kind = "flaechen" if "POLYGON" in head else "linien" if "LINE" in head else "punkte"
+    return f"{OWN_LAYER_PREFIX}_{kind}"
+
+
+def own_records(own_targets):
+    """The own targets as pipeline records of the category 'Eigene Ziele'."""
+    from .data_pipeline import HarmonizedRecord
+
+    records = []
+    for number, target in enumerate(own_targets, start=1):
+        extra = {"Bezeichnung": target.label}
+        extra.update({key: value for key, value in target.attributes.items()
+                      if key not in ("object_id", "category", "object_type")})
+        records.append(HarmonizedRecord(
+            layer_id=own_layer_id(target.wkt), source_row_id=number,
+            attributes={"category": OWN_TARGETS, "object_type": "Eigenes Ziel",
+                        "object_id": f"eigen/{number}"},
+            geometry=target.wkt, extra_attributes=extra))
+    return records
+
+
+def own_descriptors(own_targets):
+    """Layer descriptions for the own targets (for their attribute table)."""
+    from .contracts import LayerDescriptor
+
+    kinds = {own_layer_id(target.wkt) for target in own_targets}
+    return {layer_id: LayerDescriptor(layer_id, OWN_TARGETS, "Polygon" if layer_id.endswith("flaechen")
+                                      else "LineString" if layer_id.endswith("linien") else "Point",
+                                      "", category=OWN_TARGETS)
+            for layer_id in kinds}
 
 
 def summary_lines(issues):
@@ -135,19 +224,28 @@ def summary_lines(issues):
 
 
 def calculate(records, choice, settings=None):
-    """Distances for every chosen target (pipeline, M20), each with its own
-    radii.  Returns the updated records, the hints and, per target label,
-    ``(category, radii, target records)``."""
-    from .accessibility import add_air_distance, load_settings, target_records
+    """Distances for every chosen target and the own targets (pipeline, M20),
+    all with the same rings.  Returns the updated records, the hints and,
+    per target label, ``(category, radii, target records)``."""
+    from .accessibility import TargetChoice, add_air_distance, load_settings, target_records
 
     base = settings or load_settings()
+    radii = choice.radii
+    rings = replace(base, radii_m=tuple(radii))
     issues, targets = [], {}
     for target in target_choices_from(choice.targets):
-        radii = radii_for(choice, target.category)
-        own = replace(base, radii_m=tuple(radii))
-        records, found = add_air_distance(records, target, own)
+        records, found = add_air_distance(records, target, rings)
         issues.extend(found)
-        targets[target.label] = (target.category, tuple(radii), target_records(records, target, own))
+        targets[target.label] = (target.category, tuple(radii), target_records(records, target, rings))
+    if choice.own_targets:
+        extra = own_records(choice.own_targets)
+        own_ids = {record.layer_id for record in extra}
+        with_own = replace(rings, target_categories=tuple(rings.target_categories) + (OWN_TARGETS,))
+        target = TargetChoice(OWN_TARGETS)
+        combined, found = add_air_distance(list(records) + extra, target, with_own)
+        issues.extend(found)
+        targets[OWN_TARGETS] = (OWN_TARGETS, tuple(radii), target_records(combined, target, with_own))
+        records = [record for record in combined if record.layer_id not in own_ids]
     return records, issues, targets
 
 
@@ -270,9 +368,10 @@ def build_layers(targets, choice, crs_authid, descriptors=None, readable=None):
     from qgis.PyQt.QtGui import QColor
 
     meta = getattr(QMetaType, "Type", QMetaType)
+    descriptors = {**(descriptors or {}), **own_descriptors(choice.own_targets)}
     result = []
     for label, (_category, radii, records) in targets.items():
-        point_layer = target_point_layer(f"Ziele: {label}", records, descriptors or {}, crs_authid, readable)
+        point_layer = target_point_layer(f"Ziele: {label}", records, descriptors, crs_authid, readable)
         points = [feature.geometry() for feature in point_layer.getFeatures()]
         if not points:
             continue
@@ -294,7 +393,7 @@ def build_layers(targets, choice, crs_authid, descriptors=None, readable=None):
             feature.setAttributes([name])
             rings.append(feature)
             fill = QColor(color)
-            fill.setAlphaF(FILL_OPACITY if choice.fill else 0.0)
+            fill.setAlphaF(max(0.0, min(1.0, choice.opacity)) if choice.fill else 0.0)
             symbol = QgsFillSymbol.createSimple({
                 "color": f"{fill.red()},{fill.green()},{fill.blue()},{fill.alpha()}",
                 "outline_color": color if choice.fill else "#555555",
@@ -305,3 +404,119 @@ def build_layers(targets, choice, crs_authid, descriptors=None, readable=None):
         ring_layer.setRenderer(QgsCategorizedSymbolRenderer(RING_FIELD, categories))
         result.append((f"Erreichbarkeit – {label}", [point_layer, ring_layer]))
     return result
+
+
+def pick_object_at(canvas, point, tolerance_px=6):
+    """The topmost visible feature at ``point`` (canvas CRS): (geometry in
+    canvas CRS, attributes) or None.  Areas must contain the point, points
+    and lines must be within a few pixels."""
+    from qgis.core import (
+        Qgis, QgsCoordinateTransform, QgsFeatureRequest, QgsGeometry, QgsProject, QgsRectangle,
+        QgsVectorLayer,
+    )
+
+    tolerance = tolerance_px * canvas.mapUnitsPerPixel()
+    canvas_crs = canvas.mapSettings().destinationCrs()
+    click = QgsGeometry.fromPointXY(point)
+    layers = [layer for layer in canvas.layers()
+              if isinstance(layer, QgsVectorLayer) and layer.isSpatial()]
+    # points first, then areas (e.g. a building), lines last: a click inside a
+    # building should take the building, not a line running through it
+    order = {Qgis.GeometryType.Point: 0, Qgis.GeometryType.Polygon: 1}
+    layers.sort(key=lambda layer: order.get(layer.geometryType(), 2))
+    for layer in layers:
+        to_layer = QgsCoordinateTransform(canvas_crs, layer.crs(), QgsProject.instance())
+        to_canvas = QgsCoordinateTransform(layer.crs(), canvas_crs, QgsProject.instance())
+        search = QgsRectangle(point.x() - tolerance, point.y() - tolerance,
+                              point.x() + tolerance, point.y() + tolerance)
+        try:
+            search = to_layer.transformBoundingBox(search)
+        except Exception:  # point outside the area this layer can use
+            continue
+        request = QgsFeatureRequest().setFilterRect(search)
+        for feature in layer.getFeatures(request):
+            geometry = QgsGeometry(feature.geometry())
+            if geometry.isNull():
+                continue
+            geometry.transform(to_canvas)
+            if geometry.type() == Qgis.GeometryType.Polygon and not geometry.contains(click):
+                continue
+            if geometry.type() != Qgis.GeometryType.Polygon and geometry.distance(click) > tolerance:
+                continue
+            names = feature.fields().names()
+            attributes = {name: str(feature[name]) for name in names
+                          if feature[name] is not None and str(feature[name]) not in ("", "NULL")}
+            attributes["Layer"] = layer.name()
+            return geometry, attributes
+    return None
+
+
+def create_target_pick_tool(canvas, mode, on_pick, on_finished):
+    """Map tool for own targets.  ``mode`` 'point': every left click sets a
+    point; 'object': a left click takes the object below it.  Right click or
+    Esc ends.  ``on_pick(geometry, attributes)`` gets canvas-CRS geometries."""
+    from qgis.core import QgsGeometry
+    from qgis.gui import QgsMapTool
+    from qgis.PyQt.QtCore import Qt
+
+    class TargetPickTool(QgsMapTool):
+        def __init__(self):
+            super().__init__(canvas)
+            self.setCursor(Qt.CrossCursor)
+
+        def canvasReleaseEvent(self, event):
+            if event.button() == Qt.RightButton:
+                on_finished("")
+                return
+            if event.button() != Qt.LeftButton:
+                return
+            point = event.mapPoint()
+            if mode == "point":
+                on_pick(QgsGeometry.fromPointXY(point), {})
+                return
+            found = pick_object_at(canvas, point)
+            if found is None:
+                on_finished("Dort liegt kein Objekt. Bitte direkt auf ein Gebäude, eine Fläche "
+                            "oder einen Punkt klicken.", keep=True)
+                return
+            on_pick(*found)
+
+        def keyPressEvent(self, event):
+            if event.key() == Qt.Key_Escape:
+                on_finished("")
+
+    return TargetPickTool()
+
+
+class OwnTargetMarkers:
+    """Own targets as markers in the map while 'Erreichbarkeit' is open."""
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.band = None
+
+    def show(self, geometries):
+        from qgis.core import Qgis
+        from qgis.gui import QgsRubberBand
+        from qgis.PyQt.QtGui import QColor
+
+        if self.band is None:
+            self.band = QgsRubberBand(self.canvas, Qgis.GeometryType.Point)
+            self.band.setColor(QColor(200, 40, 120, 230))
+            self.band.setIconSize(12)
+            self.band.setIcon(QgsRubberBand.ICON_CIRCLE)
+            self.band.setWidth(3)
+        self.band.reset(Qgis.GeometryType.Point)
+        for geometry in geometries:
+            self.band.addPoint(geometry.pointOnSurface().asPoint(), False)
+        self.band.updatePosition()
+        self.band.show()
+
+    def hide(self):
+        if self.band is not None:
+            self.band.hide()
+
+    def remove(self):
+        if self.band is not None:
+            self.canvas.scene().removeItem(self.band)
+            self.band = None

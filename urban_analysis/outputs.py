@@ -422,7 +422,20 @@ def _write_sources_table(target, used_sources, taken) -> None:
 
 PAGE_SIZES_MM = {"A4": (210, 297), "A3": (297, 420), "A2": (420, 594),
                  "A1": (594, 841), "A0": (841, 1189)}
-SCALES = (None, 1000, 2500, 5000, 10000, 25000)  # None = fits the area
+# Usual scales of plans and maps; "passend zum Gebiet" takes the next one
+# that shows the whole area (never an odd value like 1:7.342).
+STANDARD_SCALES = (50, 100, 200, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000,
+                   50000, 100000, 200000)
+SCALES = (None,) + STANDARD_SCALES  # None = fits the area
+
+
+def fitting_scale(scale):
+    """The smallest usual scale at which the area still fits (``scale`` is
+    the exact scale that fits it); beyond the list rounded up to 10 000s."""
+    for value in STANDARD_SCALES:
+        if value >= scale * 0.999:
+            return value
+    return int(-(-scale // 10000) * 10000)
 
 
 def auto_orientation(width, height):
@@ -565,8 +578,9 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     extent = QgsRectangle(buffer_geometry.boundingBox())
     extent.scale(1.05)
     map_item.zoomToExtent(extent)
-    if scale:
-        map_item.setScale(scale)
+    # a usual scale: the chosen one, or the next one that shows the whole area
+    scale = scale or fitting_scale(map_item.scale())
+    map_item.setScale(scale)
 
     # side panel: title, subtitle, legend, north arrow, scale bar, sources
     px, py, pw, ph = frames["panel"]
@@ -621,7 +635,7 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     bar.attemptMove(QgsLayoutPoint(px + 13 * factor, base_y + 2 * factor, QgsUnitTypes.LayoutMillimeters))
 
     info = QgsLayoutItemLabel(layout)
-    info.setText(f"Maßstab {scale_label(map_item.scale() if not scale else scale)}\n\n"
+    info.setText(f"Maßstab {scale_label(scale)}\n\n"
                  + sources_text(data_source, day))
     font_info = QFont()
     font_info.setPointSizeF(6.5 * factor)

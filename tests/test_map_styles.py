@@ -80,6 +80,17 @@ def test_crs_warning_and_copy_name():
 def test_scale_and_sources_texts():
     assert scale_label(None) == "passend zum Gebiet"
     assert scale_label(5000) == "1:5.000"
+
+
+def test_fitting_scale_is_always_a_usual_one():
+    from urban_analysis.outputs import SCALES, fitting_scale
+
+    assert fitting_scale(7342) == 10000
+    assert fitting_scale(2400) == 2500
+    assert fitting_scale(2000) == 2000
+    assert fitting_scale(40) == 50
+    assert fitting_scale(345000) == 350000
+    assert SCALES[0] is None and 50 in SCALES and 20000 in SCALES
     text = sources_text("© OpenStreetMap-Mitwirkende, ODbL", date(2026, 11, 19))
     assert text.startswith("Datenquellen und Lizenzen")
     assert "ODbL" in text and "verändert" in text and "19.11.2026" in text
