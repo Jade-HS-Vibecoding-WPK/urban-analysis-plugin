@@ -71,16 +71,35 @@ from .osm_download import (
 )
 from .sources import plan_osm_download
 from .outputs import (
+    COLUMN_ORDER_FRONT,
+    COLUMN_ORDER_ORIGIN,
+    COLUMN_ORDER_PROPERTIES,
+    COLUMN_ORDER_WHAT,
+    COLUMN_ORDER_WHERE,
     GEOMETRY_KINDS,
     GEOMETRY_WORDS,
+    LAYER_GROUPS,
+    OTHER_LAYER_GROUP,
     add_result_layers,
+    apply_source_texts,
+    combined_source_text,
+    default_source_texts,
+    layer_group_name,
+    missing_source_texts,
+    source_key,
+    with_source_texts,
     geometry_counts,
     with_geometry_kinds,
     PAGE_SIZES_MM,
     SCALES,
     build_result_layers,
     data_source_text,
+    STANDARD_SCALES,
+    auto_orientation,
     export_map_pdf,
+    map_extent,
+    scale_problem,
+    suggested_scale,
     format_count,
     scale_label,
     time_text,
@@ -322,14 +341,14 @@ SAME_RUN_QUESTION = (
 # Step 5 (W14, E29/E30): columns of the input layers
 STEP5_GUIDE = (
     "Was siehst du? Alle Spalten deiner Daten, je Layer, mit lesbarem Namen und Beispielen.",
-    "Was entscheidest du? Je Spalte: in ein Kernfeld übernehmen (z. B. Adresse), "
-    "als eigene Spalte behalten oder weglassen.",
+    "Was entscheidest du? Essentielle Spalten (z. B. Objekt-ID) bleiben immer; alle "
+    "anderen behältst du als eigene Spalte oder lässt sie weg.",
     "Was passiert dann? Die Ergebnis-Layer enthalten genau diese Spalten. Die "
     "Vorauswahl passt meistens – du musst nur ändern, was du anders willst.",
 )
 STEP5_SHORT_GUIDE = (
     "So sieht deine Attributtabelle am Ende aus. Klick auf ein Etikett: "
-    "Kernfeld → Behalten → Ignoriert. Die Vorauswahl passt meistens."
+    "Behalten ↔ Nicht übernehmen. Die Vorauswahl passt meistens."
 )
 MORE_COLUMNS_LABEL ="Nicht geladen (nicht lesbar)"
 COLUMN_KEEP_HELP = "Die Spalte kommt unter ihrem lesbaren Namen in die Ergebnis-Layer."
@@ -340,10 +359,17 @@ COLUMNS_SAVED_TEXT = "Spaltenauswahl übernommen. Sie gilt bei „Verarbeitung s
 PREVIEW_ROWS = 3
 PILL_WIDTH = 92
 PREVIEW_HEADING = "Vorschau Ergebnis-Tabelle"
-COLUMNS_HEADING = "Spalten – Klick auf das Etikett wechselt: Kernfeld → Behalten → Ignoriert"
-STATE_LEGEND = ("ⓘ Kernfeld = Pflichtfeld für Karte und Legende · Behalten = eigene "
-                "Spalte · Ignoriert = wird nicht übernommen")
-STATE_LABELS = {"target": "● Kernfeld", "keep": "● Behalten", "drop": "○ Ignoriert"}
+COLUMNS_HEADING = "Spalten – Klick auf das Etikett wechselt: Behalten ↔ Nicht übernehmen"
+STATE_LEGEND = ("ⓘ Essentiell = braucht jeder Layer, bleibt immer · Behalten = eigene "
+                "Spalte · Nicht übernehmen = kommt nicht ins Ergebnis")
+STATE_LABELS = {"target": "🔒 Essentiell", "keep": "● Behalten", "drop": "○ Nicht übernehmen"}
+# Step 5: up to this many different example values per column (whole table)
+EXAMPLE_ROWS = 3
+EMPTY_COLUMN_TEXT = "– leer –"
+EMPTY_COLUMN_HINT = "Die Spalte ist in der ganzen Tabelle leer – sie erscheint nicht im Ergebnis."
+ESSENTIAL_HINT = ("Essentiell: Diese Spalte braucht jeder Ergebnis-Layer (z. B. Objekt-ID, "
+                  "Objektart, Kategorie, Quelle). Das Plugin füllt sie automatisch und behält "
+                  "sie immer.")
 # (fill, border) per state – green core field, blue kept, grey ignored
 STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5"),
                 "drop": ("#f1f2f4", "#b5bcc4")}
@@ -400,23 +426,54 @@ AUTO_COLUMNS_HINT = ("Wichtige Spalten werden übernommen, technische und fast l
 MANUAL_COLUMNS_HINT = ("Gleiche Vorauswahl, aber alle Tabellen sind aufgeklappt, damit du "
                        "jede Spalte prüfen kannst.")
 STEP5_TABLE_GUIDE = (
-    "So sieht deine Attributtabelle am Ende aus. Farbig = wird übernommen, weiß = "
-    "bleibt draußen. Zum Ändern auf eine Spaltenüberschrift klicken."
+    "So sieht deine Attributtabelle am Ende aus. <b>Grün = essentiell</b>: diese Spalten "
+    "braucht jeder Layer, sie stehen vorne und bleiben immer. Blau = behalten, weiß = nicht "
+    "übernommen – zum Ändern auf eine Spaltenüberschrift klicken. Die Beispielwerte stammen "
+    "aus der ganzen Tabelle; eine Zeile ist kein echtes Objekt."
 )
+# Order of the essential columns = order in the result layers (outputs.result_columns)
+ESSENTIAL_ORDER = (COLUMN_ORDER_FRONT + COLUMN_ORDER_WHAT + COLUMN_ORDER_WHERE
+                   + COLUMN_ORDER_PROPERTIES + COLUMN_ORDER_ORIGIN)
 
 
-def ordered_columns(columns, values):
-    """Table order: core fields, then kept, then left-out columns."""
+def ordered_columns(columns, values, examples=None):
+    """Table order: essential columns (in the order of the result layer),
+    then kept, then left-out columns; inside a group empty columns last."""
     rank = {"target": 0, "keep": 1, "drop": 2}
-    return sorted(columns, key=lambda c: rank[state_of(values.get((c.layer_id, c.source_field)))])
+
+    def key(column):
+        value = values.get((column.layer_id, column.source_field))
+        state = state_of(value)
+        field_name = value.split(":", 1)[1] if state == "target" else ""
+        order = ESSENTIAL_ORDER.index(field_name) if field_name in ESSENTIAL_ORDER else 99
+        empty = examples is not None and not examples.get(column.source_field)
+        return rank[state], order if state == "target" else 0, empty
+
+    return sorted(columns, key=key)
 
 
 def column_title(column, value):
-    """Header of a column: core field name for core fields, else the readable name."""
+    """Header of a column: '🔒 Objekt-ID' for essential columns, else the readable name."""
     name = column.readable_name or column.source_field
     if state_of(value) == "target":
-        return core_field_name(value.split(":", 1)[1])
+        return "🔒 " + core_field_name(value.split(":", 1)[1])
     return name
+
+
+def column_examples(records, limit=EXAMPLE_ROWS):
+    """{(table, source field): up to ``limit`` different, non-empty values}
+    from ALL objects of each table (not only the first rows)."""
+    examples = {}
+    for record in records:
+        table = record.source_layer or record.layer_id
+        for field_name, value in (getattr(record, "source_attributes", None) or {}).items():
+            if value in (None, ""):
+                continue
+            found = examples.setdefault((table, field_name), [])
+            text = str(value)
+            if len(found) < limit and text not in found:
+                found.append(text)
+    return examples
 
 
 def state_of(value):
@@ -459,11 +516,12 @@ def preview_columns(columns, values):
 
 
 def counts_text(columns, values):
-    """'4 Kernfelder · 3 behalten · 8 ignoriert'."""
+    """'4 essentiell · 3 behalten · 8 nicht übernommen'."""
     counts = {"target": 0, "keep": 0, "drop": 0}
     for column in columns:
         counts[state_of(values.get((column.layer_id, column.source_field), "drop"))] += 1
-    return f"{counts['target']} Kernfelder · {counts['keep']} behalten · {counts['drop']} ignoriert"
+    return (f"{counts['target']} essentiell · {counts['keep']} behalten · "
+            f"{counts['drop']} nicht übernommen")
 
 
 def column_choices():
@@ -586,21 +644,21 @@ def column_summary(columns, decisions):
 def summary_lines(summary):
     """Overview lines of one layer in step 5 (automatic mode)."""
     lines = [
-        "Kernfelder: " + (", ".join(summary["target"]) or "–"),
+        "Essentiell: " + (", ".join(summary["target"]) or "–"),
         "Behalten: " + (", ".join(summary["keep"]) or "–"),
     ]
     count = len(summary["drop"])
-    lines.append(f"Ignoriert: {count} technische {'Spalte' if count == 1 else 'Spalten'}")
+    lines.append(f"Nicht übernommen: {count} technische {'Spalte' if count == 1 else 'Spalten'}")
     return lines
 
 
 def column_header_text(layer_name, columns, decisions):
-    """'Gebäude – 4 Kernfelder, 6 behalten, 12 nicht geladen'."""
+    """'Gebäude – 4 essentiell, 6 behalten, 12 nicht geladen'."""
     counts = {"target": 0, "keep": 0, "drop": 0}
     for column in columns:
         decision = decisions.get((column.layer_id, column.source_field))
         counts[decision.action if decision else "drop"] += 1
-    return (f"{layer_name} – {counts['target']} Kernfelder, {counts['keep']} behalten, "
+    return (f"{layer_name} – {counts['target']} essentiell, {counts['keep']} behalten, "
             f"{counts['drop']} nicht geladen")
 
 
@@ -701,6 +759,43 @@ def planned_layer_rows(flow, names, kinds=GEOMETRY_KINDS):
     return tuple(rows) or ((None, "Keine Layer ausgewählt (Schritt 7)."),)
 
 
+SOURCE_FIELDS_HINT = "Je Datenquelle eine Angabe – sie steht bei jedem Objekt in der Spalte „Quelle“."
+TOPIC_LAYERS_TITLE = "Layer für die Karte"
+TOPIC_LAYERS_HINT = ("Nach Wichtigkeit sortiert: Bebauung zuerst, Kleinkram zuletzt. "
+                     "Häkchen weg = der Layer kommt nicht in die Karte.")
+# Step 7: groups by importance (same groups as the layer tree, #66)
+IMPORTANCE_ORDER = ("Bebauung", "Verkehr", "Grün & Wasser", "Nutzung", "Einrichtungen",
+                    OTHER_LAYER_GROUP, "Sonstiges")
+DEFAULT_TOPIC = "Bebauung & Stadtstruktur"
+
+
+def categories_by_importance(categories):
+    """``[(group, [categories])]``: Bebauung → Verkehr → Grün & Wasser →
+    Nutzung → Einrichtungen → Weitere Layer → Sonstiges; inside a group in the
+    order of ``LAYER_GROUPS``, unknown ones by name."""
+    position = {category: index for _name, members in LAYER_GROUPS
+                for index, category in enumerate(members)}
+    groups = {}
+    for category in categories:
+        groups.setdefault(layer_group_name(category), []).append(category)
+    return [(group, sorted(groups[group], key=lambda c: (position.get(c, 99), c)))
+            for group in IMPORTANCE_ORDER if group in groups]
+
+
+def topic_entries():
+    """``[(name, description)]`` of the map themes for the choice list in
+    step 7: from the topic catalogue (M25), else only the names."""
+    try:
+        from .topics import topic_catalog
+        entries = [(topic.name, topic.description or "") for topic in topic_catalog()]
+    except Exception:  # catalogue missing or broken: names from the contract
+        entries = []
+    if not entries:
+        from .ui_contract import TOPIC_NAMES
+        entries = [(name, "") for name in TOPIC_NAMES.values()]
+    return entries
+
+
 def layer_icon_key(flow, layer_id):
     """Icon key of a layer from its descriptor (category) or its id."""
     for descriptor in flow.result.layers:
@@ -751,13 +846,18 @@ def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_dat
 
 REVIEW_LATER_TITLE = "Wird in Schritt 6 entschieden"
 SOURCES_TITLE = "Gleiche Objekte aus mehreren Quellen"
+DUPLICATES_PART_INTRO = (
+    "Was tust du hier? Innerhalb eines Layers liegen manche Objekte doppelt. Du entscheidest "
+    "je Layer, ob sie zu einem Objekt zusammengeführt werden oder alle bleiben."
+)
 SOURCES_INTRO = (
-    "Manche Objekte gibt es in ALKIS und in OSM, z. B. dasselbe Gebäude. Wähle je "
-    "Kategorie, welche Quelle bleibt – die andere Fassung wird weggelassen. Objekte, "
-    "die es nur in einer Quelle gibt, bleiben immer erhalten."
+    "Was tust du hier? Manche Objekte gibt es in mehreren Quellen, z. B. dasselbe Gebäude "
+    "in ALKIS und in OSM. Wähle je Kategorie, welche Quelle bleibt – die andere Fassung "
+    "wird weggelassen. Objekte, die es nur in einer Quelle gibt, bleiben immer erhalten. "
+    "Mit „Weiter“ kommst du zur nächsten Kategorie."
 )
 UNCERTAIN_SOURCES_HINT = (
-    "Unsicher heißt: Die Flächen weichen um mehr als 20 % ab – es könnten auch "
+    "Unsicher heißt: Die Flächen weichen deutlich voneinander ab – es könnten auch "
     "verschiedene Objekte sein. Ohne Häkchen bleiben bei diesen Paaren beide erhalten."
 )
 
@@ -2051,8 +2151,9 @@ def _create_dock(plugin):
         draw_button = QPushButton("Polygon zeichnen")
         draw_button.setToolTip("Polygon Punkt für Punkt in der Karte zeichnen")
         rectangle_button = QPushButton("Rechteck zeichnen")
-        rectangle_button.setToolTip("Rechteck in der Karte aufziehen – schneller, wenn die "
-                                    "genaue Form egal ist")
+        rectangle_button.setToolTip("Rechteck in der Karte: erster Klick eine Ecke, zweiter "
+                                    "Klick die gegenüberliegende – schneller, wenn die genaue "
+                                    "Form egal ist")
         for button in (draw_button, rectangle_button):
             set_role(button, "secondary")
             button.setCursor(Qt.PointingHandCursor)
@@ -2104,7 +2205,15 @@ def _create_dock(plugin):
             watched_layer=None,
         )
 
+        def name_draw_buttons():
+            """'… neu zeichnen' once a drawn area exists (it gets replaced)."""
+            layer_id = page.widgets["drawn_layer_id"]
+            drawn = bool(layer_id) and QgsProject.instance().mapLayer(layer_id) is not None
+            draw_button.setText("Polygon neu zeichnen" if drawn else "Polygon zeichnen")
+            rectangle_button.setText("Rechteck neu zeichnen" if drawn else "Rechteck zeichnen")
+
         def refresh(*_args):
+            name_draw_buttons()
             drawing = use_drawing.isChecked()
             has_layers = layer_box.count() > 0
             layer_box.setEnabled(not drawing)
@@ -2144,6 +2253,7 @@ def _create_dock(plugin):
             if old_id and QgsProject.instance().mapLayer(old_id) is not None:
                 QgsProject.instance().removeMapLayer(old_id)  # only the newest drawing counts
             page.widgets["drawn_layer_id"] = layer.id()
+            name_draw_buttons()
             dock.show_message(
                 f"Gebiet gezeichnet und als Layer „{layer.name()}“ ins Projekt gelegt. "
                 "Grau gestrichelt: das Rechteck, für das OSM und ALKIS geladen werden.",
@@ -2832,12 +2942,12 @@ def _create_dock(plugin):
         by_layer = {}
         for column in flow.result.columns:
             by_layer.setdefault(column.layer_id, []).append(column)
-        records_by_layer = {}
-        for record in flow.result.harmonized_records:
-            table = record.source_layer or record.layer_id
-            rows = records_by_layer.setdefault(table, [])
-            if len(rows) < PREVIEW_ROWS:
-                rows.append(record)
+        # examples from ALL objects of a table, so every column shows values
+        examples = column_examples(flow.result.harmonized_records)
+        # own files: the plugin may not know which column is e.g. the Objekt-ID
+        own_tables = {record.source_layer or record.layer_id
+                      for record in flow.result.harmonized_records
+                      if getattr(record, "source_kind", "") in ("Eigene Datei", "")}
 
         # Part 1: one question first – automatic or own choice
         if getattr(flow, "column_phase", "ask") == "ask":
@@ -2890,22 +3000,24 @@ def _create_dock(plugin):
             panel.addWidget(counts)
             table = QTableWidget()
             panel.addWidget(table)
-            fill_table(table, ordered_columns(columns, values), values,
-                       records_by_layer.get(layer_id, []), counts)
+            layer_examples = {column.source_field: examples.get((layer_id, column.source_field), [])
+                              for column in columns}
+            fill_table(table, ordered_columns(columns, values, layer_examples), values,
+                       layer_examples, counts, own=layer_id in own_tables)
         guard_wheel(page.widget)
 
     def state_legend():
         """Small colour key above the tables."""
         box = QWidget()
-        row = QHBoxLayout(box)
+        row = QGridLayout(box)  # two per line: one line would be cut in narrow panels
         row.setContentsMargins(0, 2, 0, 2)
-        for state in ("target", "keep", "drop"):
+        for number, state in enumerate(("target", "keep", "drop")):
             chip = QLabel(STATE_LABELS[state])
             fill, border = STATE_COLORS[state]
             chip.setStyleSheet(f"background: {fill}; border: 1px solid {border}; "
                                "border-radius: 9px; padding: 1px 8px;")
-            row.addWidget(chip)
-        row.addStretch()
+            row.addWidget(chip, number // 2, number % 2)
+        row.setColumnStretch(2, 1)
         return box
 
     def link_button(text):
@@ -2916,27 +3028,39 @@ def _create_dock(plugin):
                              "background: transparent; text-decoration: underline;")
         return button
 
-    def fill_table(table, columns, values, records, counts):
+    def fill_table(table, columns, values, examples, counts, own=False):
         """All columns of a layer like the QGIS attribute table: coloured =
-        taken over (green core field, blue kept), white = left out.  A click on
-        a column header opens a small menu to change it."""
+        taken over (green essential, blue kept), white = left out.  Each
+        column shows example values from the whole table.  A click on a
+        column header opens a small menu to change it."""
         table.clear()
         table.setColumnCount(len(columns))
-        table.setRowCount(len(records))
+        rows = max([len(examples.get(c.source_field) or ()) for c in columns] + [1])
+        table.setRowCount(rows)
         for index, column in enumerate(columns):
             value = values[(column.layer_id, column.source_field)]
             state = state_of(value)
-            header = QTableWidgetItem(column_title(column, value))
+            shown = examples.get(column.source_field) or []
+            title = column_title(column, value) + ("" if shown else " (leer)")
+            header = QTableWidgetItem(title)
             header.setIcon(state_icon(state))
-            header.setToolTip(f"Spalte in den Daten: {column.source_field}\n"
-                              f"{choice_help(value) or ''}\nKlick: ändern")
+            if state == "target":
+                tip = ESSENTIAL_HINT
+            else:
+                tip = f"{choice_help(value) or ''}\nKlick: ändern"
+            if not shown:
+                tip += "\n" + EMPTY_COLUMN_HINT
+            header.setToolTip(f"Spalte in den Daten: {column.source_field}\n{tip}")
             table.setHorizontalHeaderItem(index, header)
             fill = QColor(STATE_COLORS[state][0] if state != "drop" else "#ffffff")
-            for row, record in enumerate(records):
-                raw = (getattr(record, "source_attributes", None) or {}).get(column.source_field)
-                cell = QTableWidgetItem("–" if raw in (None, "") else str(raw))
+            for row in range(rows):
+                if row < len(shown):
+                    text = shown[row]
+                else:
+                    text = EMPTY_COLUMN_TEXT if not shown and row == 0 else ""
+                cell = QTableWidgetItem(text)
                 cell.setBackground(fill)
-                if state == "drop":
+                if state == "drop" or not shown:
                     cell.setForeground(QColor("#9aa3ae"))
                 table.setItem(row, index, cell)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -2959,23 +3083,35 @@ def _create_dock(plugin):
         def clicked(index):
             column = columns[index]
             key = (column.layer_id, column.source_field)
+            essential = state_of(values[key]) == "target"
             menu = QMenu(table)
-            core = menu.addMenu("● Kernfeld …")
-            for field_name in CORE_FIELDS:
-                action = core.addAction(core_field_name(field_name))
-                action.setToolTip(choice_help(f"target:{field_name}") or "")
-                action.triggered.connect(lambda _c=False, f=field_name: choose(key, f"target:{f}"))
-            menu.addAction("● Behalten (eigene Spalte)").triggered.connect(
-                lambda _c=False: choose(key, "keep"))
-            menu.addAction("○ Nicht übernehmen").triggered.connect(
-                lambda _c=False: choose(key, "drop"))
+            if essential:
+                info = menu.addAction("🔒 Essentiell – bleibt immer im Ergebnis")
+                info.setEnabled(False)
+            else:
+                menu.addAction("● Behalten (eigene Spalte)").triggered.connect(
+                    lambda _c=False: choose(key, "keep"))
+                menu.addAction("○ Nicht übernehmen").triggered.connect(
+                    lambda _c=False: choose(key, "drop"))
+            if own:
+                # own file: the plugin may not know e.g. which column is the Objekt-ID
+                menu.addSeparator()
+                core = menu.addMenu("🔒 Als essentielle Spalte …")
+                for field_name in CORE_FIELDS:
+                    action = core.addAction(core_field_name(field_name))
+                    action.setToolTip(choice_help(f"target:{field_name}") or "")
+                    action.triggered.connect(lambda _c=False, f=field_name: choose(key, f"target:{f}"))
+                if essential:
+                    menu.addAction("Doch nicht essentiell (eigene Spalte)").triggered.connect(
+                        lambda _c=False: choose(key, "keep"))
             header = table.horizontalHeader()
             x = header.sectionViewportPosition(index)
             menu.exec_(header.mapToGlobal(header.rect().topLeft()) + QPoint(x, header.height()))
 
         def choose(key, value):
             values[key] = value
-            fill_table(table, columns, values, records, counts)
+            columns[:] = ordered_columns(columns, values, examples)
+            fill_table(table, columns, values, examples, counts, own)
             counts.setText(counts_text(columns, values))
             dock.clear_message()
 
@@ -3081,16 +3217,73 @@ def _create_dock(plugin):
         return True
 
     # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
+    # Two parts one after the other: first the same objects from several
+    # sources (one category per view, 'Weiter'), then the uncertain duplicates.
+    def harmonize_state(flow):
+        """(phase, has_sources, has_duplicates); the phase is kept on the flow."""
+        has_sources = bool(getattr(flow, "source_matches", None))
+        has_dups = bool(flow.duplicate_layers())
+        phase = getattr(flow, "harmonize_phase", None)
+        if phase not in ("sources", "duplicates") or (phase == "sources" and not has_sources) \
+                or (phase == "duplicates" and not has_dups):
+            phase = "sources" if has_sources else "duplicates"
+        flow.harmonize_phase = phase
+        return phase, has_sources, has_dups
+
+    def source_count(flow):
+        from .source_matching import priority_choices
+
+        return len(priority_choices(getattr(flow, "source_matches", None) or []))
+
+    def harmonize_action(flow):
+        phase, _has_sources, has_dups = harmonize_state(flow)
+        if phase == "sources":
+            if getattr(flow, "source_index", 0) < source_count(flow) - 1:
+                return "Weiter"
+            if has_dups:
+                return "Weiter zu Teil 2"
+        return PAGE_ACTIONS[5]
+
+    def rebuild_step6():
+        dock._rebuild_current_page()
+        dock.primary_button.setText(harmonize_action(workflow()))
+
+    def part_heading(page, text, intro_text):
+        heading = QLabel(f"<b>{text}</b>")
+        heading.setWordWrap(True)
+        set_role(heading, "key")
+        page.layout.addWidget(heading)
+        intro = QLabel(intro_text)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+
     def build_harmonization(page):
         flow = workflow()
-        has_sources = build_source_choice(page)
-        layers = flow.duplicate_layers()
-        if not layers:
-            if not has_sources:
-                none = QLabel(NO_DUPLICATES_TEXT)
-                none.setWordWrap(True)
-                page.layout.addWidget(none)
+        phase, has_sources, has_dups = harmonize_state(flow)
+        page.widgets["action_text"] = lambda: harmonize_action(flow)
+        if not has_sources and not has_dups:
+            none = QLabel(NO_DUPLICATES_TEXT)
+            none.setWordWrap(True)
+            page.layout.addWidget(none)
             return
+        both = has_sources and has_dups
+        if phase == "sources":
+            build_source_choice(page, "Teil 1 von 2 · " if both else "")
+            return
+        layers = flow.duplicate_layers()
+        if both:
+            back = link_button("◂ Zurück zu Teil 1 (gleiche Objekte aus mehreren Quellen)")
+
+            def to_part_one():
+                flow.harmonize_phase = "sources"
+                flow.source_index = source_count(flow) - 1
+                rebuild_step6()
+
+            back.clicked.connect(to_part_one)
+            page.layout.addWidget(back)
+        part_heading(page, ("Teil 2 von 2 · " if both else "") + "Unsichere Dubletten",
+                     DUPLICATES_PART_INTRO)
         intro = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION_STEP6)
         intro.setWordWrap(True)
         set_role(intro, "hint")
@@ -3110,8 +3303,9 @@ def _create_dock(plugin):
             panel.addWidget(duplicate_card(flow, layer))
 
     # 6a (W12, M14): same objects from ALKIS and OSM - one source per category
-    def build_source_choice(page):
-        """Returns True if there was something to choose."""
+    def build_source_choice(page, part=""):
+        """Part 1 of step 6: one category per view.  Returns True if there
+        was something to choose."""
         flow = workflow()
         matches = getattr(flow, "source_matches", None) or []
         if not matches:
@@ -3122,14 +3316,22 @@ def _create_dock(plugin):
         if getattr(flow, "source_priority", None) is None:
             flow.source_priority = {c.category: c.suggested_source for c in choices}
             flow.source_uncertain_ok = set()
-        heading = QLabel(f"<b>{SOURCES_TITLE}</b>")
-        heading.setWordWrap(True)
-        page.layout.addWidget(heading)
-        intro = QLabel(SOURCES_INTRO)
-        intro.setWordWrap(True)
-        set_role(intro, "hint")
-        page.layout.addWidget(intro)
-        for number, choice in enumerate(choices):
+        index = min(max(getattr(flow, "source_index", 0), 0), len(choices) - 1)
+        flow.source_index = index
+        part_heading(page, part + SOURCES_TITLE, SOURCES_INTRO)
+        progress = QLabel(f"Kategorie {index + 1} von {len(choices)}")
+        set_role(progress, "status")
+        page.layout.addWidget(progress)
+        if index > 0:
+            previous = link_button("◂ Vorherige Kategorie")
+
+            def to_previous():
+                flow.source_index = index - 1
+                rebuild_step6()
+
+            previous.clicked.connect(to_previous)
+            page.layout.addWidget(previous)
+        for number, choice in [(index, choices[index])]:
             panel = collapsible(
                 page, f"src_{number}",
                 source_title_text(choice.category, choice.group_count, choice.source_kinds),
@@ -3253,6 +3455,16 @@ def _create_dock(plugin):
 
     def validate_harmonization(page):
         flow = workflow()
+        phase, _has_sources, has_dups = harmonize_state(flow)
+        if phase == "sources":  # part 1: next category, then part 2
+            if flow.source_index < source_count(flow) - 1:
+                flow.source_index += 1
+                rebuild_step6()
+                return False
+            if has_dups:
+                flow.harmonize_phase = "duplicates"
+                rebuild_step6()
+                return False
         open_layers = flow.open_duplicate_decisions()
         if open_layers:
             sections = page.widgets.get("duplicate_sections", {})
@@ -3273,25 +3485,68 @@ def _create_dock(plugin):
 
     # 7 Kartenthema
     def build_topic(page):
-        topic_input = QLineEdit(workflow().result.selected_topic or "Siedlungsstruktur")
+        flow = workflow()
+        # Kartenthema: one of the seven themes (E36); details from the catalogue
+        topics = topic_entries()
+        topic_box = QComboBox()
+        for name, _description in topics:
+            topic_box.addItem(name, name)
+        current = flow.result.selected_topic
+        index = topic_box.findData(current) if current else -1
+        topic_box.setCurrentIndex(index if index >= 0 else 0)
+        description = QLabel()
+        description.setWordWrap(True)
+        set_role(description, "hint")
+
+        def show_description(_index=None):
+            text = dict(topics).get(topic_box.currentData(), "")
+            description.setText(text)
+            description.setVisible(bool(text))
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        topic_box.currentIndexChanged.connect(show_description)
+        show_description()
+        topic_panel = collapsible(page, "topic_choice", UI_LABELS["topic"], opened=True)
+        topic_panel.addWidget(topic_box)
+        topic_panel.addWidget(description)
+
+        # layers by importance: buildings first, small stuff last (group titles)
         category_list = QListWidget()
         category_list.setIconSize(icon_size())
-        for category in workflow().recognized_categories():
-            item = QListWidgetItem(layer_icon(icon_key(category=category)), category)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked)
-            category_list.addItem(item)
+        for group, categories in categories_by_importance(flow.recognized_categories()):
+            title = QListWidgetItem(group)
+            title.setFlags(Qt.ItemIsEnabled)  # a heading, not a choice
+            font = title.font()
+            font.setBold(True)
+            title.setFont(font)
+            title.setForeground(QColor(accent_color()))
+            category_list.addItem(title)
+            for category in categories:
+                item = QListWidgetItem(layer_icon(icon_key(category=category)), category)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)
+                item.setData(Qt.UserRole, category)
+                category_list.addItem(item)
         # show all categories at once (no inner scrolling)
         rows = max(category_list.count(), 1)
         category_list.setMinimumHeight(rows * (icon_size().height() + 4) + 8)
+        layers_panel = collapsible(page, "topic_layers", TOPIC_LAYERS_TITLE, opened=True)
+        hint = QLabel(TOPIC_LAYERS_HINT)
+        hint.setWordWrap(True)
+        set_role(hint, "hint")
+        layers_panel.addWidget(hint)
+        layers_panel.addWidget(category_list)
         confirm_missing = QCheckBox(UI_LABELS["continue_incomplete"])
-        page.layout.addWidget(QLabel(UI_LABELS["topic"]))
-        page.layout.addWidget(topic_input)
-        page.layout.addWidget(category_list)
         page.layout.addWidget(confirm_missing)
         page.widgets.update(
-            topic=topic_input, categories=category_list, confirm_missing=confirm_missing
+            topic=topic_box, categories=category_list, confirm_missing=confirm_missing
         )
+
+    def accent_color():
+        from .theme import CLASSIC_COLORS, COLORS
+        from .ui import style as ui_style
+
+        return (CLASSIC_COLORS if ui_style.current() == "classic" else COLORS)["accent_dark"]
 
     # 9 'Erreichbarkeitsanalyse' (W16): targets, radii per target, display
     def build_accessibility(page):
@@ -3716,13 +3971,14 @@ def _create_dock(plugin):
     def validate_topic(page):
         category_list = page.widgets["categories"]
         selected = tuple(
-            category_list.item(index).text()
+            category_list.item(index).data(Qt.UserRole)
             for index in range(category_list.count())
-            if category_list.item(index).checkState() == Qt.Checked
+            if category_list.item(index).data(Qt.UserRole)
+            and category_list.item(index).checkState() == Qt.Checked
         )
         try:
             workflow().select_topic(
-                page.widgets["topic"].text(),
+                page.widgets["topic"].currentData() or page.widgets["topic"].currentText(),
                 selected,
                 confirm_missing=page.widgets["confirm_missing"].isChecked(),
             )
@@ -3896,7 +4152,7 @@ def _create_dock(plugin):
             button.setCheckable(True)
             button.setChecked(key == tab)
             button.setCursor(Qt.PointingHandCursor)
-            set_role(button, "choice")
+            set_role(button, "tab")
             if key != "output" and not has_layers:
                 button.setEnabled(False)
                 button.setToolTip(LAYERS_FIRST_TOOLTIP)
@@ -3971,12 +4227,7 @@ def _create_dock(plugin):
         area.layout.addWidget(labelled_combo(
             "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
             "map_style", DEFAULT_MAP_STYLE))
-        area.layout.addWidget(QLabel(UI_LABELS["data_source"]))
-        source = QLineEdit(draft["source"])
-        source.textChanged.connect(lambda text: draft.__setitem__("source", text))
-        source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
-        source.setToolTip(DATA_SOURCE_HINT)
-        area.layout.addWidget(source)
+        source_fields(area, draft)
         geometry_ticks(area, flow, draft)
         area_button(area, area_page(area), LAYERS_AGAIN_ACTION if group is not None else LAYERS_ACTION,
                     create_layers_clicked, LAYERS_ACTION)
@@ -3990,11 +4241,63 @@ def _create_dock(plugin):
         area_hint(area, LAYERS_INTRO)
         planned = planned_layer_rows(flow, names, draft["geometry_kinds"])
         details = collapsible(area, "layers_planned",
-                              f"Diese Ergebnis-Layer werden angelegt ({len(planned)})")
+                              f"Geplante Layer ({len(planned)})")
         details.addWidget(summary_card("Diese Ergebnis-Layer werden angelegt", planned))
-        basics = collapsible(area, "layers_basics", "Grundlagen (Gebiet, CRS, Quelle)")
+        basics = collapsible(area, "layers_basics", "Grundlagen")
         basics.addWidget(summary_card(
             "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
+
+    def source_texts(draft):
+        """Quellenangabe je geladener Datenquelle (kept in the draft)."""
+        texts = draft.setdefault("source_texts", {})
+        for key, text in default_source_texts(dock.sources or []).items():
+            texts.setdefault(key, text)
+        return texts
+
+    def source_fields(area, draft):
+        """One Quellenangabe per loaded source: OSM/ALKIS pre-filled, own files
+        empty and required.  Without known sources: one field as before."""
+        title = QLabel(UI_LABELS["data_source"])
+        area.layout.addWidget(title)
+        if not dock.sources:
+            source = QLineEdit(draft["source"])
+            source.textChanged.connect(lambda text: draft.__setitem__("source", text))
+            source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
+            source.setToolTip(DATA_SOURCE_HINT)
+            area.layout.addWidget(source)
+            return
+        hint = QLabel(SOURCE_FIELDS_HINT)
+        hint.setWordWrap(True)
+        set_role(hint, "hint")
+        area.layout.addWidget(hint)
+        texts = source_texts(draft)
+        draft["source"] = combined_source_text(dock.sources, texts)
+        for source in dock.sources:
+            key = source_key(source)
+            label = QLabel(source.label + ("" if source.attribution else " – bitte eintragen"))
+            label.setWordWrap(True)
+            label.setToolTip("Auch im Lizenzblock von GeoPackage und PDF. Bei eigenen Dateien "
+                             "bitte selbst eintragen, woher die Daten stammen.")
+            if not texts.get(key):
+                set_role(label, "key")
+            field = QLineEdit(texts.get(key, ""))
+            field.setPlaceholderText("z. B. Kartierung Studio, 2026" if not source.attribution
+                                     else DATA_SOURCE_PLACEHOLDER)
+            field.setToolTip(f"Steht bei jedem Objekt aus „{source.label}“ in der Spalte „Quelle“.")
+
+            def changed(text, key=key, label=label):
+                texts[key] = text
+                draft["source"] = combined_source_text(dock.sources, texts)
+                set_role(label, None if text.strip() else "key")
+
+            field.textChanged.connect(changed)
+            box = QWidget()
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(INDENT_PX, 0, 0, 2)
+            box_layout.setSpacing(1)
+            box_layout.addWidget(label)
+            box_layout.addWidget(field)
+            area.layout.addWidget(box)
 
     def geometry_ticks(area, flow, draft):
         """'Diese Layer erzeugen': Punkte · Linien · Flächen, each with the
@@ -4080,6 +4383,15 @@ def _create_dock(plugin):
             reject("Bei „Diese Layer erzeugen“ ist nichts angekreuzt. Bitte Punkte, Linien "
                    "oder Flächen ankreuzen (Bereich „Ausgabe“).")
             return None
+        texts = source_texts(draft) if dock.sources else {}
+        missing = missing_source_texts(dock.sources or [], texts)
+        if missing:
+            reject("Bitte eine Quellenangabe eintragen für: " + ", ".join(missing)
+                   + " (Bereich „Ausgabe“, Datenquelle). Sie steht bei jedem Objekt dieser "
+                   "Quelle in der Spalte „Quelle“.")
+            return None
+        if dock.sources:
+            draft["source"] = combined_source_text(dock.sources, texts)
         source = draft.get("source", "")
         problem = output_choice_problem(geopackage=False, pdf=False, paths={}, data_source=source)
         if problem:
@@ -4107,6 +4419,9 @@ def _create_dock(plugin):
                     getattr(flow, "column_decisions", None))
             flow.result.harmonized_records = apply_data_source(
                 flow.result.harmonized_records, source)
+            # each object gets the Quellenangabe of its own source (own files too)
+            flow.result.harmonized_records = apply_source_texts(
+                flow.result.harmonized_records, texts)
         except ValueError as error:
             reject(error_text(error))
             return None
@@ -4233,7 +4548,7 @@ def _create_dock(plugin):
         draft = output_draft()
         area_hint(area, SAVE_INTRO)
         output_choice(area, "geopackage", "Bereinigtes GeoPackage speichern", draft["geopackage"])
-        topic = workflow().result.selected_topic or "Siedlungsstruktur"
+        topic = workflow().result.selected_topic or DEFAULT_TOPIC
         north = QCheckBox("Nordpfeil anzeigen")
         north.setChecked(draft.setdefault("pdf_north", True))
         north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
@@ -4241,18 +4556,151 @@ def _create_dock(plugin):
         grey = QCheckBox("Umgebung außerhalb des Gebiets in Graustufen")
         grey.setChecked(draft.setdefault("grey_outside", True))
         grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
+        page_box = labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3")
+        orientation_box = labelled_combo(
+            "Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
+                            ("quer", "Querformat"), ("hoch", "Hochformat")],
+            "pdf_orientation", "auto")
+        buffer_box, buffer_changed = pdf_buffer_block(draft)
+        scale_box, refresh_scale = pdf_scale_block(draft)
+        for box in (page_box, orientation_box):
+            box.findChild(QComboBox).currentIndexChanged.connect(lambda _i: refresh_scale())
+        buffer_changed.append(refresh_scale)
         pdf_extra = (
             labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
             labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
-            labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3"),
-            labelled_combo("Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
-                                           ("quer", "Querformat"), ("hoch", "Hochformat")],
-                           "pdf_orientation", "auto"),
-            labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
+            page_box,
+            orientation_box,
+            buffer_box,
+            scale_box,
             north,
             grey,
         )
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
+
+    def pdf_extent_size(draft):
+        """(width, height) in m of what the PDF map shows, or None."""
+        flow = workflow()
+        area = QgsGeometry.fromWkt(flow.result.study_area_wkt or "")
+        if area is None or area.isEmpty():
+            return None
+        box = map_extent(area, draft.get("pdf_buffer_m", flow.result.buffer_meters),
+                         draft.get("pdf_buffer_on", True))
+        return box.width(), box.height()
+
+    def pdf_suggestion(draft):
+        """(suggested scale, 'A3 quer') for the current settings, or (None, '')."""
+        size = pdf_extent_size(draft)
+        if size is None:
+            return None, ""
+        page = draft.get("pdf_page", "A3")
+        orientation = draft.get("pdf_orientation", "auto")
+        if orientation not in ("quer", "hoch"):
+            orientation = auto_orientation(*size)
+        word = "quer" if orientation == "quer" else "hoch"
+        return suggested_scale(size[0], size[1], page, orientation), f"{page} {word}"
+
+    def pdf_buffer_block(draft):
+        """'Puffer in der Karte zeigen' and how wide (up to the buffer of step 2,
+        only there are data).  Returns (widget, list of callbacks on change)."""
+        flow = workflow()
+        project_buffer = int(flow.result.buffer_meters or 0)
+        draft.setdefault("pdf_buffer_on", project_buffer > 0)
+        draft.setdefault("pdf_buffer_m", project_buffer)
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 4, 0, 0)
+        show = QCheckBox("Puffer in der Karte zeigen")
+        show.setChecked(bool(draft["pdf_buffer_on"]) and project_buffer > 0)
+        show.setEnabled(project_buffer > 0)
+        spin = QSpinBox()
+        spin.setRange(0, max(project_buffer, 0))
+        spin.setSingleStep(max(10, project_buffer // 10 or 10))
+        spin.setSuffix(" m")
+        spin.setValue(min(int(draft["pdf_buffer_m"]), project_buffer))
+        width_box = QWidget()
+        width_row = QHBoxLayout(width_box)
+        width_row.setContentsMargins(INDENT_PX, 0, 0, 0)
+        width_row.addWidget(QLabel("Breite"))
+        width_row.addWidget(stepper(spin))
+        width_row.addStretch()
+        note = QLabel(f"Höchstens {format_count(project_buffer)} m – so weit wurden in "
+                      "Schritt 2 Daten geladen.")
+        note.setWordWrap(True)
+        set_role(note, "hint")
+        layout.addWidget(show)
+        layout.addWidget(width_box)
+        layout.addWidget(indented(note))
+        callbacks = []
+
+        def changed(*_args):
+            draft["pdf_buffer_on"] = show.isChecked()
+            draft["pdf_buffer_m"] = spin.value()
+            width_box.setEnabled(show.isChecked())
+            for callback in callbacks:
+                callback()
+
+        show.toggled.connect(changed)
+        spin.valueChanged.connect(changed)
+        width_box.setEnabled(show.isChecked())
+        return box, callbacks
+
+    def pdf_scale_block(draft):
+        """Maßstab: the fitting one for paper size and area is shown; an own
+        scale that does not suit the area asks first (keep / choose again).
+        Returns (widget, refresh)."""
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 4, 0, 0)
+        layout.addWidget(QLabel("Maßstab"))
+        fitting = QLabel()
+        fitting.setWordWrap(True)
+        set_role(fitting, "key")
+        layout.addWidget(fitting)
+        combo = QComboBox()
+        combo.addItem("Passend zum Blatt (empfohlen)", 0)
+        for value in STANDARD_SCALES:
+            combo.addItem(scale_label(value), value)
+        index = combo.findData(draft.setdefault("pdf_scale", 0))
+        combo.setCurrentIndex(max(index, 0))
+        layout.addWidget(combo)
+        state = {"busy": False}
+
+        def refresh():
+            suggestion, paper = pdf_suggestion(draft)
+            if suggestion:
+                fitting.setText(f"Passend für {paper}: {scale_label(suggestion)}")
+                combo.setItemText(0, f"Passend zum Blatt: {scale_label(suggestion)} (empfohlen)")
+            fitting.setVisible(bool(suggestion))
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        def chosen(_index):
+            if state["busy"]:
+                return
+            value = combo.currentData() or 0
+            draft["pdf_scale"] = value
+            suggestion, _paper = pdf_suggestion(draft)
+            problem = scale_problem(value, suggestion)
+            if not problem:
+                return
+            ask = QMessageBox(dock)
+            ask.setWindowTitle("Maßstab prüfen")
+            ask.setIcon(QMessageBox.Warning)
+            ask.setText(problem)
+            keep = ask.addButton("Trotzdem verwenden", QMessageBox.AcceptRole)
+            ask.addButton(f"Neu wählen ({scale_label(suggestion)})", QMessageBox.RejectRole)
+            ask.exec()
+            if ask.clickedButton() is not keep:
+                state["busy"] = True
+                position = combo.findData(suggestion)
+                combo.setCurrentIndex(position if position >= 0 else 0)
+                draft["pdf_scale"] = combo.currentData() or 0
+                state["busy"] = False
+
+        combo.currentIndexChanged.connect(chosen)
+        refresh()
+        return box, refresh
+
         if dock.last_saved:
             area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
         area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
@@ -4263,21 +4711,27 @@ def _create_dock(plugin):
             return []
         from .data_pipeline import used_sources
 
-        return used_sources(dock.sources, flow.result.harmonized_records)
+        used = used_sources(dock.sources, flow.result.harmonized_records)
+        texts = dock.output_draft.get("source_texts") or {}
+        return with_source_texts(used, dock.sources, texts)
 
-    def write_map_pdf(flow, path, layers):
-        """PDF map with the settings of 'Speichern'."""
+    def write_map_pdf(flow, path, layers, image_path=None):
+        """PDF map with the settings of 'Speichern' (or its preview picture).
+        Returns (path, scale)."""
         draft = dock.output_draft
         used = current_used_sources(flow)
         source = (data_source_text(used, flow.result.output.data_source) if used
                   else flow.result.output.data_source)
+        if not source:  # preview before anything was confirmed
+            source = draft.get("source", "")
         return export_map_pdf(
-            path, layers=layers,
+            path, layers=layers, image_path=image_path,
             grey_outside=draft.get("grey_outside", True),
             study_area_wkt=flow.result.study_area_wkt,
-            buffer_meters=flow.result.buffer_meters,
+            buffer_meters=draft.get("pdf_buffer_m", flow.result.buffer_meters),
+            show_buffer=draft.get("pdf_buffer_on", True),
             crs_authid=flow.result.project_crs,
-            title=draft.get("pdf_title") or flow.result.selected_topic or "Siedlungsstruktur",
+            title=draft.get("pdf_title") or flow.result.selected_topic or DEFAULT_TOPIC,
             subtitle=draft.get("pdf_subtitle", ""),
             data_source=source,
             page=draft.get("pdf_page", "A3"),
@@ -4316,7 +4770,7 @@ def _create_dock(plugin):
         if pdf:
             if not visible:
                 return reject(REMAKE_NO_LAYERS_MESSAGE)
-            jobs.append(("pdf", lambda path: write_map_pdf(flow, path, visible)))
+            jobs.append(("pdf", lambda path: write_map_pdf(flow, path, visible)[0]))
         saved, failures = [], []
         working = {"geopackage": "GeoPackage wird gespeichert …", "pdf": "PDF wird erstellt …"}
         dock.start_work(working[jobs[0][0]] if jobs else "Wird gespeichert …")

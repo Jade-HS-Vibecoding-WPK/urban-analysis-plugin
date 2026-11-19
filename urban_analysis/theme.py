@@ -174,6 +174,7 @@ ROLES = (
     "issue-error",    # one review hint (step 4), by severity
     "issue-warning",
     "issue-info",
+    "tab",             # one of the area buttons of the last step (Ausgabe, …)
     "accent",          # click point, e.g. a map tool ('Punkt setzen')
     "key",             # important information in the accent colour
     "own-target",      # one own target in the list (last step)
@@ -349,6 +350,24 @@ QPushButton[uaRole="choice"]:checked {{
     background-color: {c['selected_light']};
     border-bottom-width: 2px;
     color: {c['selected']};
+}}
+/* Fold-out sections: a coloured bar on the left (accent), like a marker */
+QPushButton[uaRole="choice"], QFrame[uaRole="panel"] QPushButton[uaRole="choice"] {{
+    border-left: 6px solid {c['accent']};
+}}
+/* Tabs of the last step: no bar, the chosen one underlined in the accent */
+QPushButton[uaRole="tab"] {{
+    background-color: {c['surface']};
+    font-weight: bold;
+    padding: 7px 8px 6px 8px;
+}}
+QPushButton[uaRole="tab"]:hover {{
+    background-color: {c['selected_light']};
+}}
+QPushButton[uaRole="tab"]:checked {{
+    background-color: {c['accent_light']};
+    color: {c['accent_dark']};
+    border-bottom: 5px solid {c['accent']};
 }}
 QFrame[uaRole="panel"] {{
     background-color: {c['surface']};
@@ -627,6 +646,25 @@ QPushButton[uaRole="choice"]:checked {{
     border-bottom-left-radius: 0px;
     border-bottom-right-radius: 0px;
     color: {c['accent_pressed']};
+}}
+/* Fold-out sections: a coloured bar on the left (accent), like a marker */
+QPushButton[uaRole="choice"], QFrame[uaRole="panel"] QPushButton[uaRole="choice"] {{
+    border-left: 4px solid {c['accent']};
+}}
+/* Tabs of the last step: no bar, the chosen one underlined in the accent */
+QPushButton[uaRole="tab"] {{
+    background-color: {c['surface']};
+    font-weight: bold;
+    padding: 8px 8px;
+}}
+QPushButton[uaRole="tab"]:hover {{
+    background-color: {c['accent_light']};
+}}
+QPushButton[uaRole="tab"]:checked {{
+    background-color: {c['accent_light']};
+    color: {c['accent_pressed']};
+    border: 1px solid {c['accent']};
+    border-bottom: 4px solid {c['accent']};
 }}
 QFrame[uaRole="panel"] {{
     background-color: {c['surface']};

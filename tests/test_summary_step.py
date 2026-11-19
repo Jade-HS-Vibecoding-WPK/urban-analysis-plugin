@@ -78,3 +78,24 @@ def test_result_rows_list_created_layers_and_skipped_objects():
 
 def test_hectares_with_german_comma():
     assert format_hectares(81.0) == "81,0"
+
+
+def test_step7_layers_are_sorted_by_importance_buildings_first():
+    from urban_analysis.guided_dialog import categories_by_importance
+
+    groups = categories_by_importance([
+        "Sonstige OSM-Punkte", "Gesundheit", "Straßen", "Gebäude", "Grünflächen",
+        "Nutzungsflächen", "Eigene Kategorie", "Bauwerke und Überdachungen"])
+    assert [name for name, _members in groups] == [
+        "Bebauung", "Verkehr", "Grün & Wasser", "Nutzung", "Einrichtungen",
+        "Weitere Layer", "Sonstiges"]
+    assert groups[0][1] == ["Gebäude", "Bauwerke und Überdachungen"]
+
+
+def test_step7_offers_the_seven_map_themes_with_a_description():
+    from urban_analysis.guided_dialog import topic_entries
+    from urban_analysis.ui_contract import TOPIC_NAMES
+
+    entries = topic_entries()
+    assert [name for name, _text in entries] == list(TOPIC_NAMES.values())
+    assert entries[0][0] == "Bebauung & Stadtstruktur"

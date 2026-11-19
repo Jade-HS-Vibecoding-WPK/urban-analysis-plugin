@@ -567,8 +567,9 @@ PAGE_SIZES_MM = {"A4": (210, 297), "A3": (297, 420), "A2": (420, 594),
                  "A1": (594, 841), "A0": (841, 1189)}
 # Usual scales of plans and maps; "passend zum Gebiet" takes the next one
 # that shows the whole area (never an odd value like 1:7.342).
-STANDARD_SCALES = (50, 100, 200, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000,
-                   50000, 100000, 200000)
+STANDARD_SCALES = (50, 100, 200, 250, 500, 750, 1000, 1250, 1500, 2000, 2500, 3000, 4000,
+                   5000, 7500, 10000, 12500, 15000, 20000, 25000, 30000, 40000, 50000,
+                   75000, 100000, 150000, 200000)
 SCALES = (None,) + STANDARD_SCALES  # None = fits the area
 
 
@@ -596,51 +597,144 @@ def scale_label(scale):
     return "passend zum Gebiet" if not scale else f"1:{int(round(scale)):,}".replace(",", ".")
 
 
-# share of the page for the panel (legend, title …): grows when the legend
-# does not fit, the map gets a bit smaller instead of a cut legend
-PANEL_SHARES = {"quer": (0.28, 0.36, 0.44), "hoch": (0.26, 0.36, 0.46)}
+# --- PDF page plan (QGIS-free, tested) ------------------------------------------
+# Font sizes per paper size (title, normal text) in pt – user wish 19.11.:
+# A4 14/12, growing in steps up to 24/20 for A0.
+FONT_SIZES = {"A4": (14, 12), "A3": (16, 13), "A2": (18, 15), "A1": (21, 17), "A0": (24, 20)}
+PT_MM = 25.4 / 72
+# share of the free page for the panel (legend, title …); grows when the
+# legend does not fit – the map gets a bit smaller instead of a cut legend
+PANEL_SHARES = {"quer": (0.30, 0.38, 0.46), "hoch": (0.28, 0.36, 0.45)}
+INFO_SHARE_HOCH = 0.40  # portrait: left part of the panel = title, symbols, sources
 
 
-def panel_parts(panel, orientation, factor=1.0, subtitle=False):
-    """Inside the panel (x, y, w, h): where title, legend and the block with
-    north arrow, scale bar and sources go.  Landscape: one column, legend in
-    the middle.  Portrait: info left, legend right over the full height."""
-    px, py, pw, ph = panel
-    head = (13 + (8 if subtitle else 0)) * factor
-    bottom = 42 * factor
-    if orientation == "quer":
-        return {
-            "title": (px, py, pw),
-            "legend": (px, py + head, pw, max(20.0, ph - head - bottom)),
-            "info": (px, py + ph - bottom, pw, bottom),
-        }
-    gap = 6 * factor
-    info_w = min(pw * 0.38, 80 * factor)
-    return {
-        "title": (px, py, info_w),
-        "legend": (px + info_w + gap, py, pw - info_w - gap, ph),
-        "info": (px, py + max(head, ph - bottom), info_w, bottom),
-    }
+def font_sizes(page):
+    """(title pt, text pt) for the paper size."""
+    return FONT_SIZES.get(page, FONT_SIZES["A4"])
 
 
-def layout_frames(width, height, orientation="quer", panel_share=None):
-    """Rectangles (x, y, w, h) in mm for map and side panel; panel holds
-    title, legend, north arrow, scale bar and sources."""
+def line_mm(points):
+    return points * PT_MM * 1.4
+
+
+def wrapped_lines(text, width_mm, points):
+    """Lines a text needs at this width (estimate on the safe side)."""
+    per_line = max(8, int(width_mm / (points * PT_MM * 0.6)))
+    return sum(max(1, -(-len(line) // per_line)) for line in (text or "").split("\n"))
+
+
+def symbol_row_mm(text_pt):
+    """Height of the row with north arrow and scale bar."""
+    return text_pt * PT_MM * 3.2
+
+
+def page_plan(page="A4", orientation="quer", share=None, *, title="", subtitle="",
+              info_text=""):
+    """Rectangles (x, y, w, h) in mm: map, title, subtitle, symbols (north
+    arrow + scale bar), text (scale and sources), legend.  Heights come from
+    the real font sizes and text lengths, so nothing overlaps.
+
+    Landscape: map left, panel right (title, legend, symbols and text at the
+    bottom).  Portrait: map on top, panel below – left title, symbols and
+    text, right the legend."""
+    width, height = page_size_mm(page, orientation)
+    title_pt, text_pt = font_sizes(page)
     margin = max(8.0, width * 0.03)
-    share = panel_share or PANEL_SHARES.get(orientation, PANEL_SHARES["quer"])[0]
-    if orientation == "quer":
-        panel_w = (width - 3 * margin) * share
-        map_w = width - 3 * margin - panel_w
-        return {
-            "map": (margin, margin, map_w, height - 2 * margin),
-            "panel": (2 * margin + map_w, margin, panel_w, height - 2 * margin),
-        }
-    panel_h = (height - 3 * margin) * share
-    map_h = height - 3 * margin - panel_h
-    return {
-        "map": (margin, margin, width - 2 * margin, map_h),
-        "panel": (margin, 2 * margin + map_h, width - 2 * margin, panel_h),
-    }
+    gap = text_pt * PT_MM * 1.2
+    share = share or PANEL_SHARES[orientation][0]
+    plan = {"width": width, "height": height, "title_pt": title_pt, "text_pt": text_pt}
+
+    def column(x, y, w):
+        title_h = wrapped_lines(title or "Urban Analysis", w, title_pt) * line_mm(title_pt)
+        sub_h = wrapped_lines(subtitle, w, text_pt) * line_mm(text_pt) if subtitle else 0.0
+        text_h = wrapped_lines(info_text, w, text_pt) * line_mm(text_pt)
+        return title_h, sub_h, symbol_row_mm(text_pt), text_h
+
+    if orientation == "hoch":
+        free = height - 3 * margin
+        inner_w = width - 2 * margin
+        info_w = inner_w * INFO_SHARE_HOCH
+        title_h, sub_h, sym_h, text_h = column(margin, 0, info_w)
+        need = title_h + sub_h + gap + sym_h + gap + text_h
+        panel_h = min(max(need, free * share), free * 0.6)
+        map_h = free - panel_h
+        py = 2 * margin + map_h
+        y = py
+        plan["map"] = (margin, margin, inner_w, map_h)
+        plan["title"] = (margin, y, info_w, title_h)
+        y += title_h
+        plan["subtitle"] = (margin, y, info_w, sub_h) if subtitle else None
+        y += sub_h + gap
+        plan["symbols"] = (margin, y, info_w, sym_h)
+        y += sym_h + gap
+        plan["text"] = (margin, y, info_w, max(text_h, py + panel_h - y))
+        legend_x = margin + info_w + gap
+        plan["legend"] = (legend_x, py, width - margin - legend_x, panel_h)
+        plan["fits"] = need <= panel_h + 0.5
+        return plan
+
+    free_w = width - 3 * margin
+    panel_w = free_w * share
+    inner_h = height - 2 * margin
+    px = width - margin - panel_w
+    title_h, sub_h, sym_h, text_h = column(px, margin, panel_w)
+    plan["map"] = (margin, margin, free_w - panel_w, inner_h)
+    y = margin
+    plan["title"] = (px, y, panel_w, title_h)
+    y += title_h
+    plan["subtitle"] = (px, y, panel_w, sub_h) if subtitle else None
+    y += sub_h + gap
+    bottom = margin + inner_h
+    text_y = bottom - text_h
+    sym_y = text_y - gap - sym_h
+    plan["symbols"] = (px, sym_y, panel_w, sym_h)
+    plan["text"] = (px, text_y, panel_w, text_h)
+    plan["legend"] = (px, y, panel_w, max(0.0, sym_y - gap - y))
+    plan["fits"] = sym_y - gap - y >= line_mm(text_pt) * 2
+    return plan
+
+
+def breakable_links(text, width_mm=None, points=12):
+    """Web addresses have no spaces and would not wrap in a narrow column:
+    break words longer than the column after a '/' (QGIS wraps only at
+    spaces)."""
+    if not width_mm:
+        return text or ""
+    per_line = max(8, int(width_mm / (points * PT_MM * 0.6)))
+    lines = []
+    for line in (text or "").split("\n"):
+        words = []
+        for word in line.split(" "):
+            while len(word) > per_line:
+                cut = word.rfind("/", 0, per_line)
+                cut = cut + 1 if cut > 0 else per_line
+                words.append(word[:cut] + "\n")
+                word = word[cut:]
+            words.append(word)
+        lines.append(" ".join(words).replace("\n ", "\n"))
+    return "\n".join(lines)
+
+
+def suggested_scale(extent_width_m, extent_height_m, page="A4", orientation="quer"):
+    """The usual scale at which the extent fills the map frame of this paper
+    size (the frame as it is with a short legend)."""
+    plan = page_plan(page, orientation, title="Titel", info_text="\n" * 6)
+    _x, _y, map_w, map_h = plan["map"]
+    exact = max(extent_width_m * 1000 / max(map_w, 1), extent_height_m * 1000 / max(map_h, 1))
+    return fitting_scale(exact * 1.03)
+
+
+def scale_problem(chosen, suggested):
+    """Hint when an own scale does not suit the area, else None."""
+    if not chosen or not suggested:
+        return None
+    if chosen < suggested:
+        return (f"Beim Maßstab {scale_label(chosen)} passt das Gebiet nicht ganz auf das Blatt – "
+                f"passend wäre {scale_label(suggested)}.")
+    if chosen >= suggested * 4:
+        return (f"Beim Maßstab {scale_label(chosen)} wird das Gebiet sehr klein und füllt nur einen "
+                f"kleinen Teil der Karte – passend wäre {scale_label(suggested)}.")
+    return None
 
 
 def licence_lines(used_sources):
@@ -660,6 +754,56 @@ def licence_lines(used_sources):
             line += f" ({source.licence_url})"
         lines.append(line)
     return lines
+
+
+def source_key(source) -> str:
+    """Key of a loaded source (``SourceFile``): the file it came from, the
+    same value the records carry in ``source_file``."""
+    return str(source.path)
+
+
+def default_source_texts(sources) -> Dict[str, str]:
+    """Quellenangabe je Datenquelle, pre-filled from the download
+    (attribution); own files start empty – the user must name them."""
+    return {source_key(source): (source.attribution or "").strip() for source in sources}
+
+
+def missing_source_texts(sources, texts) -> List[str]:
+    """Labels of the loaded sources that still have no Quellenangabe."""
+    return [source.label for source in sources if not (texts.get(source_key(source)) or "").strip()]
+
+
+def combined_source_text(sources, texts) -> str:
+    """All Quellenangaben in one line, e.g. for the PDF and the check."""
+    parts = []
+    for source in sources:
+        text = (texts.get(source_key(source)) or "").strip()
+        if text and text not in parts:
+            parts.append(text)
+    return "; ".join(parts)
+
+
+def apply_source_texts(records, texts):
+    """Every object gets the Quellenangabe of ITS source in ``source``
+    (also an own file next to OSM/ALKIS).  Records of sources without a
+    text stay unchanged; the input list is not changed."""
+    from dataclasses import replace
+
+    updated = []
+    for record in records:
+        text = (texts.get(getattr(record, "source_file", "") or "") or "").strip()
+        if text and (record.attributes or {}).get("source") != text:
+            record = replace(record, attributes={**(record.attributes or {}), "source": text})
+        updated.append(record)
+    return updated
+
+
+def with_source_texts(used, sources, texts):
+    """Used sources (licence block) with the Quellenangabe the user typed."""
+    from dataclasses import replace
+
+    by_label = {source.label: (texts.get(source_key(source)) or "").strip() for source in sources}
+    return [replace(item, attribution=by_label.get(item.name) or item.attribution) for item in used]
 
 
 def data_source_text(used_sources, typed=""):
@@ -685,15 +829,17 @@ def sources_text(data_source, day):
 
 # Legend too long for the panel: first smaller text in one column, columns
 # only when needed - (columns, text size factor), tried in this order.
-LEGEND_STEPS = ((1, 1.0), (1, 0.85), (1, 0.72), (2, 0.72), (1, 0.6), (2, 0.6), (2, 0.5),
-                (3, 0.5), (3, 0.42))
+LEGEND_STEPS = ((1, 1.0), (1, 0.9), (2, 0.9), (1, 0.8), (2, 0.8), (2, 0.7), (3, 0.7),
+                (3, 0.6), (3, 0.5))
 LEGEND_CUT_TITLE = "Legende (gekürzt – für alle Einträge ein größeres Papierformat wählen)"
+PREVIEW_DPI = 45
 
 
-def fit_legend(legend, width, height, factor=1.0):
-    """Make the legend fit into width × height (mm): smaller text and more
-    columns step by step.  Returns False if even the smallest step is too
-    big (the caller then says so in the title)."""
+def fit_legend(legend, width, height, text_pt=12):
+    """Make the legend fit into width × height (mm): starts with the normal
+    text size of the page, then smaller text and more columns step by step.
+    Returns False if even the smallest step is too big (the caller then says
+    so in the title)."""
     from qgis.core import QgsLayoutUtils, QgsLegendRenderer, QgsLegendStyle
 
     def content_size():
@@ -703,42 +849,62 @@ def fit_legend(legend, width, height, factor=1.0):
 
     styles = (QgsLegendStyle.Title, QgsLegendStyle.Group, QgsLegendStyle.Subgroup,
               QgsLegendStyle.SymbolLabel)
-    base = {}
-    for kind in styles:
-        size = legend.rstyle(kind).textFormat().size()
-        base[kind] = size * factor if size > 0 else 10 * factor
-    symbol_w, symbol_h = legend.symbolWidth() * factor, legend.symbolHeight() * factor
-    for columns, shrink in LEGEND_STEPS:
+    symbol_w, symbol_h = text_pt * 0.55, text_pt * 0.35  # mm, grows with the text
+
+    def apply(columns, shrink):
         for kind in styles:
             text_format = legend.rstyle(kind).textFormat()
-            text_format.setSize(base[kind] * shrink)
+            text_format.setSize(text_pt * shrink)
             legend.rstyle(kind).setTextFormat(text_format)
         legend.setSymbolWidth(symbol_w * shrink)
         legend.setSymbolHeight(symbol_h * shrink)
         legend.setColumnCount(columns)
         legend.setSplitLayer(True)
         legend.setEqualColumnWidth(True)
-        size = content_size()
-        if size.height() <= height and size.width() <= width:
-            return True
+        return content_size()
+
+    best = None  # last step that is not too wide: cut at the bottom, never at the side
+    for columns, shrink in LEGEND_STEPS:
+        size = apply(columns, shrink)
+        if size.width() <= width:
+            if size.height() <= height:
+                return True
+            best = (columns, shrink)
+    if best is not None:
+        apply(*best)
     return False
+
+
+def map_extent(area, buffer_meters, show_buffer=True):
+    """What the map shows: area + buffer (or a small margin without buffer)."""
+    if show_buffer and buffer_meters:
+        box = area.buffer(float(buffer_meters), 16).boundingBox()
+        box.scale(1.05)
+    else:
+        box = area.boundingBox()
+        box.scale(1.08)
+    return box
 
 
 def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
                    title, subtitle="", data_source="", page="A4", orientation="quer",
-                   scale=None, north_arrow=True, project=None, day=None, grey_outside=False):
+                   scale=None, north_arrow=True, project=None, day=None, grey_outside=False,
+                   show_buffer=True, image_path=None):
     """Write the analysis map as PDF (QGIS print layout).
 
     ``layers`` are the result layers, top-most first (as in the layer list).
-    The study area and its buffer are drawn as outlines on top."""
+    The study area (and, with ``show_buffer``, the buffer of
+    ``buffer_meters``) is drawn as outline on top.  Title, text, legend and
+    the scale bar use the font sizes of the paper size (``font_sizes``); the
+    page plan keeps them apart.  With ``image_path`` a small PNG preview is
+    written instead of the PDF.  Returns ``(path, scale)``."""
     from datetime import date as _date
 
     from qgis.core import (
         QgsFeature, QgsFillSymbol, QgsGeometry, QgsLayerTree, QgsLayoutExporter,
         QgsLayoutItemLabel, QgsLayoutItemLegend, QgsLayoutItemMap, QgsLayoutItemPicture,
         QgsLayoutItemScaleBar, QgsLayoutPoint, QgsLayoutSize, QgsPrintLayout, QgsProject,
-        QgsRectangle, QgsSingleSymbolRenderer, QgsSymbolLayerUtils, QgsUnitTypes,
-        QgsVectorLayer,
+        QgsSingleSymbolRenderer, QgsSymbolLayerUtils, QgsUnitTypes, QgsVectorLayer,
     )
     from qgis.PyQt.QtGui import QFont
 
@@ -747,12 +913,13 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     area = QgsGeometry.fromWkt(study_area_wkt or "")
     if area is None or area.isEmpty():
         raise ValueError("Für das PDF fehlt das Untersuchungsgebiet (Schritt 2).")
+    extent = map_extent(area, buffer_meters, show_buffer)
     if orientation not in ("quer", "hoch"):  # 'auto': follow the shape of the area
-        box = area.boundingBox()
-        orientation = auto_orientation(box.width(), box.height())
+        orientation = auto_orientation(extent.width(), extent.height())
     width, height = page_size_mm(page, orientation)
-    frames = layout_frames(width, height, orientation)  # legend right (quer) or below (hoch)
-    factor = (width * height / (297 * 210)) ** 0.5  # font size grows with the page
+    title_pt, text_pt = font_sizes(page)
+    scale = scale or suggested_scale(extent.width(), extent.height(), page, orientation)
+    info_text = f"Maßstab {scale_label(scale)}\n\n" + sources_text(data_source, day)
 
     def outline_layer(geometry, name, style):
         layer = QgsVectorLayer(f"Polygon?crs={crs_authid}", name, "memory")
@@ -764,109 +931,108 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
 
     from .study_area import AREA_OUTLINE_STYLE
 
-    area_layer = outline_layer(area, "Untersuchungsgebiet", dict(AREA_OUTLINE_STYLE))
-    buffer_geometry = area.buffer(float(buffer_meters or 0), 16)
-    buffer_layer = outline_layer(buffer_geometry, f"Puffer {format_count(int(buffer_meters or 0))} m", {
-        "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.3",
-        "outline_style": "dash"})
+    outlines = [outline_layer(area, "Untersuchungsgebiet", dict(AREA_OUTLINE_STYLE))]
+    if show_buffer and buffer_meters:
+        outlines.append(outline_layer(
+            area.buffer(float(buffer_meters), 16), f"Puffer {format_count(int(buffer_meters))} m",
+            {"color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.3",
+             "outline_style": "dash"}))
 
     layout = QgsPrintLayout(project)
     layout.initializeDefaults()
     layout.setName("Urban Analysis")
     layout.pageCollection().page(0).setPageSize(QgsLayoutSize(width, height, QgsUnitTypes.LayoutMillimeters))
 
-    def place(item, x, y, w, h):
+    def place(item, rect):
+        x, y, w, h = rect
         layout.addLayoutItem(item)
         item.attemptMove(QgsLayoutPoint(x, y, QgsUnitTypes.LayoutMillimeters))
         item.attemptResize(QgsLayoutSize(w, h, QgsUnitTypes.LayoutMillimeters))
 
+    def font(points, bold=False):
+        value = QFont()
+        value.setPointSizeF(points)
+        value.setBold(bold)
+        return value
+
     # legend first: its size decides how much room the map leaves (no overlap)
     map_item = QgsLayoutItemMap(layout)
     map_item.setFrameEnabled(True)
-    map_item.setCrs(project.crs() if not crs_authid else area_layer.crs())
-    map_item.setLayers([area_layer, buffer_layer] + list(layers))
+    map_item.setCrs(outlines[0].crs())
+    map_item.setLayers(outlines + list(layers))
     legend = QgsLayoutItemLegend(layout)
     legend.setTitle("Legende")
     legend.setAutoUpdateModel(False)
     root = QgsLayerTree()
     from .map_styles import fix_legend
 
-    for layer in [area_layer, buffer_layer] + list(layers):
+    for layer in outlines + list(layers):
         fix_legend(root.addLayer(layer))  # cut layers: plain colour patch
     legend.model().setRootGroup(root)
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)
     legend.setReferencePoint(QgsLayoutItemLegend.UpperLeft)  # starts at the top, not centred
     layout.addLayoutItem(legend)
-    fits = False
+    plan, fits = None, False
     for share in PANEL_SHARES[orientation]:
-        frames = layout_frames(width, height, orientation, share)
-        parts = panel_parts(frames["panel"], orientation, factor, bool(subtitle))
-        _lx, _ly, lw, lh = parts["legend"]
-        if fit_legend(legend, lw, lh, factor):
+        plan = page_plan(page, orientation, share, title=title, subtitle=subtitle,
+                         info_text=info_text)
+        _lx, _ly, lw, lh = plan["legend"]
+        if lh > 0 and fit_legend(legend, lw, lh, text_pt):
             fits = True
             break
     if not fits:
         legend.setTitle(LEGEND_CUT_TITLE)  # never cut silently
 
-    # map
-    mx, my, mw, mh = frames["map"]
-    place(map_item, mx, my, mw, mh)
-    extent = QgsRectangle(buffer_geometry.boundingBox())
-    extent.scale(1.05)
+    # map: centred on the extent, at a usual scale (the chosen or the fitting one)
+    place(map_item, plan["map"])
     map_item.zoomToExtent(extent)
-    # a usual scale: the chosen one, or the next one that shows the whole area
-    scale = scale or fitting_scale(map_item.scale())
     map_item.setScale(scale)
 
-    # panel: title, subtitle, legend, north arrow, scale bar, sources
-    tx, ty, tw = parts["title"]
     title_label = QgsLayoutItemLabel(layout)
     title_label.setText(title or "Urban Analysis")
-    font = QFont()
-    font.setPointSizeF(16 * factor)
-    font.setBold(True)
-    title_label.setFont(font)
-    place(title_label, tx, ty, tw, 12 * factor)
-    if subtitle:
+    title_label.setFont(font(title_pt, bold=True))
+    place(title_label, plan["title"])
+    if plan["subtitle"]:
         sub = QgsLayoutItemLabel(layout)
         sub.setText(subtitle)
-        font_sub = QFont()
-        font_sub.setPointSizeF(10 * factor)
-        sub.setFont(font_sub)
-        place(sub, tx, ty + 13 * factor, tw, 7 * factor)
+        sub.setFont(font(text_pt))
+        place(sub, plan["subtitle"])
 
-    lx, ly, lw, lh = parts["legend"]
     legend.setResizeToContents(False)
+    lx, ly, lw, lh = plan["legend"]
     legend.attemptMove(QgsLayoutPoint(lx, ly, QgsUnitTypes.LayoutMillimeters))
-    legend.attemptResize(QgsLayoutSize(lw, lh, QgsUnitTypes.LayoutMillimeters))
+    legend.attemptResize(QgsLayoutSize(lw, max(lh, 1.0), QgsUnitTypes.LayoutMillimeters))
 
-    ix, iy, iw, ih = parts["info"]
+    sx, sy, sw, sh = plan["symbols"]
+    bar_x = sx
     if north_arrow:
         arrow = QgsLayoutItemPicture(layout)
         arrow.setPicturePath(QgsSymbolLayerUtils.svgSymbolNameToPath(
             "arrows/NorthArrow_02.svg", project.pathResolver()))
-        place(arrow, ix, iy, 10 * factor, 10 * factor)
+        place(arrow, (sx, sy, sh * 0.8, sh))
+        bar_x = sx + sh * 0.8 + text_pt * PT_MM
     bar = QgsLayoutItemScaleBar(layout)
     bar.setStyle("Single Box")
     bar.setLinkedMap(map_item)
     bar.setUnits(QgsUnitTypes.DistanceMeters)
     bar.setNumberOfSegments(2)
     bar.setNumberOfSegmentsLeft(0)
-    bar.setMaximumBarWidth(max(20.0, iw - 15 * factor))
+    text_format = bar.textFormat()
+    text_format.setSize(text_pt)
+    bar.setTextFormat(text_format)
+    bar.setHeight(text_pt * PT_MM * 0.6)
+    bar.setMaximumBarWidth(max(20.0, sx + sw - bar_x - text_pt * PT_MM * 2))
     bar.applyDefaultSize()
     layout.addLayoutItem(bar)
-    bar.attemptMove(QgsLayoutPoint(ix + 13 * factor, iy + 2 * factor, QgsUnitTypes.LayoutMillimeters))
+    bar.attemptMove(QgsLayoutPoint(bar_x, sy + sh * 0.15, QgsUnitTypes.LayoutMillimeters))
 
     info = QgsLayoutItemLabel(layout)
-    info.setText(f"Maßstab {scale_label(scale)}\n\n"
-                 + sources_text(data_source, day))
-    font_info = QFont()
-    font_info.setPointSizeF(6.5 * factor)
-    info.setFont(font_info)
-    place(info, ix, iy + 13 * factor, iw, ih - 13 * factor)
+    info.setText(breakable_links(info_text, plan["text"][2], text_pt))
+    info.setFont(font(text_pt))
+    place(info, plan["text"])
 
-    target = Path(path)
+    target = Path(image_path or path)
     target.parent.mkdir(parents=True, exist_ok=True)
     # Grey border only in the PDF: cut style for the export, then back
     restore = []
@@ -882,7 +1048,15 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
         for node in root.findLayers():
             fix_legend(node)
     try:
-        result = QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
+        exporter = QgsLayoutExporter(layout)
+        if image_path:
+            settings = QgsLayoutExporter.ImageExportSettings()
+            settings.dpi = PREVIEW_DPI
+            settings.generateWorldFile = False  # a picture only, no georeferencing
+            settings.exportMetadata = False
+            result = exporter.exportToImage(str(target), settings)
+        else:
+            result = exporter.exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
     finally:
         from .map_styles import CUT_PROPERTY
 
@@ -890,12 +1064,19 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
             layer.setRenderer(renderer)
             layer.setCustomProperty(CUT_PROPERTY, False)
             layer.triggerRepaint()
+        # delete the layout now, while the outline layers and the legend tree
+        # it points to still exist (else Python may free them first: crash)
+        from qgis.PyQt import sip
+
+        del exporter
+        sip.delete(layout)
+        del root
     if result != QgsLayoutExporter.Success:
         raise RuntimeError(
             "Das PDF konnte nicht geschrieben werden. Ist die Datei noch in einem "
             "PDF-Programm geöffnet? Dann bitte schließen und erneut verarbeiten."
         )
-    return str(target)
+    return str(target), scale
 
 
 def _pdf_escape(value: object) -> str:
