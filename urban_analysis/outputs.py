@@ -290,11 +290,51 @@ def run_group_name(base, existing_names, time):
     return name
 
 
-def add_result_layers(layer_objects: Mapping[str, object], group_name: str, project=None):
+# Vertretung Mac (19.11.2026): sub-groups of the result group, so the layer
+# list stays short.  Order = order in the layer tree (top draws on top):
+# points first, areas of use last.  "Sonstiges" is hidden and folded – the
+# small things are there, but not in the map unless the user ticks them.
+LAYER_GROUPS = (
+    ("Einrichtungen", ("Gesundheit", "Nahversorgung", "Bildung und Betreuung", "Freizeit und Grün")),
+    ("Verkehr", ("Straßen", "Fuß- und Radwege", "Plätze", "Bahnstrecken", "Bahnflächen",
+                 "ÖPNV-Haltestellen", "Schiffsverkehrsflächen")),
+    ("Bebauung", ("Gebäude", "Gebäudeteile", "Bauwerke und Überdachungen")),
+    ("Grün & Wasser", ("Grünflächen", "Wasserflächen", "Gewässer", "Hecken und Baumreihen")),
+    ("Nutzung", ("Nutzungsflächen",)),
+    ("Sonstiges", ("Sonstige OSM-Punkte", "Sonstige OSM-Linien", "Sonstige OSM-Flächen",
+                   "Zäune und Mauern")),
+)
+OTHER_LAYER_GROUP = "Weitere Layer"  # categories not listed above, e.g. from own files
+HIDDEN_LAYER_GROUPS = ("Sonstiges",)
+
+
+def layer_group_name(category: Optional[str]) -> str:
+    """Sub-group of a result layer by its category."""
+    for name, categories in LAYER_GROUPS:
+        if category in categories:
+            return name
+    return OTHER_LAYER_GROUP
+
+
+def layer_groups(layer_ids: Iterable[str], categories: Mapping[str, Optional[str]]) -> List[Tuple[str, List[str]]]:
+    """``[(group name, [layer ids])]`` in the order of ``LAYER_GROUPS``, the
+    layers in their given order; empty groups are left out."""
+    order = [name for name, _categories in LAYER_GROUPS]
+    order.insert(order.index("Sonstiges"), OTHER_LAYER_GROUP)
+    members: Dict[str, List[str]] = {name: [] for name in order}
+    for layer_id in layer_ids:
+        members[layer_group_name(categories.get(layer_id))].append(layer_id)
+    return [(name, members[name]) for name in order if members[name]]
+
+
+def add_result_layers(layer_objects: Mapping[str, object], group_name: str, project=None,
+                      categories: Optional[Mapping[str, Optional[str]]] = None):
     """Put the result layers into their own group at the top of the layer tree.
 
     Every run gets a new group (with the time in its name from the second
-    run on); earlier results are kept.  Returns the group.
+    run on); earlier results are kept.  With ``categories`` (layer_id ->
+    category) the layers go into sub-groups (``LAYER_GROUPS``); the group
+    „Sonstiges“ is hidden and folded.  Returns the group.
     """
     from qgis.core import QgsProject
 
@@ -307,9 +347,20 @@ def add_result_layers(layer_objects: Mapping[str, object], group_name: str, proj
     group.setCustomProperty(RESULT_GROUP_PROPERTY, True)
     from .map_styles import fix_legend
 
-    for layer in layer_objects.values():
-        project.addMapLayer(layer, False)
-        fix_legend(group.addLayer(layer))  # clean symbol in the layer panel
+    if categories is None:
+        for layer in layer_objects.values():
+            project.addMapLayer(layer, False)
+            fix_legend(group.addLayer(layer))  # clean symbol in the layer panel
+        return group
+    for name, layer_ids in layer_groups(layer_objects, categories):
+        sub = group.addGroup(name)
+        for layer_id in layer_ids:
+            layer = layer_objects[layer_id]
+            project.addMapLayer(layer, False)
+            fix_legend(sub.addLayer(layer))
+        if name in HIDDEN_LAYER_GROUPS:
+            sub.setItemVisibilityChecked(False)
+            sub.setExpanded(False)
     return group
 
 

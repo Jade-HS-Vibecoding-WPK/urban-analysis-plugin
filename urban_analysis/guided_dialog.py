@@ -3834,7 +3834,9 @@ def _create_dock(plugin):
                 layer_objects.items(),
                 key=lambda item: layer_order_key(
                     geometry_kind(item[1]), draw_rank(categories.get(item[0])))))
-            group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
+            # sub-groups (Bebauung, Verkehr, …); „Sonstiges“ hidden (Vertretung Mac)
+            group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic),
+                                      categories=categories)
         finally:
             QApplication.restoreOverrideCursor()
         dock.last_group_name = group.name()
