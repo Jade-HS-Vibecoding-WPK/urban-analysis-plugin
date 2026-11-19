@@ -139,9 +139,9 @@ def test_closing_the_panel_unchecks_the_toolbar_button(monkeypatch):
 def test_every_step_has_one_main_action_and_progress_label():
     assert len(PAGE_ACTIONS) == len(MVP_UI_STEPS)
     assert PAGE_ACTIONS[-1] == "Verarbeitung starten"
-    assert step_counter_text(4) == "Schritt 5 von 9"
-    assert progress_text(0) == "Schritt 1 von 9\u00a0– Projekt-CRS"
-    assert progress_text(8) == "Schritt 9 von 9\u00a0– Verarbeitung starten"
+    assert step_counter_text(4) == "Schritt 5 von 8"
+    assert progress_text(0) == "Schritt 1 von 8\u00a0– Projekt-CRS"
+    assert progress_text(7) == "Schritt 8 von 8\u00a0– Verarbeitung starten"
 
 
 def test_unexpected_errors_are_described_with_step_type_and_log_hint():

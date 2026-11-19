@@ -43,7 +43,6 @@ def test_ui_contract_is_stable():
             "Attributzuordnung",
             "Harmonisierung",
             "Kartenthema",
-            "Ausgabe",
             "Verarbeitung starten",
         )
     )

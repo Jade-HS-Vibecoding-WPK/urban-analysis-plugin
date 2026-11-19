@@ -64,7 +64,7 @@ def test_outputs_name_the_missing_save_location():
     rows = dict(output_rows(OutputSelection(create_pdf=True)))
     assert rows["Ergebnis-Layer in QGIS"] == "ja"
     assert rows["Bereinigtes GeoPackage"] == "nein"
-    assert rows["PDF"] == "ja – Speicherort fehlt (Schritt 8)"
+    assert rows["PDF"] == "ja – Speicherort fehlt („Speichern unter …“)"
 
 
 def test_result_rows_list_created_layers_and_skipped_objects():

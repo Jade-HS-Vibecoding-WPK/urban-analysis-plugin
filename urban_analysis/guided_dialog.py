@@ -1,4 +1,4 @@
-"""QGIS side panel for the contract-defined nine-step user guidance.
+"""QGIS side panel for the contract-defined eight-step user guidance.
 
 The guidance lives in a dock widget on the right side of QGIS, so it can stay
 open, be hidden via the toolbar button or be undocked while working in QGIS.
@@ -155,7 +155,7 @@ SIMPLE_PDF_HINT = (
 SAVE_FAILED_MESSAGE = (
     "{kind} konnte nicht gespeichert werden: {reason}\n"
     "Was tun: Ist die Datei gerade in QGIS oder einem anderen Programm geöffnet, "
-    "bitte dort schließen oder in Schritt 8 einen anderen Dateinamen wählen. "
+    "bitte dort schließen oder unter „Speichern“ einen anderen Dateinamen wählen. "
     "Die Ergebnis-Layer in QGIS sind trotzdem angelegt."
 )
 CRS_HINT = (
@@ -173,7 +173,6 @@ PAGE_ACTIONS = (
     "Zuordnung bestätigen",
     "Entscheidung übernehmen",
     "Thema übernehmen",
-    "Ausgabe übernehmen",
     UI_LABELS["start_processing"],
 )
 
@@ -292,7 +291,7 @@ REMAKE_QUESTION = (
     "Soll die bisherige PDF-Datei überschrieben oder eine neue Datei angelegt werden?"
 )
 REMAKE_NO_GROUP_MESSAGE = (
-    "Die Ergebnis-Gruppe wurde in QGIS nicht gefunden. Bitte „Erneut verarbeiten“ klicken."
+    "Die Ergebnis-Gruppe wurde in QGIS nicht gefunden. Bitte unter „Ausgabe“ „Layer erzeugen“ klicken."
 )
 REMAKE_NO_LAYERS_MESSAGE = (
     "In der Ergebnis-Gruppe ist kein Layer sichtbar. Bitte mindestens einen Layer einschalten."
@@ -336,30 +335,25 @@ STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5")
 # Step 9: one row of buttons, each opens its own area (always selectable)
 STEP9_TABS = (
     ("output", "Ausgabe"),
-    ("map", "Karte erzeugen"),
-    ("access", "Erreichbarkeitsanalyse"),
+    ("access", "Erreichbarkeit"),
     ("save", "Speichern"),
 )
-STEP9_ACTIONS = {
-    "output": "Weiter: Karte erzeugen",
-    "map": "Karte erzeugen",
-    "access": "Analyse starten",
-    "save": "Speichern",
-}
-MAP_AGAIN_ACTION = "Karte neu erzeugen"
-MAP_NEXT_HINT = ("Weiter mit „Erreichbarkeitsanalyse“ (optional) oder „Speichern“ – "
-                 "die Knöpfe oben sind jederzeit anwählbar.")
-OUTPUT_TAB_HINT = ("Kartenstil, Dateien und PDF-Layout – dieselben Einstellungen wie in "
-                   "Schritt 8. Sie gelten für „Karte erzeugen“ und „Speichern“.")
-NEEDS_MAP_MESSAGE = ("Bitte zuerst „Karte erzeugen“ – die Analyse und das Speichern "
-                     "arbeiten mit den Ergebnis-Layern in QGIS.")
-NEEDS_MAP_HINT = "Noch keine Karte erzeugt: bitte zuerst „Karte erzeugen“."
+LAYERS_ACTION = "Layer erzeugen"
+LAYERS_AGAIN_ACTION = "Layer neu erzeugen"
+ACCESS_ACTION = "Analyse starten"
+SAVE_ACTION = "Speichern"
+LAYERS_INTRO = ("Hier entstehen die Ergebnis-Layer in QGIS (eine neue Gruppe). Deine "
+                "Eingangsdaten bleiben unverändert.")
+LAYERS_NEXT_HINT = ("Optional weiter mit „Erreichbarkeit“, dann „Speichern“ – die Knöpfe "
+                    "oben sind jederzeit anwählbar.")
+LAYERS_FIRST_HINT = ("Noch keine Ergebnis-Layer: Sie werden beim Klick unten automatisch "
+                     "zuerst erzeugt (Einstellungen unter „Ausgabe“).")
 SAVE_INTRO = ("Gespeichert wird der aktuelle Stand in QGIS: das GeoPackage mit allen Layern "
               "der Ergebnis-Gruppe (auch der Erreichbarkeit), das PDF mit den gerade "
               "sichtbaren Layern in ihrer Reihenfolge. Erneut speichern überschreibt die "
-              "Dateien – für neue Dateien unter „Ausgabe“ einen anderen Speicherort wählen.")
-SAVE_NOTHING_MESSAGE = ("Es ist nichts zum Speichern ausgewählt. Bitte unter „Ausgabe“ "
-                        "„GeoPackage“ und/oder „PDF-Karte“ ankreuzen.")
+              "Dateien – für neue Dateien „Speichern unter …“ wählen.")
+SAVE_NOTHING_MESSAGE = ("Es ist nichts zum Speichern ausgewählt. Bitte oben „GeoPackage“ "
+                        "und/oder „PDF-Karte“ ankreuzen.")
 ACCESS_SECTION_LABEL = "Erreichbarkeit (zusätzlich)"
 ACCESS_INTRO = ("Wie weit ist es von jedem Gebäude zum nächsten Ziel (Luftlinie)? Ergebnis: "
                 "Abstand je Gebäude in der Attributtabelle und Radien um die Ziele in der Karte. "
@@ -628,7 +622,7 @@ def objects_text(count):
 def done_hint_text(group_name):
     return (
         f"Du findest sie im Layer-Bedienfeld in der Gruppe „{group_name}“. "
-        "„Erneut verarbeiten“ legt eine neue Gruppe an; frühere Ergebnisse bleiben erhalten."
+        "„Layer neu erzeugen“ legt eine neue Gruppe an; frühere Ergebnisse bleiben erhalten."
     )
 
 
@@ -651,7 +645,7 @@ def overview_rows(flow, area_ha, names):
         ("Puffer", f"{format_count(int(round(result.buffer_meters)))} m"),
         ("Datei", ", ".join(files) or "–"),
         ("Kartenthema", result.selected_topic or "–"),
-        ("Datenquelle", result.output.data_source or "– noch nicht eingetragen (Schritt 8)"),
+        ("Datenquelle", result.output.data_source or "– noch nicht eingetragen (oben)"),
         ("Unsichere Dubletten", duplicates),
         ("Hinweise aus Schritt 4", f"{warnings} Warnung(en)"),
     )
@@ -785,7 +779,7 @@ def output_rows(output, paths=None):
         if not flag:
             return "nein"
         path = paths.get(kind)
-        return f"ja – {Path(path).name}{extra}" if path else "ja – Speicherort fehlt (Schritt 8)"
+        return f"ja – {Path(path).name}{extra}" if path else "ja – Speicherort fehlt („Speichern unter …“)"
 
     return (
         ("Ergebnis-Layer in QGIS", "ja"),
@@ -1236,7 +1230,7 @@ def _create_dock(plugin):
             child.installEventFilter(wheel_guard)
 
     class GuidedDock(QgsDockWidget):
-        """Side panel that walks through the nine MVP steps."""
+        """Side panel that walks through the eight MVP steps."""
 
         def __init__(self):
             super().__init__("Urban Analysis", plugin.iface.mainWindow())
@@ -1259,7 +1253,7 @@ def _create_dock(plugin):
             self.input_paths = set()  # loaded input files: never an output
             self.last_run_signature = None  # what step 9 produced last time
             self.last_group_name = None
-            self.step9_tab = "map"  # open area of step 9
+            self.step9_tab = "output"  # open area of the last step
             self.last_access_lines = []  # result of the last accessibility run
             self.download_feedback = None  # QgsFeedback of a running OSM download
 
@@ -1493,8 +1487,11 @@ def _create_dock(plugin):
 
         def show_page(self, index):
             self.stop_drawing()
-            self.last_reports = None  # step 9 starts with the overview again
+            self.last_reports = None  # the last step starts with the overview again
             self.last_saved = []
+            last = index == len(self.pages) - 1
+            if last:
+                self.step9_tab = "output"  # 'Ausgabe' is open first
             page = self.pages[index]
             if page.rebuild:
                 page.build()
@@ -1521,6 +1518,8 @@ def _create_dock(plugin):
             # a page may name its main action itself (step 3: folder first)
             action_text = page.widgets.get("action_text")
             self.primary_button.setText(action_text() if action_text else PAGE_ACTIONS[index])
+            # last step: every area has its own button
+            self.primary_button.setVisible(not last)
             self.back_button.setEnabled(index > 0)
             self.clear_message()
             if self.next_message:
@@ -1675,7 +1674,7 @@ def _create_dock(plugin):
                 self.output_draft = {}
                 self.input_paths = set()
                 self.next_message = None
-                self.step9_tab = "map"
+                self.step9_tab = "output"
                 self.last_access_lines = []
                 self.last_group_name = None
                 for page in self.pages:
@@ -3102,101 +3101,45 @@ def _create_dock(plugin):
         button.clicked.connect(lambda: choose_output_path(page, kind))
         toggled(checked)
 
-    def build_output(page):
+    def output_draft():
+        """Settings of the last step; unconfirmed input survives a rebuild."""
         output = workflow().result.output
-        # Unconfirmed input survives a rebuild of the page (e.g. style switch).
         draft = dock.output_draft
         draft.setdefault("geopackage", output.save_cleaned_geopackage)
         draft.setdefault("pdf", output.create_pdf)
         draft.setdefault("source", output.data_source)
-        # QGIS result layers are always created (contract); no greyed-out box
-        def labelled_combo(label, items, key, default):
-            """Small 'Label + choice list' block; the choice is kept in the draft."""
-            box = QWidget()
-            box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(0, 4, 0, 0)
-            box_layout.addWidget(QLabel(label))
-            combo = QComboBox()
-            for value, text in items:
-                combo.addItem(text, value)
-            index = combo.findData(draft.setdefault(key, default))
-            combo.setCurrentIndex(max(index, 0))
-            combo.currentIndexChanged.connect(
-                lambda _i, c=combo: draft.__setitem__(key, c.currentData()))
-            box_layout.addWidget(combo)
-            return box
+        return draft
 
-        def labelled_line(label, key, placeholder):
-            box = QWidget()
-            box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(0, 4, 0, 0)
-            box_layout.addWidget(QLabel(label))
-            line = QLineEdit(draft.setdefault(key, ""))
-            line.setPlaceholderText(placeholder)
-            line.textChanged.connect(lambda text: draft.__setitem__(key, text))
-            box_layout.addWidget(line)
-            return box
+    def labelled_combo(label, items, key, default):
+        """Small 'Label + choice list' block; the choice is kept in the draft."""
+        draft = output_draft()
+        box = QWidget()
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(0, 4, 0, 0)
+        box_layout.addWidget(QLabel(label))
+        combo = QComboBox()
+        for value, text in items:
+            combo.addItem(text, value)
+        index = combo.findData(draft.setdefault(key, default))
+        combo.setCurrentIndex(max(index, 0))
+        combo.currentIndexChanged.connect(
+            lambda _i, c=combo: draft.__setitem__(key, c.currentData()))
+        box_layout.addWidget(combo)
+        return box
 
-        # map style for the result layers in QGIS and the PDF (E33)
-        page.layout.addWidget(labelled_combo(
-            "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
-            "map_style", DEFAULT_MAP_STYLE))
+    def labelled_line(label, key, placeholder):
+        draft = output_draft()
+        box = QWidget()
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(0, 4, 0, 0)
+        box_layout.addWidget(QLabel(label))
+        line = QLineEdit(draft.setdefault(key, ""))
+        line.setPlaceholderText(placeholder)
+        line.textChanged.connect(lambda text: draft.__setitem__(key, text))
+        box_layout.addWidget(line)
+        return box
 
-        output_choice(page, "geopackage", "Bereinigtes GeoPackage speichern",
-                      draft["geopackage"])
-        topic = workflow().result.selected_topic or "Siedlungsstruktur"
-        north = QCheckBox("Nordpfeil anzeigen")
-        north.setChecked(draft.setdefault("pdf_north", True))
-        north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
-        # a PDF setting only: shown inside the PDF options
-        grey = QCheckBox("Umgebung außerhalb des Gebiets in Graustufen")
-        grey.setChecked(draft.setdefault("grey_outside", True))
-        grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
-        pdf_extra = (
-            labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
-            labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
-            labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3"),
-            labelled_combo("Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
-                                           ("quer", "Querformat"), ("hoch", "Hochformat")],
-                           "pdf_orientation", "auto"),
-            labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
-            north,
-            grey,
-        )
-        output_choice(page, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
-        title = QLabel(UI_LABELS["data_source"])
-        page.layout.addWidget(title)
-        source = QLineEdit(draft["source"])
-        source.textChanged.connect(lambda text: draft.__setitem__("source", text))
-        source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
-        page.layout.addWidget(source)
-        hint = QLabel(DATA_SOURCE_HINT)
-        hint.setWordWrap(True)
-        set_role(hint, "hint")
-        page.layout.addWidget(hint)
-        page.widgets.update(source=source)
-
-    def validate_output(page):
-        widgets = page.widgets
-        geopackage = widgets["geopackage"].isChecked()
-        pdf = widgets["pdf"].isChecked()
-        problem = output_choice_problem(
-            geopackage=geopackage, pdf=pdf, paths=dock.output_paths,
-            data_source=widgets["source"].text(), confirmed=dock.output_confirmed,
-            input_paths=dock.input_paths)
-        if problem:
-            return reject(problem)
-        try:
-            workflow().choose_output(
-                save_cleaned_geopackage=geopackage,
-                create_pdf=pdf,
-                data_source=widgets["source"].text(),
-            )
-        except ValueError as error:
-            return reject(str(error))
-        return True
-
-    # 9 Verarbeitung starten: readable overview before, result list after
+    # 8 Verarbeitung starten: three areas with their own button each
     def summary_card(title, rows):
         card = QFrame()
         set_role(card, "issue-info")
@@ -3222,65 +3165,64 @@ def _create_dock(plugin):
         return geometry.area() / 10000
 
     class Area:
-        """One area of step 9: own layout, shares the widgets of the page."""
+        """One area of the last step: own layout, shares the widgets of the page."""
 
         def __init__(self, layout, widgets):
             self.layout = layout
             self.widgets = widgets
 
     def result_group():
-        """The layer group of the last 'Karte erzeugen', or None (also when
+        """The layer group of the last 'Layer erzeugen', or None (also when
         the user removed it in QGIS)."""
         if not dock.last_group_name:
             return None
         return QgsProject.instance().layerTreeRoot().findGroup(dock.last_group_name)
 
-    def step9_action_text():
-        tab = dock.step9_tab
-        if tab == "map" and result_group() is not None:
-            return MAP_AGAIN_ACTION
-        return STEP9_ACTIONS[tab]
-
     def build_summary(page):
-        """Step 9: a row of buttons (always selectable), below the chosen area."""
+        """Last step: a row of buttons (always selectable), below the chosen area."""
         tab = dock.step9_tab
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(6)
-        for index, (key, text) in enumerate(STEP9_TABS):
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        for key, text in STEP9_TABS:
             button = QPushButton(text)
             button.setCheckable(True)
             button.setChecked(key == tab)
             button.setCursor(Qt.PointingHandCursor)
             set_role(button, "choice")
             button.clicked.connect(lambda _checked=False, k=key: switch_step9_tab(page, k))
-            grid.addWidget(button, index // 2, index % 2)
-        page.layout.addLayout(grid)
+            row.addWidget(button)
+        page.layout.addLayout(row)
         panel = QFrame()
         set_role(panel, "panel")
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(12, 10, 12, 12)
         page.layout.addWidget(panel)
         area = Area(panel_layout, page.widgets)
-        {"output": build_output_area, "map": build_map_area,
-         "access": build_access_area, "save": build_save_area}[tab](area)
-        page.widgets["action_text"] = step9_action_text
+        {"output": build_layers_area, "access": build_access_area,
+         "save": build_save_area}[tab](area)
 
     def switch_step9_tab(page, key):
         try:
-            if dock.step9_tab == "access" and "access_tree" in page.widgets:
-                try:  # keep what was set, even without starting the analysis
-                    workflow().accessibility = accessibility_from(page)
-                except RadiusError:
-                    pass  # said again on 'Analyse starten'
+            remember_accessibility(page)
             dock.step9_tab = key
             dock.clear_message()
-            page.build()
-            make_texts_selectable(page.widget)
-            dock.primary_button.setText(step9_action_text())
-            QTimer.singleShot(0, dock.fit_wrapped_labels)
+            rebuild_last_step(page)
         except Exception as error:  # show every program error visibly
             dock.show_unexpected_error("Bereich wechseln", error)
+
+    def rebuild_last_step(page):
+        page.build()
+        make_texts_selectable(page.widget)
+        QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+    def remember_accessibility(page):
+        """Keep the accessibility settings, even without starting the analysis."""
+        if dock.step9_tab == "access" and "access_tree" in page.widgets:
+            try:
+                workflow().accessibility = accessibility_from(page)
+            except RadiusError:
+                pass  # said again on 'Analyse starten'
 
     def area_hint(area, text, role="hint"):
         label = QLabel(text)
@@ -3288,14 +3230,42 @@ def _create_dock(plugin):
         set_role(label, role)
         area.layout.addWidget(label)
 
-    def build_output_area(area):
-        area_hint(area, OUTPUT_TAB_HINT)
-        build_output(area)
+    def area_button(area, page, text, action, context):
+        """The own main button of an area (at its end)."""
+        button = PixelButton(text, "primary")
+        button.setCursor(Qt.PointingHandCursor)
 
-    def build_map_area(area):
+        def clicked():
+            dock.clear_message()
+            try:
+                action(page)
+            except Exception as error:  # show every program error visibly
+                dock.show_unexpected_error(context, error)
+
+        button.clicked.connect(clicked)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 8, 0, 0)
+        row.addStretch()
+        row.addWidget(button)
+        area.layout.addLayout(row)
+        return button
+
+    # Ausgabe: map style, data source, 'Layer erzeugen'
+    def build_layers_area(area):
         flow = workflow()
         names = readable_names()
+        draft = output_draft()
         group = result_group()
+        area_hint(area, LAYERS_INTRO)
+        area.layout.addWidget(labelled_combo(
+            "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
+            "map_style", DEFAULT_MAP_STYLE))
+        area.layout.addWidget(QLabel(UI_LABELS["data_source"]))
+        source = QLineEdit(draft["source"])
+        source.textChanged.connect(lambda text: draft.__setitem__("source", text))
+        source.setPlaceholderText(DATA_SOURCE_PLACEHOLDER)
+        area.layout.addWidget(source)
+        area_hint(area, DATA_SOURCE_HINT)
         if dock.last_reports is not None and group is not None:
             area_hint(area, DONE_TITLE, "status")
             area.layout.addWidget(summary_card(
@@ -3303,75 +3273,56 @@ def _create_dock(plugin):
                 result_rows(dock.last_reports,
                             {d.layer_id: d.category for d in flow.result.layers})))
             area_hint(area, done_hint_text(group.name()))
+        else:
+            area.layout.addWidget(summary_card(
+                "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
+            area.layout.addWidget(summary_card(
+                "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
+        area_button(area, area_page(area), LAYERS_AGAIN_ACTION if group is not None else LAYERS_ACTION,
+                    create_layers_clicked, LAYERS_ACTION)
+
+    def area_page(area):
+        return dock.pages[dock.current]
+
+    def create_layers_clicked(page):
+        if make_layers(ask_same=True) is None:
             return
-        area_hint(area, SUMMARY_INTRO)
+        rebuild_last_step(page)
+        dock.show_message(result_layers_text(dock.last_reports) + "\n" + LAYERS_NEXT_HINT, kind="info")
+
+    def ensure_layers():
+        """The result group; created first if there is none yet, so every
+        area works on its own.  None if that failed (message shown)."""
+        group = result_group()
         if group is not None:
-            area_hint(area, done_hint_text(group.name()))
-        area.layout.addWidget(summary_card(
-            "Grundlagen", overview_rows(flow, study_area_hectares(flow.result), names)))
-        area.layout.addWidget(summary_card(
-            "Diese Ergebnis-Layer werden angelegt", planned_layer_rows(flow, names)))
+            return group
+        return make_layers(ask_same=False)
 
-    def build_access_area(area):
-        if result_group() is None:
-            area_hint(area, NEEDS_MAP_HINT, "warning")
-        build_accessibility(area)
-        if dock.last_access_lines:
-            area.layout.addWidget(summary_card("Ergebnis der letzten Analyse",
-                                               [(None, line) for line in dock.last_access_lines]))
-
-    def build_save_area(area):
-        flow = workflow()
-        draft = dock.output_draft
-        if result_group() is None:
-            area_hint(area, NEEDS_MAP_HINT, "warning")
-        area_hint(area, SAVE_INTRO)
-        planned = SimpleNamespace(
-            save_cleaned_geopackage=bool(draft.get("geopackage", flow.result.output.save_cleaned_geopackage)),
-            create_pdf=bool(draft.get("pdf", flow.result.output.create_pdf)))
-        rows = output_rows(planned, dock.output_paths)[1:]  # QGIS layers: 'Karte erzeugen'
-        area.layout.addWidget(summary_card("Wird gespeichert (ändern unter „Ausgabe“)", rows))
-        if dock.last_saved:
-            area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
-
-    def validate_summary(page):
-        """Main button of step 9: the action of the open area."""
-        tab = dock.step9_tab
-        if tab == "output":
-            if validate_output(page):
-                switch_step9_tab(page, "map")
-            return False
-        if tab == "map":
-            return create_map(page)
-        if tab == "access":
-            return run_accessibility(page)
-        return save_files(page)
-
-    def create_map(page):
-        """'Karte erzeugen': build the result layers and add them to QGIS."""
+    def make_layers(ask_same):
+        """Build the result layers and add them to QGIS as a new group."""
         flow = workflow()
         selected = flow.result.selected_layers()
         if not selected:
-            return reject(
-                "Für das Kartenthema ist kein Layer ausgewählt. Bitte in Schritt 7 "
-                "mindestens eine Kategorie ankreuzen."
-            )
-        draft = dock.output_draft
-        source = draft.get("source", flow.result.output.data_source)
+            reject("Für das Kartenthema ist kein Layer ausgewählt. Bitte in Schritt 7 "
+                   "mindestens eine Kategorie ankreuzen.")
+            return None
+        draft = output_draft()
+        source = draft.get("source", "")
         problem = output_choice_problem(geopackage=False, pdf=False, paths={}, data_source=source)
         if problem:
-            return reject(problem + " (Bereich „Ausgabe“)")
+            reject(problem + " (Bereich „Ausgabe“)")
+            return None
         signature = run_signature(flow, draft, dock.output_paths)
-        if signature == dock.last_run_signature and result_group() is not None:
+        if ask_same and signature == dock.last_run_signature and result_group() is not None:
             answer = QMessageBox.question(
-                dock, MAP_AGAIN_ACTION, SAME_RUN_QUESTION,
+                dock, LAYERS_AGAIN_ACTION, SAME_RUN_QUESTION,
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if answer != QMessageBox.Yes:
-                return False
+                return None
         try:
             flow.choose_output(
-                save_cleaned_geopackage=bool(draft.get("geopackage", flow.result.output.save_cleaned_geopackage)),
-                create_pdf=bool(draft.get("pdf", flow.result.output.create_pdf)),
+                save_cleaned_geopackage=bool(draft.get("geopackage")),
+                create_pdf=bool(draft.get("pdf")),
                 data_source=source,
             )
             # Current decisions of step 5 (and step 6) on the data (S5),
@@ -3384,7 +3335,8 @@ def _create_dock(plugin):
             flow.result.harmonized_records = apply_data_source(
                 flow.result.harmonized_records, source)
         except ValueError as error:
-            return reject(error_text(error))
+            reject(error_text(error))
+            return None
         try:
             from .mapping import readable_layer
         except ImportError:
@@ -3401,29 +3353,31 @@ def _create_dock(plugin):
                 layer_objects.items(),
                 key=lambda item: -draw_rank(categories.get(item[0]))))
             group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
-            dock.last_group_name = group.name()
         finally:
             QApplication.restoreOverrideCursor()
+        dock.last_group_name = group.name()
         dock.last_run_signature = signature
         plugin.result_layers = layer_objects
         dock.last_reports = reports
         dock.last_saved = []
         dock.last_access_lines = []  # a new group has no analysis yet
-        page.build()
-        make_texts_selectable(page.widget)
-        QTimer.singleShot(0, dock.fit_wrapped_labels)
-        dock.primary_button.setText(step9_action_text())
-        dock.show_message(result_layers_text(reports) + "\n" + MAP_NEXT_HINT, kind="info")
         dock.mark_all_done()
-        return False  # last step: stay here
+        return group
+
+    # Erreichbarkeit
+    def build_access_area(area):
+        build_accessibility(area)
+        if dock.last_access_lines:
+            area.layout.addWidget(summary_card("Ergebnis der letzten Analyse",
+                                               [(None, line) for line in dock.last_access_lines]))
+        if result_group() is None:
+            area_hint(area, LAYERS_FIRST_HINT)
+        area_button(area, area_page(area), ACCESS_ACTION, run_accessibility, ACCESS_ACTION)
 
     def run_accessibility(page):
         """'Analyse starten': distances into the buildings of the map, targets
         (copies with attribute table) and dashed radii as sub-groups."""
         flow = workflow()
-        group = result_group()
-        if group is None:
-            return reject(NEEDS_MAP_MESSAGE)
         if not page.widgets.get("access_available"):
             return reject(ACCESS_NO_TARGETS)
         try:
@@ -3434,6 +3388,9 @@ def _create_dock(plugin):
         if problem:
             return reject(problem)
         flow.accessibility = choice
+        group = ensure_layers()
+        if group is None:
+            return False
         try:
             from .mapping import readable_layer
         except ImportError:
@@ -3478,15 +3435,44 @@ def _create_dock(plugin):
             lines.append(f"{format_count(missing)} Gebäude ohne passende Objekt-ID – dort "
                          "fehlen die Abstände.")
         dock.last_access_lines = lines
-        page.build()
-        make_texts_selectable(page.widget)
-        QTimer.singleShot(0, dock.fit_wrapped_labels)
+        rebuild_last_step(page)
         severe = any(issue.severity in ("error", "warning") for issue in issues) or missing
         dock.show_message("\n".join(lines), kind="warning" if severe else "info")
         return False
 
+    # Speichern: GeoPackage and PDF with its settings
+    def build_save_area(area):
+        draft = output_draft()
+        area_hint(area, SAVE_INTRO)
+        output_choice(area, "geopackage", "Bereinigtes GeoPackage speichern", draft["geopackage"])
+        topic = workflow().result.selected_topic or "Siedlungsstruktur"
+        north = QCheckBox("Nordpfeil anzeigen")
+        north.setChecked(draft.setdefault("pdf_north", True))
+        north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
+        # a PDF setting only: shown inside the PDF options
+        grey = QCheckBox("Umgebung außerhalb des Gebiets in Graustufen")
+        grey.setChecked(draft.setdefault("grey_outside", True))
+        grey.toggled.connect(lambda on: draft.__setitem__("grey_outside", on))
+        pdf_extra = (
+            labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
+            labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
+            labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3"),
+            labelled_combo("Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
+                                           ("quer", "Querformat"), ("hoch", "Hochformat")],
+                           "pdf_orientation", "auto"),
+            labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
+            north,
+            grey,
+        )
+        output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
+        if dock.last_saved:
+            area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
+        if result_group() is None:
+            area_hint(area, LAYERS_FIRST_HINT)
+        area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
+
     def write_map_pdf(flow, path, layers):
-        """PDF map with the settings of 'Ausgabe'."""
+        """PDF map with the settings of 'Speichern'."""
         draft = dock.output_draft
         return export_map_pdf(
             path, layers=layers,
@@ -3506,20 +3492,19 @@ def _create_dock(plugin):
         """'Speichern': GeoPackage (all layers of the group) and PDF (visible
         layers in their order) from the current state in QGIS."""
         flow = workflow()
-        group = result_group()
-        if group is None:
-            return reject(NEEDS_MAP_MESSAGE)
-        draft = dock.output_draft
-        geopackage = bool(draft.get("geopackage", flow.result.output.save_cleaned_geopackage))
-        pdf = bool(draft.get("pdf", flow.result.output.create_pdf))
+        draft = output_draft()
+        geopackage, pdf = bool(draft.get("geopackage")), bool(draft.get("pdf"))
         if not (geopackage or pdf):
             return reject(SAVE_NOTHING_MESSAGE)
-        source = draft.get("source", flow.result.output.data_source)
+        source = draft.get("source", "")
         problem = output_choice_problem(
             geopackage=geopackage, pdf=pdf, paths=dock.output_paths, data_source=source,
             confirmed=dock.output_confirmed, input_paths=dock.input_paths)
         if problem:
-            return reject(problem + " (Bereich „Ausgabe“)")
+            return reject(problem)
+        group = ensure_layers()
+        if group is None:
+            return False
         try:
             flow.choose_output(save_cleaned_geopackage=geopackage, create_pdf=pdf, data_source=source)
         except ValueError as error:
@@ -3546,14 +3531,16 @@ def _create_dock(plugin):
             finally:
                 QApplication.restoreOverrideCursor()
         dock.last_saved = saved
-        page.build()
-        make_texts_selectable(page.widget)
-        QTimer.singleShot(0, dock.fit_wrapped_labels)
+        rebuild_last_step(page)
         text = ("Gespeichert: " + ", ".join(path.name for _kind, path in saved) + ".") if saved else ""
         if failures:
             dock.show_message("\n\n".join([t for t in [text] if t] + failures), kind="error")
         else:
             dock.show_message(text, kind="info")
+        return False
+
+    def validate_summary(page):
+        """The areas have their own buttons; the panel button is hidden here."""
         return False
 
     crs_page = dock.add_page(build_crs, validate_crs)
@@ -3563,7 +3550,6 @@ def _create_dock(plugin):
     dock.add_page(build_mapping, validate_mapping, rebuild=True)
     dock.add_page(build_harmonization, validate_harmonization, rebuild=True)
     dock.add_page(build_topic, validate_topic, rebuild=True)
-    dock.add_page(build_output, validate_output, rebuild=True)
     dock.add_page(build_summary, validate_summary, rebuild=True)
     dock.show_page(0)
     return dock

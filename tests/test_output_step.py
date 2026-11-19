@@ -87,7 +87,7 @@ def test_overview_shows_chosen_file_names():
     rows = dict(output_rows(output, {"geopackage": Path("C:/daten/ergebnis.gpkg")}))
     assert rows["Ergebnis-Layer in QGIS"] == "ja"
     assert rows["Bereinigtes GeoPackage"] == "ja – ergebnis.gpkg"
-    assert rows["PDF"] == "ja – Speicherort fehlt (Schritt 8)"
+    assert rows["PDF"] == "ja – Speicherort fehlt („Speichern unter …“)"
     rows = dict(output_rows(OutputSelection()))
     assert rows["Bereinigtes GeoPackage"] == "nein"
     assert rows["PDF"] == "nein"
