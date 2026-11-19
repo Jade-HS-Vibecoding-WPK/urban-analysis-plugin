@@ -657,6 +657,27 @@ QCheckBox::indicator:checked:disabled {{
     background-color: {c['disabled_text']};
     border-color: {c['disabled_text']};
 }}
+/* Own round choices (step 2): visible ring, chosen = blue ring with white centre. */
+QRadioButton::indicator {{
+    width: 14px;
+    height: 14px;
+    background-color: {c['surface']};
+    border: 1px solid {c['border_strong']};
+    border-radius: 7px;
+}}
+QRadioButton::indicator:hover {{
+    border-color: {c['accent']};
+}}
+QRadioButton::indicator:checked {{
+    background-color: {c['surface']};
+    border: 4px solid {c['accent']};
+    width: 8px;
+    height: 8px;
+}}
+QRadioButton::indicator:disabled {{
+    background-color: {c['disabled']};
+    border-color: {c['border']};
+}}
 /* Same boxes in lists (e.g. categories in step 7). */
 QListView::indicator {{
     width: 14px;

@@ -10,6 +10,7 @@ they always reflect the data that is currently loaded.
 
 import os
 import re
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -21,7 +22,13 @@ from .data_pipeline import (
     apply_data_source,
 )
 from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
-from .osm_download import DownloadCanceled, DownloadError, lonlat_box, run_download
+from .osm_download import (
+    DownloadCanceled,
+    DownloadError,
+    ensure_project_crs,
+    lonlat_box,
+    run_download,
+)
 from .sources import plan_osm_download
 from .outputs import (
     add_result_layers,
@@ -236,6 +243,38 @@ SUMMARY_INTRO = (
 )
 DONE_TITLE = "Fertig ✓ – die Ergebnis-Layer sind in QGIS angelegt."
 RERUN_ACTION = "Erneut verarbeiten"
+SAME_RUN_QUESTION = (
+    "Seit der letzten Verarbeitung hat sich nichts geändert – das Ergebnis wäre "
+    "gleich.\n\nTrotzdem eine neue Gruppe mit denselben Ergebnis-Layern erzeugen?"
+)
+
+
+def crs_mismatch_text(qgis_crs, plugin_crs):
+    """Warning in step 1 when QGIS and the plugin use different CRS."""
+    return (
+        f"Das QGIS-Projekt nutzt {qgis_crs}, im Plugin ist {plugin_crs} gewählt.\n\n"
+        "Unterschiedliche Koordinatensysteme können zu Anzeigefehlern führen. Bei "
+        f"„Fortfahren“ wird das QGIS-Projekt auf {plugin_crs} umgestellt, und Daten "
+        f"in einem anderen CRS werden beim Laden als Kopie nach {plugin_crs} "
+        "umgerechnet (die Originaldateien bleiben unverändert).\n\n"
+        "Möchtest du das CRS im Plugin noch ändern?"
+    )
+
+
+def run_signature(flow, draft, paths):
+    """Everything that changes the output of step 9; equal = nothing changed."""
+    result = flow.result
+    suggestions = tuple(
+        (s.layer_id, s.source_field, s.user_value, s.accepted)
+        for s in getattr(result, "attribute_suggestions", ()) or ()
+    )
+    return repr((
+        tuple(d.layer_id for d in result.selected_layers()),
+        result.selected_topic, result.study_area_wkt, result.buffer_meters,
+        result.output, sorted((flow.duplicate_decisions or {}).items()),
+        suggestions, sorted((k, str(v)) for k, v in draft.items()),
+        sorted((k, str(v)) for k, v in paths.items()),
+    ))
 
 
 def format_hectares(hectares):
@@ -251,7 +290,7 @@ def objects_text(count):
 def done_hint_text(group_name):
     return (
         f"Du findest sie im Layer-Bedienfeld in der Gruppe „{group_name}“. "
-        "„Erneut verarbeiten“ ersetzt diese Gruppe; andere Layer bleiben unberührt."
+        "„Erneut verarbeiten“ legt eine neue Gruppe an; frühere Ergebnisse bleiben erhalten."
     )
 
 
@@ -489,7 +528,7 @@ def split_summary(message, details=None):
         return text, str(details).strip()
     for match in re.finditer(r"[.!?]\s+(?=[A-ZÄÖÜ„\"(])", text):
         before = text[:match.start()]
-        last_word = before.split()[-1] if before.split() else ""
+        last_word = before.split()[-1].lstrip("(„\"'") if before.split() else ""
         # 'z.' of 'z. B.' (one letter) or a known abbreviation: no sentence end
         if len(last_word) <= 1 or before.endswith(_ABBREVIATIONS):
             continue
@@ -868,6 +907,8 @@ def _create_dock(plugin):
             self.output_confirmed = set()  # kinds picked in the save dialog
             self.output_draft = {}  # step-8 input not yet confirmed
             self.input_paths = set()  # loaded input files: never an output
+            self.last_run_signature = None  # what step 9 produced last time
+            self.last_group_name = None
             self.download_feedback = None  # QgsFeedback of a running OSM download
 
             # The whole plugin shares one style (theme.py), with the bundled
@@ -1385,6 +1426,19 @@ def _create_dock(plugin):
                 f"{crs.authid()} rechnet in Grad. Für den Puffer in Metern bitte ein "
                 "metrisches CRS wählen, z. B. EPSG:25832."
             )
+        project = QgsProject.instance()
+        if project.crs().isValid() and project.crs() != crs:
+            # different CRS in QGIS and plugin can cause display problems
+            box = QMessageBox(dock)
+            box.setWindowTitle("Koordinatensystem")
+            box.setIcon(QMessageBox.Warning)
+            box.setText(crs_mismatch_text(project.crs().authid(), crs.authid()))
+            go_on = box.addButton("Fortfahren und Projekt umstellen", QMessageBox.AcceptRole)
+            box.addButton("CRS noch ändern", QMessageBox.RejectRole)
+            box.exec_() if hasattr(box, "exec_") else box.exec()
+            if box.clickedButton() is not go_on:
+                return False
+            project.setCrs(crs)
         dock.settings["project_crs"] = crs.authid()
         return True
 
@@ -1834,8 +1888,18 @@ def _create_dock(plugin):
         settings = dict(dock.settings)
         dock.input_paths.add(Path(path))  # protected from being overwritten in step 8
         dock.set_busy(f"Lade „{path.name}“ … Das kann bei großen Dateien etwas dauern.")
+        project_crs = QgsCoordinateReferenceSystem(settings["project_crs"])
+        context = QgsProject.instance().transformContext()
+        converted = {"path": None, "layers": []}  # copy in the project CRS, if needed
 
         def run_import(task):
+            # Layers in another CRS: convert a copy first (originals stay as they are)
+            used, changed = ensure_project_crs(
+                path, project_crs, context, Path(tempfile.gettempdir()) / "urban_analysis")
+            if changed:
+                converted.update(path=used, layers=changed)
+            if task.isCanceled():
+                raise ImportCanceled()
             importer = GeoPackageImporter()
             options = {}
             if pipeline_reports_progress(importer):
@@ -1845,7 +1909,7 @@ def _create_dock(plugin):
             if task.isCanceled():
                 raise ImportCanceled()
             return importer.import_file(
-                path,
+                used,
                 project_crs=settings["project_crs"],
                 study_area_wkt=settings["study_area_wkt"],
                 buffer_meters=settings["buffer_meters"],
@@ -1864,7 +1928,9 @@ def _create_dock(plugin):
                     return
                 if exception is not None:
                     dock.clear_busy("error")
-                    if isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
+                    if isinstance(exception, DownloadError):
+                        dock.show_message(str(exception))
+                    elif isinstance(exception, (GeoPackageImportError, ValueError, OSError)):
                         dock.show_message(import_error_text(path.name, exception, path))
                     else:
                         dock.show_unexpected_error(UI_LABELS["load_data"], exception)
@@ -1876,11 +1942,14 @@ def _create_dock(plugin):
                 dock.clear_busy("done")
                 plugin.start_workflow(result)
                 dock.show_page(3)
-                dock.show_message(
-                    f"„{path.name}“ geladen: {len(result.layers)} Layer. "
-                    "Bitte die Prüfhinweise ansehen.",
-                    kind="info",
-                )
+                text = (f"„{path.name}“ geladen: {len(result.layers)} Layer. "
+                        "Bitte die Prüfhinweise ansehen.")
+                if converted["path"] is not None:
+                    dock.input_paths.add(Path(converted["path"]))
+                    text += (f"\n{len(converted['layers'])} Layer lagen in einem anderen CRS und "
+                             f"wurden als Kopie nach {settings['project_crs']} umgerechnet "
+                             f"({Path(converted['path']).name}); die Originaldatei ist unverändert.")
+                dock.show_message(text, kind="info")
             except Exception as error:  # show every program error visibly
                 dock.show_unexpected_error(UI_LABELS["load_data"], error)
 
@@ -1929,7 +1998,7 @@ def _create_dock(plugin):
             step6.setWordWrap(True)
             set_role(step6, "hint")
             card_layout.addWidget(step6)
-        extra = [part for part in (more, f"Regel: {issue.rule}" if issue.rule else "") if part]
+        extra = [more] if more else []  # rules stay internal (not shown to users)
         if extra:
             # short summary first; the explanation folds out on demand (W13)
             more_label = QLabel("\n\n".join(extra))
@@ -2293,11 +2362,7 @@ def _create_dock(plugin):
         draft.setdefault("geopackage", output.save_cleaned_geopackage)
         draft.setdefault("pdf", output.create_pdf)
         draft.setdefault("source", output.data_source)
-        layers = QCheckBox("Ergebnis-Layer in QGIS anlegen")
-        layers.setChecked(True)
-        layers.setEnabled(False)  # always (contract: QGIS layers are mandatory)
-        page.layout.addWidget(layers)
-
+        # QGIS result layers are always created (contract); no greyed-out box
         def labelled_combo(label, items, key, default):
             """Small 'Label + choice list' block; the choice is kept in the draft."""
             box = QWidget()
@@ -2340,8 +2405,9 @@ def _create_dock(plugin):
             labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
             labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
             labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3"),
-            labelled_combo("Ausrichtung", [("quer", "Querformat"), ("hoch", "Hochformat")],
-                           "pdf_orientation", "quer"),
+            labelled_combo("Ausrichtung", [("auto", "Automatisch (passend zum Gebiet)"),
+                                           ("quer", "Querformat"), ("hoch", "Hochformat")],
+                           "pdf_orientation", "auto"),
             labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
             north,
         )
@@ -2416,8 +2482,11 @@ def _create_dock(plugin):
                 result_rows(dock.last_reports,
                             {d.layer_id: d.category for d in flow.result.layers})))
             if dock.last_saved:
-                page.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
-            hint = QLabel(done_hint_text(result_group_name(flow.result.selected_topic)))
+                # folded: the long file paths would take much room
+                files = collapsible(page, "saved_files", f"Gespeicherte Dateien ({len(dock.last_saved)})")
+                files.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
+            hint = QLabel(done_hint_text(
+                dock.last_group_name or result_group_name(flow.result.selected_topic)))
             hint.setWordWrap(True)
             set_role(hint, "hint")
             page.layout.addWidget(hint)
@@ -2448,6 +2517,13 @@ def _create_dock(plugin):
             confirmed=dock.output_confirmed, input_paths=dock.input_paths)
         if problem:
             return reject(problem + " (Schritt 8)")
+        signature = run_signature(flow, dock.output_draft, dock.output_paths)
+        if signature == dock.last_run_signature:
+            answer = QMessageBox.question(
+                dock, "Erneut verarbeiten", SAME_RUN_QUESTION,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return False
         try:
             # Current decisions of step 5 (and step 6) on the data (S5),
             # then the data source into empty 'source' fields (S8).
@@ -2471,9 +2547,11 @@ def _create_dock(plugin):
             layer_objects = dict(sorted(
                 layer_objects.items(),
                 key=lambda item: -draw_rank(categories.get(item[0]))))
-            add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
+            group = add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
+            dock.last_group_name = group.name()
         finally:
             QApplication.restoreOverrideCursor()
+        dock.last_run_signature = signature
         plugin.result_layers = layer_objects
         saved, failures = save_outputs(flow, selected, layer_objects)
         # Switch the page to "Fertig" with the list of created layers.
@@ -2516,7 +2594,7 @@ def _create_dock(plugin):
                     subtitle=draft.get("pdf_subtitle", ""),
                     data_source=output.data_source,
                     page=draft.get("pdf_page", "A3"),
-                    orientation=draft.get("pdf_orientation", "quer"),
+                    orientation=draft.get("pdf_orientation", "auto"),
                     scale=draft.get("pdf_scale") or None,
                     north_arrow=draft.get("pdf_north", True))
 

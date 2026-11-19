@@ -175,6 +175,56 @@ def convert_to_geopackage(raw_path, gpkg_path, project_crs, transform_context):
     return written
 
 
+def reprojected_name(path, crs_authid):
+    """'daten.gpkg' -> 'daten_EPSG25832.gpkg' (copy in the project CRS)."""
+    path = Path(path)
+    return f"{path.stem}_{crs_authid.replace(':', '')}.gpkg"
+
+
+def ensure_project_crs(path, project_crs, transform_context, folder):
+    """Return ``(path, changed_layers)``: the file itself if all layers are in
+    ``project_crs``, else a new GeoPackage in ``folder`` with every layer
+    converted.  The original file is never changed."""
+    from osgeo import ogr
+    from qgis.core import QgsCoordinateTransform, QgsVectorFileWriter, QgsVectorLayer
+
+    source = ogr.Open(str(path))
+    if source is None:
+        return Path(path), []  # the pipeline reports unreadable files itself
+    names = [source.GetLayer(i).GetName() for i in range(source.GetLayerCount())]
+    source = None
+    layers = [(name, QgsVectorLayer(f"{path}|layername={name}", name, "ogr")) for name in names]
+    changed = [name for name, layer in layers
+               if layer.isValid() and layer.crs().isValid() and layer.crs() != project_crs]
+    if not changed:
+        return Path(path), []
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    target = unique_path(folder, reprojected_name(path, project_crs.authid()))
+    first = True
+    for name, layer in layers:
+        if not layer.isValid():
+            continue
+        options = QgsVectorFileWriter.SaveVectorOptions()
+        options.driverName = "GPKG"
+        options.fileEncoding = "UTF-8"
+        options.layerName = name
+        if name in changed:
+            options.ct = QgsCoordinateTransform(layer.crs(), project_crs, transform_context)
+        options.actionOnExistingFile = (
+            QgsVectorFileWriter.CreateOrOverwriteFile if first
+            else QgsVectorFileWriter.CreateOrOverwriteLayer
+        )
+        result = QgsVectorFileWriter.writeAsVectorFormatV3(
+            layer, str(target), transform_context, options)
+        if result[0] != QgsVectorFileWriter.NoError:
+            raise DownloadError(
+                f"Die Datei konnte nicht ins Projekt-KBS umgerechnet werden (Layer „{name}“: "
+                f"{result[1]}).\nWas tun: freien Speicherplatz prüfen und erneut laden."
+            )
+        first = False
+    return target, changed
+
+
 def run_download(request, folder, project_crs, transform_context, feedback,
                  is_canceled, report, progress):
     """Whole download for one OSM job (runs inside a QgsTask).

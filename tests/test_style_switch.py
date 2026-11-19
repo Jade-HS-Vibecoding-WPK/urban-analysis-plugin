@@ -47,7 +47,7 @@ def test_classic_looks_like_qgis_blue_accent_soft_corners_visible_boxes():
     assert style_colors("classic") is CLASSIC_COLORS and style_colors("pixel") is COLORS
     assert CLASSIC_COLORS["background"] in _rule(css, "QWidget")
     assert "font-family" not in css  # QGIS font
-    assert "QRadioButton::indicator" not in css  # native radio buttons
+    assert CLASSIC_COLORS["accent"] in _rule(css, "QRadioButton::indicator:checked")  # visible choices
     # own check boxes: visible frame, ticked in the accent colour, smooth check
     assert CLASSIC_COLORS["border_strong"] in _rule(css, "QCheckBox::indicator")
     checked = _rule(css, "QCheckBox::indicator:checked")

@@ -51,6 +51,31 @@ def test_page_sizes_and_frames():
     assert frames["panel"][1] > frames["map"][1] + frames["map"][3]  # panel below
 
 
+def test_pdf_orientation_follows_the_area():
+    from urban_analysis.outputs import auto_orientation
+
+    assert auto_orientation(3000, 2000) == "quer"
+    assert auto_orientation(1500, 2600) == "hoch"
+
+
+def test_every_run_gets_its_own_group():
+    from urban_analysis.outputs import run_group_name
+
+    base = "Urban Analysis – Siedlungsstruktur"
+    assert run_group_name(base, set(), "10:42") == base
+    assert run_group_name(base, {base}, "10:42") == f"{base} (10:42)"
+    assert run_group_name(base, {base, f"{base} (10:42)"}, "10:42") == f"{base} (10:42, 2)"
+
+
+def test_crs_warning_and_copy_name():
+    from urban_analysis.guided_dialog import crs_mismatch_text
+    from urban_analysis.osm_download import reprojected_name
+
+    text = crs_mismatch_text("EPSG:3857", "EPSG:25832")
+    assert "EPSG:3857" in text and "EPSG:25832" in text and "unverändert" in text
+    assert reprojected_name("C:/x/daten.gpkg", "EPSG:25832") == "daten_EPSG25832.gpkg"
+
+
 def test_scale_and_sources_texts():
     assert scale_label(None) == "passend zum Gebiet"
     assert scale_label(5000) == "1:5.000"

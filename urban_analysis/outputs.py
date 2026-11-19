@@ -231,27 +231,38 @@ def _set_field_aliases(layer, specs) -> None:
             pass
 
 
+def time_text():
+    from datetime import datetime
+
+    return datetime.now().strftime("%H:%M")
+
+
+def run_group_name(base, existing_names, time):
+    """'Urban Analysis – Thema' for the first run, then with the time
+    ('… (10:42)') and, if needed, a number, so no group is replaced."""
+    if base not in existing_names:
+        return base
+    name = f"{base} ({time})"
+    number = 2
+    while name in existing_names:
+        name = f"{base} ({time}, {number})"
+        number += 1
+    return name
+
+
 def add_result_layers(layer_objects: Mapping[str, object], group_name: str, project=None):
     """Put the result layers into their own group at the top of the layer tree.
 
-    A group created earlier by the plugin (and only its layers) is replaced,
-    so starting the processing again does not duplicate results.
+    Every run gets a new group (with the time in its name from the second
+    run on); earlier results are kept.  Returns the group.
     """
     from qgis.core import QgsProject
 
     project = project or QgsProject.instance()
     root = project.layerTreeRoot()
-    for group in list(root.findGroups()):
-        if group.customProperty(RESULT_GROUP_PROPERTY):
-            layer_ids = [
-                node.layerId()
-                for node in group.findLayers()
-                if node.layer() is not None
-                and node.layer().customProperty(RESULT_LAYER_PROPERTY)
-            ]
-            root.removeChildNode(group)
-            if layer_ids:
-                project.removeMapLayers(layer_ids)
+    # Every run gets its own group; earlier results stay for comparison.
+    existing = {group.name() for group in root.findGroups()}
+    group_name = run_group_name(group_name, existing, time_text())
     group = root.insertGroup(0, group_name)
     group.setCustomProperty(RESULT_GROUP_PROPERTY, True)
     for layer in layer_objects.values():
@@ -336,6 +347,11 @@ PAGE_SIZES_MM = {"A4": (210, 297), "A3": (297, 420), "A2": (420, 594),
 SCALES = (None, 1000, 2500, 5000, 10000, 25000)  # None = fits the area
 
 
+def auto_orientation(width, height):
+    """'quer' for wide areas, 'hoch' for tall ones (PDF format, map shape)."""
+    return "quer" if width >= height else "hoch"
+
+
 def page_size_mm(page="A4", orientation="quer"):
     """(width, height) in mm; 'quer' = landscape."""
     short, long_ = PAGE_SIZES_MM.get(page, PAGE_SIZES_MM["A4"])
@@ -395,13 +411,15 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
 
     project = project or QgsProject.instance()
     day = day or _date.today()
-    width, height = page_size_mm(page, orientation)
-    frames = layout_frames(width, height, orientation)
-    factor = (width * height / (297 * 210)) ** 0.5  # font size grows with the page
-
     area = QgsGeometry.fromWkt(study_area_wkt or "")
     if area is None or area.isEmpty():
         raise ValueError("Für das PDF fehlt das Untersuchungsgebiet (Schritt 2).")
+    if orientation not in ("quer", "hoch"):  # 'auto': follow the shape of the area
+        box = area.boundingBox()
+        orientation = auto_orientation(box.width(), box.height())
+    width, height = page_size_mm(page, orientation)
+    frames = layout_frames(width, height, orientation)  # legend right (quer) or below (hoch)
+    factor = (width * height / (297 * 210)) ** 0.5  # font size grows with the page
 
     def outline_layer(geometry, name, style):
         layer = QgsVectorLayer(f"Polygon?crs={crs_authid}", name, "memory")
@@ -471,6 +489,7 @@ def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
     legend._root = root  # keep the tree alive while the layout lives
     legend.setLinkedMap(map_item)
     legend.setResizeToContents(False)
+    legend.setReferencePoint(QgsLayoutItemLegend.UpperLeft)  # starts at the top, not centred
     bottom_reserved = 42 * factor
     place(legend, px, y, pw, max(20.0, py + ph - y - bottom_reserved))
 
