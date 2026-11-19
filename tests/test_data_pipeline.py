@@ -1372,3 +1372,95 @@ def test_used_sources_lists_only_sources_with_objects(tmp_path):
 
     only_osm = [record for record in result.harmonized_records if record.source_kind == "OSM"]
     assert [item.source_kind for item in used_sources(sources, only_osm)] == ["OSM"]
+
+
+# --- Quellen zusammenführen (QGIS-Test 19.11.: „Gebäude (ALKIS)“ + „Gebäude (OSM)“) ---
+
+from urban_analysis.contracts import LayerDescriptor  # noqa: E402
+from urban_analysis.data_pipeline import HarmonizedRecord, combine_source_layers  # noqa: E402
+
+
+def test_import_sources_fills_source_from_attribution(tmp_path):
+    _, result = import_two(tmp_path)
+
+    by_kind = {record.source_kind: record for record in result.harmonized_records}
+    assert by_kind["OSM"].attributes["source"] == "© OpenStreetMap-Mitwirkende"
+    assert by_kind["OSM"].pipeline_attributes["source"] == "© OpenStreetMap-Mitwirkende"
+    assert by_kind["Eigene Datei"].attributes["source"] is None
+    # "Datenquelle fehlt" only for the source without attribution
+    missing = [issue.message for issue in result.issues if issue.code == "missing-data-source"]
+    assert len(missing) == 1 and missing[0].startswith("Kartierung – ")
+
+    # step 5 rebuilds the fields from pipeline_attributes: the source stays
+    rebuilt = apply_attribute_decisions(result)
+    assert {record.attributes["source"] for record in rebuilt if record.source_kind == "OSM"} == {
+        "© OpenStreetMap-Mitwirkende"
+    }
+
+
+def test_wfs_technical_columns_do_not_count_for_duplicates(tmp_path):
+    path = tmp_path / "wfs.gpkg"
+    make_geopackage(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE buildings ADD COLUMN gml_id TEXT")
+        connection.execute("ALTER TABLE buildings ADD COLUMN identifier TEXT")
+        connection.execute("UPDATE buildings SET gml_id = 'g' || fid, identifier = 'urn:' || fid")
+
+    result = GeoPackageImporter().import_file(
+        path, project_crs="EPSG:25832", study_area_wkt=AREA
+    )
+
+    # same object delivered twice by the WFS (only gml_id/identifier differ)
+    assert len(result.harmonized_records) == 1
+    codes = {issue.code for issue in result.issues}
+    assert "duplicate-row" in codes and "uncertain-duplicate" not in codes
+
+
+def descriptor(layer_id, kind, category="Gebäude", geometry="POLYGON", selected=True):
+    return LayerDescriptor(
+        layer_id=layer_id, name=layer_id, geometry_type=geometry, source_name=f"{kind}.gpkg",
+        category=category, selected_for_topic=selected, source_kind=kind,
+    )
+
+
+def harmonized(layer_id, kind, row=1):
+    return HarmonizedRecord(layer_id=layer_id, source_row_id=row, attributes={}, source_kind=kind)
+
+
+def test_combine_source_layers_gives_one_layer_per_category_and_geometry():
+    layers = [
+        descriptor("gebaeude_alkis", "ALKIS"),
+        descriptor("multipolygons_gebaeude", "OSM", selected=False),
+        descriptor("strassen_alkis", "ALKIS", category="Straßen"),
+        descriptor("lines_strassen", "OSM", category="Straßen", geometry="LINESTRING"),
+        descriptor("points", "OSM", category=None, geometry="POINT"),
+    ]
+    records = [
+        harmonized("gebaeude_alkis", "ALKIS"),
+        harmonized("multipolygons_gebaeude", "OSM"),
+        harmonized("lines_strassen", "OSM"),
+    ]
+
+    combined, moved = combine_source_layers(layers, records)
+
+    assert [layer.layer_id for layer in combined] == [
+        "gebaeude_flaechen_quellen", "strassen_alkis", "lines_strassen", "points"
+    ]
+    building = combined[0]
+    assert building.name == "Gebäude" and building.source_kind == ""
+    assert building.source_name == "ALKIS.gpkg, OSM.gpkg"
+    assert building.selected_for_topic  # one part was selected
+    assert [(record.layer_id, record.source_kind) for record in moved] == [
+        ("gebaeude_flaechen_quellen", "ALKIS"),
+        ("gebaeude_flaechen_quellen", "OSM"),
+        ("lines_strassen", "OSM"),  # streets as lines and as areas stay apart
+    ]
+    # the input is not changed
+    assert layers[0].layer_id == "gebaeude_alkis" and records[1].layer_id == "multipolygons_gebaeude"
+
+
+def test_combine_source_layers_keeps_layers_of_one_source_apart():
+    layers = [descriptor("gebaeude", "OSM"), descriptor("gebaeude_2", "OSM")]
+    records = [harmonized("gebaeude", "OSM"), harmonized("gebaeude_2", "OSM")]
+
+    assert combine_source_layers(layers, records) == (layers, records)
