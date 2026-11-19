@@ -24,6 +24,7 @@ from urban_analysis.topics import (
     parse_rule,
     record_values,
     topic_catalog,
+    topic_categories,
 )
 from urban_analysis.ui_contract import TOPIC_NAMES
 
@@ -130,6 +131,39 @@ def test_catalog_with_unknown_topic_id_is_refused(tmp_path):
 def test_unreadable_rule_is_refused():
     with pytest.raises(ValueError, match="nicht lesbar"):
         parse_rule("building")
+
+
+# --- pre-selected layer categories in step 7 --------------------------------
+
+
+def known_categories():
+    from urban_analysis.mapping import RULES_FILE
+
+    rules = json.loads(RULES_FILE.read_text(encoding="utf-8"))
+    found = set()
+    for profile in rules["profiles"]:
+        for layer in profile["layers"].values():
+            found.add(layer.get("category"))
+            found.update(rule["category"] for rule in layer.get("category_rules", ()))
+            found.add((layer.get("default_rule") or {}).get("category"))
+    return found - {None}
+
+
+def test_every_topic_preselects_known_categories_with_buildings_and_streets():
+    known = known_categories()
+    for topic_id in TOPIC_NAMES:
+        categories = topic_categories(topic_id)
+        assert {"Gebäude", "Straßen"} <= set(categories), topic_id
+        assert set(categories) <= known, (topic_id, set(categories) - known)
+        assert len(categories) == len(set(categories))
+
+
+def test_topic_categories_by_id_or_name():
+    by_id = topic_categories("mobilitaet")
+    assert by_id == topic_categories(TOPIC_NAMES["mobilitaet"])
+    assert "ÖPNV-Haltestellen" in by_id and "Grünflächen" not in by_id
+    with pytest.raises(ValueError, match="Unbekanntes Thema"):
+        topic_categories("erfunden")
 
 
 # --- rules and values -------------------------------------------------------

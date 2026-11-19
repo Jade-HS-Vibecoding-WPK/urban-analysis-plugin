@@ -151,6 +151,21 @@ def topic_catalog(path: Optional[Path] = None) -> List[TopicInfo]:
     return [topic.info for topic in _read_topics(path)]
 
 
+def topic_categories(topic: str, path: Optional[Path] = None) -> Tuple[str, ...]:
+    """Layer categories pre-ticked in step 7 for ``topic`` (its id, e.g.
+    ``"mobilitaet"``, or its name from ``TOPIC_NAMES``), in catalog order.
+
+    Only a suggestion; the user can tick or untick any category.  Raises
+    ValueError for an unknown topic.
+    """
+    by_name = {name: topic_id for topic_id, name in TOPIC_NAMES.items()}
+    topic_id = by_name.get(topic, topic)
+    for entry in load_catalog(path).get("themen", []):
+        if entry.get("id") == topic_id:
+            return tuple(str(category) for category in entry.get("kategorien", ()))
+    raise ValueError(f"Unbekanntes Thema: {topic}")
+
+
 def _text(value: Any) -> str:
     if value is None:
         return ""

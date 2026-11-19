@@ -1870,7 +1870,7 @@ def _layer_column_plan(
         elif decision.action == COLUMN_TARGET:
             if decision.target_field in targets.values():
                 raise ValueError(
-                    f"Das Kernfeld „{decision.target_field}“ ist zweimal zugeordnet. "
+                    f"Die essentielle Spalte „{decision.target_field}“ ist zweimal zugeordnet. "
                     "Bitte nur eine Spalte wählen."
                 )
             # The pipeline already filled its own suggestion (with profile
