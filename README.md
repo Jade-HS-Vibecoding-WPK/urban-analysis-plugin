@@ -59,6 +59,20 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
 - **PDF-Karte** mit Legende, Nordpfeil, Maßstab und Quellen.
 - **GeoPackage** mit allen Ergebnis-Layern.
 
+### Zwei Oberflächen-Stile
+
+Über das Paletten-Symbol im Plugin-Fenster lässt sich jederzeit wechseln:
+
+- **Klassisch** – hell und neutral wie QGIS selbst, mit blauem Akzent, QGIS-Schrift und
+  gewohnten Bedienelementen. Oben zeigen Schrittpunkte und ein Ladebalken, wo du stehst.
+- **Pixel** – verspielt, mit Einflüssen aus Spielen (Gamification): pastellige
+  Pixel-Landschaft, ein angelnder Hase zieht beim Laden den Fortschritt heran, ein Fisch
+  schwimmt zum aktuellen Schritt und beißt an, wenn etwas fertig ist. Alle Figuren sind
+  selbst gezeichnet.
+
+Beide Stile bieten dieselben Funktionen; der Kartenstil der Ergebnisse ist davon
+unabhängig.
+
 ### In Arbeit
 
 - **Kartenthemen:** sieben allgemeine Themen für Bestandsanalysen – Bebauung &
@@ -143,6 +157,19 @@ veröffentlichen.**
   Wartungszeiten. Das Plugin meldet das; eine eigene Datei ist dann der Ausweg.
 - **Keine Umprojektion im Hintergrund.** Passt das Koordinatensystem einer Quelle nicht,
   wird das angezeigt statt still umgerechnet.
+
+---
+
+## Hinweis zur KI-Nutzung
+
+Das Plugin ist in einem Kurs zum Programmieren mit KI entstanden. Code, Tests und Texte
+wurden zu großen Teilen mit KI-Programmierassistenten (Claude Code, GitHub Copilot)
+geschrieben – nach den Vorgaben des Teams. Fachliche Entscheidungen (was das Plugin
+können soll, welche Daten wie behandelt werden) hat das Team getroffen; jede Änderung
+wurde mit automatischen Tests und von Hand in QGIS geprüft.
+
+Das Plugin selbst nutzt **keine KI** und sendet keine Daten an KI-Dienste. Es fragt nur
+die genannten Datendienste ab (OpenStreetMap, ALKIS der Länder).
 
 ---
 
