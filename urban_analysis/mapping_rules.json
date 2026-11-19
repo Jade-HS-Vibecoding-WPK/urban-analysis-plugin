@@ -170,6 +170,24 @@
     "heritage": "Denkmalschutz"
   },
 
+  "erreichbarkeit": {
+    "_hinweis": "Erreichbarkeit Stufe 1, Luftlinie (E26, E34). Gemessen wird vom Mittelpunkt jedes Objekts der Ausgangs-Kategorien zum nächsten gewählten Ziel. Radien in Metern.",
+    "radien_m": [300, 500],
+    "ausgang_kategorien": ["Gebäude"],
+    "ziel_kategorien": ["Gesundheit", "Nahversorgung", "Bildung und Betreuung", "Freizeit und Grün", "ÖPNV-Haltestellen"],
+    "_hinweis_flaechen_als_ziele": "Flächen, die als Ziel zählen (über ihren Mittelpunkt): Objektart der Fläche → [Ziel-Kategorie, Unterart]. Viele Krankenhäuser, Schulen oder Parks sind in OSM nur als Fläche eingetragen.",
+    "flaechen_als_ziele": {
+      "Krankenhausgelände": ["Gesundheit", "Krankenhaus"],
+      "Schulgelände": ["Bildung und Betreuung", "Schule"],
+      "Kita": ["Bildung und Betreuung", "Kita"],
+      "Hochschulgelände": ["Bildung und Betreuung", "Hochschule"],
+      "Park": ["Freizeit und Grün", "Park"],
+      "Spielplatz": ["Freizeit und Grün", "Spielplatz"],
+      "Sportplatz": ["Freizeit und Grün", "Sportplatz"],
+      "Sportanlage": ["Freizeit und Grün", "Sportanlage"]
+    }
+  },
+
   "profiles": [
     {
       "name": "ALKIS",

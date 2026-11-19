@@ -536,3 +536,42 @@ def within_distance(feature: Geometry, area: Geometry, max_distance: float) -> b
     if not bboxes_within(feature_bbox, area_bbox, max_distance):
         return False
     return distance(feature, area, stop_at=max_distance) <= max_distance
+
+
+def _ring_centroid(ring: Ring) -> Tuple[Optional[Point], float]:
+    """Centroid and (absolute) area of a closed ring (shoelace formula)."""
+    area = cx = cy = 0.0
+    for (x1, y1), (x2, y2) in zip(ring, ring[1:]):
+        cross = x1 * y2 - x2 * y1
+        area += cross
+        cx += (x1 + x2) * cross
+        cy += (y1 + y2) * cross
+    if abs(area) < 1e-12:
+        return None, 0.0
+    return (cx / (3.0 * area), cy / (3.0 * area)), abs(area) / 2.0
+
+
+def representative_point(geometry: Geometry) -> Optional[Point]:
+    """One point for distance measures (accessibility, E26).
+
+    A point stays itself; for areas the centroid of the largest outer ring;
+    otherwise (lines, degenerate areas) the mean of all vertices.
+    """
+    if geometry.points:
+        return geometry.points[0]
+    best: Optional[Point] = None
+    best_area = 0.0
+    for polygon in geometry.polygons:
+        if polygon:
+            centroid, area = _ring_centroid(polygon[0])
+            if centroid is not None and area > best_area:
+                best, best_area = centroid, area
+    if best is not None:
+        return best
+    vertices = list(geometry.vertices())
+    if not vertices:
+        return None
+    return (
+        sum(x for x, _ in vertices) / len(vertices),
+        sum(y for _, y in vertices) / len(vertices),
+    )

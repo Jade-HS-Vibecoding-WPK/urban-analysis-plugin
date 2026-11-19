@@ -304,13 +304,58 @@ Notlösung, nie still: ein Info-Hinweis sagt es. Branch
   die Dateitabelle von `CLAUDE.md` (Person Mac).
 - Tests: `tests/test_osm_cache.py` (7).
 
+## F7 / M20 – Erreichbarkeit Stufe 1: Luftlinie (19.11.2026)
+
+Setzt E26 (Stufe 1) und E34 um. Branch `feature/pipeline-erreichbarkeit`
+liegt auf dem Cache-Branch (Kette F1 → F3 → F6 → Cache → F7).
+
+- **Neu `urban_analysis/accessibility.py`** (QGIS-frei):
+  - `target_choices(records)` → was im Gebiet als Ziel vorkommt, je
+    Kategorie mit Unterarten und Anzahl, z. B. `{"Nahversorgung":
+    [("Bäckerei", 20), ("Supermarkt", 11), …]}` – für die Auswahl in W16.
+  - `TargetChoice(category, subtypes)` – Kategorie, optional Unterarten.
+  - `add_air_distance(records, choice)` → je Gebäude in
+    `extra_attributes`: „Abstand Supermarkt (m)“ (ganze Meter) und
+    „Supermarkt bis 300 m“ / „… bis 500 m“ = „ja“/„nein“; dazu ein
+    Info-Hinweis „Erreichbarkeit „Supermarkt“ (Luftlinie): 32 % höchstens
+    300 m; 57 % höchstens 500 m vom nächsten Ziel entfernt.“ Mehrfach
+    aufrufbar (eine Wahl je Aufruf, Spaltennamen trennen sie).
+  - `target_records(records, choice)` → die Ziel-Objekte, z. B. für die
+    Radien-Kreise in QGIS.
+  - Warnung statt stiller Lücke, wenn es keine Ziele oder keine Gebäude
+    gibt; Fehler, wenn die Koordinaten in Grad statt Metern sind.
+- **Gemessen** vom Mittelpunkt des Gebäudes (`representative_point` in
+  `geometry.py`) zum nächsten Ziel. **Flächen als Ziele** über ihren
+  Mittelpunkt (`flaechen_als_ziele`): Krankenhausgelände → Gesundheit /
+  Krankenhaus, Schulgelände, Kita, Hochschulgelände, Park, Spielplatz,
+  Sportplatz, Sportanlage. Viele davon sind in OSM nur als Fläche drin.
+- **Einstellungen** in `mapping_rules.json` → `erreichbarkeit`: Radien
+  (300/500 m), Ausgangs-Kategorien (Gebäude), Ziel-Kategorien, Flächen als
+  Ziele.
+- **Live geprüft** mit den Cache-Daten Donnerschwee (nach UTM 32N
+  umgerechnet): ÖPNV 79 % ≤ 300 m, 98 % ≤ 500 m; Supermarkt 32 % / 57 %;
+  Krankenhaus 4 % / 13 %; Park oder Spielplatz 82 % / 97 %. Drei
+  Auswertungen über rund 2 600 Gebäude in 0,24 s.
+- **Grenzen:** Luftlinie, nicht Fußweg (Stufe 2 später). Ziele außerhalb
+  des geladenen Gebiets fehlen → am Rand zu große Abstände (steht im
+  Hinweis). Bei großen Parks zählt der Mittelpunkt, nicht der Eingang.
+  Supermärkte, die nur als Gebäude mit `shop=supermarket` eingetragen sind,
+  heißen heute „Einzelhandel“ und zählen noch nicht.
+- **Für Person Windows (W16):** Auswahl aus `target_choices` (Kategorie,
+  dann Häkchen bei Unterarten) → je Wahl `add_air_distance`; Ergebnis
+  wählbar: Radien als QGIS-Puffer um `target_records` und/oder Gebäude
+  nach „Abstand … (m)“ eingefärbt. Die neuen Spalten stehen in
+  `extra_attributes` und kommen mit W14 in die Attributtabelle.
+- Tests: `tests/test_accessibility.py` (8).
+
 ## Tests
 
 `.venv/bin/python -m pytest tests` (Python 3.9 im Projekt-venv; das
-System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 315 grün.
+System-`python3` hat ein kaputtes pytest). Stand 19.11.2026: 323 grün.
 
 ## Als Nächstes (Person Mac)
 
-Feature Freeze (`ARBEITSPLAN_DEUTSCHLANDWEIT.md` §6, Etappe F):
-F7 M20 Luftlinie.
-Danach: M10b, M18, M6, M12 Teil 2.
+Etappe F ist für Person Mac erledigt (F0, F1, F3, F6, F7 und E35). Offen:
+PRs nacheinander öffnen (F3, F6, Cache, F7 – jeweils nach dem Merge des
+vorherigen), gemeinsam G12 (Plan, E35, `CLAUDE.md`-Dateitabelle mit
+`osm_cache.py` und `accessibility.py`). Danach: M10b, M18, M6, M12 Teil 2.
