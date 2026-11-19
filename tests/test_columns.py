@@ -192,3 +192,24 @@ def test_osm_known_tags_become_columns_and_other_tags_is_not_loaded(tmp_path):
 
     line_columns = by_field(result.columns_of("lines"))
     assert line_columns["maxspeed"].readable_name == "Höchstgeschwindigkeit"
+
+
+def test_osm_object_id_column_is_reported_as_core_field_and_kept_intact(tmp_path):
+    """Step 5 must not replace "way/123" by the raw osm_id (empty for most
+    buildings): the profile's ID column is reported as filling Objekt-ID."""
+    path = tmp_path / "osm.gpkg"
+    make_osm_geopackage(path)
+    result = import_osm(path)
+
+    areas = by_field(result.columns_of("multipolygons"))
+    assert areas["osm_way_id"].suggested_target == "object_id"
+    assert areas["osm_id"].suggested_target == ""
+    assert by_field(result.columns_of("lines"))["osm_id"].suggested_target == "object_id"
+
+    before = {r.source_row_id: r.attributes["object_id"] for r in result.harmonized_records}
+    records = apply_column_decisions(
+        result.harmonized_records, result.columns, default_column_decisions(result.columns)
+    )
+    assert {r.source_row_id: r.attributes["object_id"] for r in records} == before
+    house = next(r for r in records if r.source_layer == "multipolygons" and r.source_row_id == 1)
+    assert house.attributes["object_id"] == "way/11"

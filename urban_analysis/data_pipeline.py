@@ -487,6 +487,15 @@ class GeoPackageImporter:
         suggested = {
             rule.source_field: rule for rule in field_rules if rule.target_field in CORE_FIELDS
         }
+        # OSM: the profile builds the object ID itself from several columns
+        # ("way/123" from osm_way_id, "relation/456" from osm_id).  The first
+        # of them is reported as already filling Objekt-ID, so step 5 does not
+        # put a single raw column there (which is empty for most buildings).
+        if profile is not None and profile.object_id_fields:
+            for id_field, _prefix in profile.object_id_fields:
+                if id_field in layer.fields:
+                    suggested.setdefault(id_field, MappingRule(id_field, "object_id", 1.0))
+                    break
         technical = {
             _normalized(name) for name in (layer.geometry_column, layer.primary_key) if name
         } | {"geom", "geometry", "thegeom", "wktgeom", "fid"}

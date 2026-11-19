@@ -73,21 +73,32 @@ def test_label_click_cycles_and_preview_order():
     assert counts_text(COLUMNS, values) == "1 Kernfelder · 1 behalten · 1 ignoriert"
 
 
-def test_better_preselection_id_and_empty_columns():
+def test_better_preselection_keeps_pipeline_ids_and_drops_empty_columns():
     from urban_analysis.guided_dialog import decision_from_value, preselect
 
     columns = [
-        ColumnInfo("points", "osm_id", "OSM-ID", True, ("1",)),
-        ColumnInfo("points", "barrier", "Absperrung (OSM)", True, ("bollard",)),
-        ColumnInfo("points", "name", "Name", False, ("Haaren",)),
+        ColumnInfo("multipolygons", "osm_id", "OSM-ID", True, ("1",)),
+        ColumnInfo("multipolygons", "osm_way_id", "OSM-Weg-ID", True, ("7",), "object_id", 1.0),
+        ColumnInfo("multipolygons", "barrier", "Absperrung (OSM)", True, ("bollard",)),
+        ColumnInfo("multipolygons", "name", "Name", False, ("Haaren",)),
+        ColumnInfo("multipolygons", "building_levels", "Geschosszahl (OSM)", True, ("3",)),
     ]
-    decisions = {(c.layer_id, c.source_field): decision_from_value(c, "keep") for c in columns[:2]}
-    decisions[("points", "name")] = decision_from_value(columns[2], "drop")
-    rates = {("points", "osm_id"): 1.0, ("points", "barrier"): 0.02, ("points", "name"): 0.05}
-    result = preselect(columns, decisions, rates)
-    assert decision_value(result[("points", "osm_id")]) == "target:object_id"
-    assert decision_value(result[("points", "barrier")]) == "drop"  # nearly empty
-    assert decision_value(result[("points", "name")]) == "keep"  # always kept
+    decisions = {
+        ("multipolygons", "osm_id"): decision_from_value(columns[0], "keep"),
+        ("multipolygons", "osm_way_id"): decision_from_value(columns[1], "target:object_id"),
+        ("multipolygons", "barrier"): decision_from_value(columns[2], "keep"),
+        ("multipolygons", "name"): decision_from_value(columns[3], "drop"),
+        ("multipolygons", "building_levels"): decision_from_value(columns[4], "keep"),
+    }
+    rates = {("multipolygons", "osm_id"): 0.01, ("multipolygons", "osm_way_id"): 1.0,
+             ("multipolygons", "barrier"): 0.02, ("multipolygons", "name"): 0.05,
+             ("multipolygons", "building_levels"): 0.01}
+    result = {k[1]: decision_value(v) for k, v in preselect(columns, decisions, rates).items()}
+    assert result["osm_way_id"] == "target:object_id"  # the pipeline's ID stays
+    assert result["osm_id"] == "drop"  # never turned into the Objekt-ID by the UI
+    assert result["barrier"] == "drop"  # nearly empty
+    assert result["name"] == "keep"  # always kept
+    assert result["building_levels"] == "keep"  # 'Geschosszahl (OSM)' starts with Geschosszahl
 
 
 def test_choice_values_round_trip():
