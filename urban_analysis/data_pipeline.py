@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .contracts import (
+    COLUMN_DROP,
+    COLUMN_KEEP,
+    COLUMN_TARGET,
+    CORE_FIELDS,
     AttributeSuggestion,
+    ColumnDecision,
+    ColumnInfo,
     LayerDescriptor,
     MVP_DEFAULT_BUFFER_METERS,
     PipelineResult,
@@ -106,6 +112,9 @@ class HarmonizedRecord:
     source_layer: Optional[str] = None
     source_attributes: Mapping[str, Any] = field(default_factory=dict)
     pipeline_attributes: Mapping[str, Any] = field(default_factory=dict)
+    # Source columns taken over with their readable name (E29, E30), in the
+    # order of the source, e.g. {"Hausnummer": "4a"}; see apply_column_decisions.
+    extra_attributes: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -361,6 +370,7 @@ class GeoPackageImporter:
 
         descriptors: List[LayerDescriptor] = []
         suggestions: List[AttributeSuggestion] = []
+        columns: List[ColumnInfo] = []
         records: List[HarmonizedRecord] = []
         layers_without_source: List[str] = []
         layers_without_category: List[str] = []
@@ -388,9 +398,14 @@ class GeoPackageImporter:
                         examples=_examples(layer.rows, rule.source_field),
                     )
                 )
+            layer_columns = self._column_infos(layer, profile, field_rules)
+            columns.extend(layer_columns)
+            if layer.rows:
+                self._report_columns_not_loaded(layer.table_name, layer_columns, issues)
             layer_records = self._harmonize(layer, file_path, category, issues, profile, field_rules, self.mapping_rules)
             records.extend(layer_records)
             descriptors.extend(self._layer_descriptors(layer, file_path, category, profile, layer_records))
+        records = apply_column_decisions(records, columns)
 
         if layers_without_category:
             issues.append(
@@ -399,12 +414,16 @@ class GeoPackageImporter:
                     message=(
                         f"{_names([self.mapping_rules.layer_name(name) for name in layers_without_category])}: "
                         + (
-                            "Für diesen Layer ist unklar, was er darstellt (z. B. Gebäude oder "
-                            "Grünflächen). Er wird geladen, steht beim Kartenthema aber nicht zur Auswahl."
+                            "Für diesen Layer ist unklar, was er darstellt. Er wird geladen, "
+                            "steht beim Kartenthema aber nicht zur Auswahl."
                             if len(layers_without_category) == 1
-                            else "Für diese Layer ist unklar, was sie darstellen (z. B. Gebäude oder "
-                            "Grünflächen). Sie werden geladen, stehen beim Kartenthema aber nicht zur Auswahl."
+                            else "Für diese Layer ist unklar, was sie darstellen. Sie werden geladen, "
+                            "stehen beim Kartenthema aber nicht zur Auswahl."
                         )
+                    ),
+                    details=(
+                        "Das Plugin erkennt am Namen des Layers, ob er Gebäude, Straßen, "
+                        "Grünflächen oder Nutzungsflächen zeigt. Bei diesem Namen klappt das nicht."
                     ),
                     severity="warning",
                     rule="Kategorie aus Layername",
@@ -443,6 +462,77 @@ class GeoPackageImporter:
             attribute_suggestions=suggestions,
             issues=issues,
             harmonized_records=records,
+            columns=columns,
+        )
+
+    def _column_infos(
+        self,
+        layer: GeoPackageLayer,
+        profile: Optional[LayerProfile],
+        field_rules: Sequence[MappingRule],
+    ) -> List[ColumnInfo]:
+        """One ``ColumnInfo`` per source column of ``layer`` (G11, E30).
+
+        Geometry and row number are left out.  For ALKIS and OSM (a profile
+        matched) a column is known if it is in the name list or the plugin
+        uses it for a core field; OSM's ``other_tags`` holds the tags the
+        plugin cannot read and is therefore not known.  Own files without a
+        profile keep every column: their columns were named by the user.
+        """
+        suggested = {
+            rule.source_field: rule for rule in field_rules if rule.target_field in CORE_FIELDS
+        }
+        technical = {
+            _normalized(name) for name in (layer.geometry_column, layer.primary_key) if name
+        } | {"geom", "geometry", "thegeom", "wktgeom", "fid"}
+        infos: List[ColumnInfo] = []
+        for source_field in layer.fields:
+            if _normalized(source_field) in technical:
+                continue
+            rule = suggested.get(source_field)
+            if profile is None or rule is not None:
+                known = True
+            else:
+                known = self.mapping_rules.knows_field(source_field) and source_field != profile.tags_field
+            infos.append(
+                ColumnInfo(
+                    layer_id=layer.table_name,
+                    source_field=source_field,
+                    readable_name=self.mapping_rules.field_name(source_field),
+                    known=known,
+                    examples=_examples(layer.rows, source_field, limit=3),
+                    suggested_target=rule.target_field if rule else "",
+                    confidence=rule.confidence if rule else 0.0,
+                )
+            )
+        return infos
+
+    def _report_columns_not_loaded(
+        self, table_name: str, columns: Sequence[ColumnInfo], issues: List[ValidationIssue]
+    ) -> None:
+        """Info hint naming the columns that are not taken over (E30)."""
+        unknown = [column.source_field for column in columns if not column.known]
+        if not unknown:
+            return
+        shown = unknown[:8] + (["…"] if len(unknown) > 8 else [])
+        number = "1 Spalte wird" if len(unknown) == 1 else f"{_count(len(unknown))} Spalten werden"
+        issues.append(
+            ValidationIssue(
+                code="columns-not-loaded",
+                message=(
+                    f"{self.mapping_rules.layer_name(table_name)}: {number} nicht übernommen, "
+                    f"weil das Plugin sie nicht lesen kann: {', '.join(shown)}."
+                ),
+                severity="info",
+                rule="Namensliste der Quelle",
+                details=(
+                    f"Nicht übernommen: {', '.join(unknown)}. "
+                    "Das Plugin übernimmt nur Spalten, für die es einen verständlichen Namen kennt. "
+                    "Du kannst die anderen in Schritt 5 unter „Nicht geladen (nicht lesbar)“ "
+                    "trotzdem dazuholen."
+                ),
+                layer_id=table_name,
+            )
         )
 
     @staticmethod
@@ -1021,8 +1111,13 @@ class GeoPackageImporter:
             ValidationIssue(
                 code="several-addresses",
                 message=(
-                    f"{display_name or layer.table_name}: {subject} mehrere Adressen "
-                    "(z. B. Eckhaus). Alle Adressen bleiben erhalten."
+                    f"{display_name or layer.table_name}: {subject} mehrere Adressen. "
+                    "Alle Adressen bleiben erhalten."
+                ),
+                details=(
+                    "Ein Eckhaus mit zwei Hausnummern steht in der Quelle zweimal mit gleicher "
+                    "Form. Das Plugin macht daraus ein Gebäude und schreibt beide Adressen "
+                    "hinein, getrennt mit „; “."
                 ),
                 severity="info",
                 rule="Gleiche Objekt-ID und Geometrie, nur Adresse verschieden",
@@ -1275,4 +1370,126 @@ def apply_attribute_decisions(
             attributes["object_detail"] = None
 
         updated.append(replace(record, attributes=attributes))
+    return updated
+
+
+def default_column_decisions(columns: Sequence[ColumnInfo]) -> List[ColumnDecision]:
+    """The preselection for step 5 (E30).
+
+    A column with a suggested core field goes there, a known column is kept
+    under its readable name, an unknown column is not loaded.
+    """
+    decisions = []
+    for column in columns:
+        if column.suggested_target in CORE_FIELDS:
+            decisions.append(
+                ColumnDecision(column.layer_id, column.source_field, COLUMN_TARGET, column.suggested_target)
+            )
+        elif column.known:
+            decisions.append(
+                ColumnDecision(
+                    column.layer_id,
+                    column.source_field,
+                    COLUMN_KEEP,
+                    name=column.readable_name or column.source_field,
+                )
+            )
+        else:
+            decisions.append(ColumnDecision(column.layer_id, column.source_field, COLUMN_DROP))
+    return decisions
+
+
+def _layer_column_plan(
+    layer_id: str,
+    layer_columns: Sequence[ColumnInfo],
+    decisions: Mapping[Tuple[str, str], ColumnDecision],
+) -> Tuple[List[Tuple[str, str]], Dict[str, str], List[str]]:
+    """Kept columns (source field, name), changed targets and cleared targets
+    of one layer.  Raises ``ValueError`` for a name or target chosen twice."""
+    kept: List[Tuple[str, str]] = []
+    targets: Dict[str, str] = {}
+    cleared: List[str] = []
+    names: Dict[str, str] = {}
+    for column in layer_columns:
+        decision = decisions.get((layer_id, column.source_field))
+        if decision is None:
+            continue
+        if decision.action == COLUMN_KEEP:
+            name = (decision.name or column.readable_name or column.source_field).strip()
+            if name.casefold() in names:
+                raise ValueError(
+                    f"Der Spaltenname „{name}“ ist zweimal vergeben ({names[name.casefold()]} und "
+                    f"{column.source_field}). Bitte einen anderen Namen wählen."
+                )
+            names[name.casefold()] = column.source_field
+            kept.append((column.source_field, name))
+        elif decision.action == COLUMN_TARGET:
+            if decision.target_field in targets.values():
+                raise ValueError(
+                    f"Das Kernfeld „{decision.target_field}“ ist zweimal zugeordnet. "
+                    "Bitte nur eine Spalte wählen."
+                )
+            # The pipeline already filled its own suggestion (with profile
+            # rules such as OSM ID prefixes); only a changed choice is applied.
+            if decision.target_field != column.suggested_target:
+                targets[column.source_field] = decision.target_field
+                if column.suggested_target:
+                    cleared.append(column.suggested_target)
+        elif column.suggested_target:
+            cleared.append(column.suggested_target)
+    chosen = set(targets.values())
+    return kept, targets, [target for target in cleared if target not in chosen]
+
+
+def apply_column_decisions(
+    records: Sequence[HarmonizedRecord],
+    columns: Sequence[ColumnInfo],
+    decisions: Optional[Sequence[ColumnDecision]] = None,
+) -> List[HarmonizedRecord]:
+    """Fill ``extra_attributes`` and core fields from the step-5 choices (E29, E30).
+
+    Without ``decisions`` the preselection (``default_column_decisions``) is
+    used; the importer does that, so a result always carries the known
+    columns.  Decisions are per input layer (``ColumnDecision.layer_id``);
+    columns without a decision are not loaded.
+
+    * ``"keep"``: the value goes into ``extra_attributes`` under ``name``.
+    * ``"target"``: a column that fills another core field than suggested
+      overwrites that field; the old suggestion is cleared.
+    * ``"drop"``: not taken over; if it was suggested for a core field, that
+      field becomes empty (the category keeps the layer's category).
+
+    Starts from ``pipeline_attributes`` for changed core fields only, so it
+    can be called again.  Call it after ``apply_attribute_decisions``.
+    Raises ``ValueError`` for a column name or core field chosen twice.
+    """
+    if decisions is None:
+        decisions = default_column_decisions(columns)
+    by_key = {(decision.layer_id, decision.source_field): decision for decision in decisions}
+    columns_by_layer: Dict[str, List[ColumnInfo]] = {}
+    for column in columns:
+        columns_by_layer.setdefault(column.layer_id, []).append(column)
+    plans = {
+        layer_id: _layer_column_plan(layer_id, layer_columns, by_key)
+        for layer_id, layer_columns in columns_by_layer.items()
+    }
+
+    updated: List[HarmonizedRecord] = []
+    for record in records:
+        table = record.source_layer or record.layer_id
+        if table not in plans:
+            updated.append(record)
+            continue
+        kept, targets, cleared = plans[table]
+        row = record.source_attributes
+        extra = {name: row.get(source_field) for source_field, name in kept}
+        attributes = dict(record.attributes)
+        for target in cleared:
+            if target == "category":
+                attributes[target] = (record.pipeline_attributes or record.attributes).get("category")
+            else:
+                attributes[target] = None
+        for source_field, target in targets.items():
+            attributes[target] = _coerce(target, row.get(source_field))
+        updated.append(replace(record, attributes=attributes, extra_attributes=extra))
     return updated

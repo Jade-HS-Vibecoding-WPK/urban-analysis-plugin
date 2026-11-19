@@ -391,7 +391,8 @@ def test_building_with_several_addresses_is_one_building(tmp_path):
     combined = next(issue for issue in result.issues if issue.code == "several-addresses")
     assert combined.severity == "info"
     assert not combined.requires_confirmation
-    assert combined.message == "Gebäude: 1 Gebäude hat mehrere Adressen (z. B. Eckhaus). Alle Adressen bleiben erhalten."
+    assert combined.message == "Gebäude: 1 Gebäude hat mehrere Adressen. Alle Adressen bleiben erhalten."
+    assert "Eckhaus" in combined.details
 
 
 def test_same_id_with_other_differences_is_not_combined(tmp_path):
@@ -1205,7 +1206,9 @@ def test_osm_areas_get_categories_and_readable_object_types(tmp_path):
         3: ("multipolygons_gruen", "Grünflächen", "Park"),
         4: ("multipolygons_flaechen", "Nutzungsflächen", "Wohnbaufläche"),
         5: ("multipolygons_wasser", "Wasserflächen", "Gewässer"),
-        6: ("multipolygons_sonstige", "Sonstige OSM-Flächen", None),
+        # "shop" is taken out of other_tags as a column (E30), so the
+        # bakery gets a readable object type; the category stays the same.
+        6: ("multipolygons_sonstige", "Sonstige OSM-Flächen", "Geschäft"),
         7: ("multipolygons_strassen", "Straßen", "Stellplatz"),
         8: ("multipolygons_gruen", "Grünflächen", "Hecke"),
         9: ("multipolygons_flaechen", "Nutzungsflächen", "Schulgelände"),
