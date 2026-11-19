@@ -795,13 +795,18 @@ def source_choice_problem(*, osm, alkis, state, own, path, download_km2, has_dat
 
 REVIEW_LATER_TITLE = "Wird in Schritt 6 entschieden"
 SOURCES_TITLE = "Gleiche Objekte aus mehreren Quellen"
+DUPLICATES_PART_INTRO = (
+    "Was tust du hier? Innerhalb eines Layers liegen manche Objekte doppelt. Du entscheidest "
+    "je Layer, ob sie zu einem Objekt zusammengeführt werden oder alle bleiben."
+)
 SOURCES_INTRO = (
-    "Manche Objekte gibt es in ALKIS und in OSM, z. B. dasselbe Gebäude. Wähle je "
-    "Kategorie, welche Quelle bleibt – die andere Fassung wird weggelassen. Objekte, "
-    "die es nur in einer Quelle gibt, bleiben immer erhalten."
+    "Was tust du hier? Manche Objekte gibt es in mehreren Quellen, z. B. dasselbe Gebäude "
+    "in ALKIS und in OSM. Wähle je Kategorie, welche Quelle bleibt – die andere Fassung "
+    "wird weggelassen. Objekte, die es nur in einer Quelle gibt, bleiben immer erhalten. "
+    "Mit „Weiter“ kommst du zur nächsten Kategorie."
 )
 UNCERTAIN_SOURCES_HINT = (
-    "Unsicher heißt: Die Flächen weichen um mehr als 20 % ab – es könnten auch "
+    "Unsicher heißt: Die Flächen weichen deutlich voneinander ab – es könnten auch "
     "verschiedene Objekte sein. Ohne Häkchen bleiben bei diesen Paaren beide erhalten."
 )
 
@@ -3161,16 +3166,73 @@ def _create_dock(plugin):
         return True
 
     # 6 Harmonisierung: decide per layer whether uncertain duplicates are merged
+    # Two parts one after the other: first the same objects from several
+    # sources (one category per view, 'Weiter'), then the uncertain duplicates.
+    def harmonize_state(flow):
+        """(phase, has_sources, has_duplicates); the phase is kept on the flow."""
+        has_sources = bool(getattr(flow, "source_matches", None))
+        has_dups = bool(flow.duplicate_layers())
+        phase = getattr(flow, "harmonize_phase", None)
+        if phase not in ("sources", "duplicates") or (phase == "sources" and not has_sources) \
+                or (phase == "duplicates" and not has_dups):
+            phase = "sources" if has_sources else "duplicates"
+        flow.harmonize_phase = phase
+        return phase, has_sources, has_dups
+
+    def source_count(flow):
+        from .source_matching import priority_choices
+
+        return len(priority_choices(getattr(flow, "source_matches", None) or []))
+
+    def harmonize_action(flow):
+        phase, _has_sources, has_dups = harmonize_state(flow)
+        if phase == "sources":
+            if getattr(flow, "source_index", 0) < source_count(flow) - 1:
+                return "Weiter"
+            if has_dups:
+                return "Weiter zu Teil 2"
+        return PAGE_ACTIONS[5]
+
+    def rebuild_step6():
+        dock._rebuild_current_page()
+        dock.primary_button.setText(harmonize_action(workflow()))
+
+    def part_heading(page, text, intro_text):
+        heading = QLabel(f"<b>{text}</b>")
+        heading.setWordWrap(True)
+        set_role(heading, "key")
+        page.layout.addWidget(heading)
+        intro = QLabel(intro_text)
+        intro.setWordWrap(True)
+        set_role(intro, "hint")
+        page.layout.addWidget(intro)
+
     def build_harmonization(page):
         flow = workflow()
-        has_sources = build_source_choice(page)
-        layers = flow.duplicate_layers()
-        if not layers:
-            if not has_sources:
-                none = QLabel(NO_DUPLICATES_TEXT)
-                none.setWordWrap(True)
-                page.layout.addWidget(none)
+        phase, has_sources, has_dups = harmonize_state(flow)
+        page.widgets["action_text"] = lambda: harmonize_action(flow)
+        if not has_sources and not has_dups:
+            none = QLabel(NO_DUPLICATES_TEXT)
+            none.setWordWrap(True)
+            page.layout.addWidget(none)
             return
+        both = has_sources and has_dups
+        if phase == "sources":
+            build_source_choice(page, "Teil 1 von 2 · " if both else "")
+            return
+        layers = flow.duplicate_layers()
+        if both:
+            back = link_button("◂ Zurück zu Teil 1 (gleiche Objekte aus mehreren Quellen)")
+
+            def to_part_one():
+                flow.harmonize_phase = "sources"
+                flow.source_index = source_count(flow) - 1
+                rebuild_step6()
+
+            back.clicked.connect(to_part_one)
+            page.layout.addWidget(back)
+        part_heading(page, ("Teil 2 von 2 · " if both else "") + "Unsichere Dubletten",
+                     DUPLICATES_PART_INTRO)
         intro = QLabel(UNCERTAIN_DUPLICATE_EXPLANATION_STEP6)
         intro.setWordWrap(True)
         set_role(intro, "hint")
@@ -3190,8 +3252,9 @@ def _create_dock(plugin):
             panel.addWidget(duplicate_card(flow, layer))
 
     # 6a (W12, M14): same objects from ALKIS and OSM - one source per category
-    def build_source_choice(page):
-        """Returns True if there was something to choose."""
+    def build_source_choice(page, part=""):
+        """Part 1 of step 6: one category per view.  Returns True if there
+        was something to choose."""
         flow = workflow()
         matches = getattr(flow, "source_matches", None) or []
         if not matches:
@@ -3202,14 +3265,22 @@ def _create_dock(plugin):
         if getattr(flow, "source_priority", None) is None:
             flow.source_priority = {c.category: c.suggested_source for c in choices}
             flow.source_uncertain_ok = set()
-        heading = QLabel(f"<b>{SOURCES_TITLE}</b>")
-        heading.setWordWrap(True)
-        page.layout.addWidget(heading)
-        intro = QLabel(SOURCES_INTRO)
-        intro.setWordWrap(True)
-        set_role(intro, "hint")
-        page.layout.addWidget(intro)
-        for number, choice in enumerate(choices):
+        index = min(max(getattr(flow, "source_index", 0), 0), len(choices) - 1)
+        flow.source_index = index
+        part_heading(page, part + SOURCES_TITLE, SOURCES_INTRO)
+        progress = QLabel(f"Kategorie {index + 1} von {len(choices)}")
+        set_role(progress, "status")
+        page.layout.addWidget(progress)
+        if index > 0:
+            previous = link_button("◂ Vorherige Kategorie")
+
+            def to_previous():
+                flow.source_index = index - 1
+                rebuild_step6()
+
+            previous.clicked.connect(to_previous)
+            page.layout.addWidget(previous)
+        for number, choice in [(index, choices[index])]:
             panel = collapsible(
                 page, f"src_{number}",
                 source_title_text(choice.category, choice.group_count, choice.source_kinds),
@@ -3333,6 +3404,16 @@ def _create_dock(plugin):
 
     def validate_harmonization(page):
         flow = workflow()
+        phase, _has_sources, has_dups = harmonize_state(flow)
+        if phase == "sources":  # part 1: next category, then part 2
+            if flow.source_index < source_count(flow) - 1:
+                flow.source_index += 1
+                rebuild_step6()
+                return False
+            if has_dups:
+                flow.harmonize_phase = "duplicates"
+                rebuild_step6()
+                return False
         open_layers = flow.open_duplicate_decisions()
         if open_layers:
             sections = page.widgets.get("duplicate_sections", {})
