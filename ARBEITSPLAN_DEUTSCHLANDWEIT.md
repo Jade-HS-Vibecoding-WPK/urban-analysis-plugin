@@ -546,6 +546,18 @@ Kein Pilotthema: erst G13, dann M25 und W19/W20 gleichzeitig, dann G14.
   Codes `topic-limit` und `topic-class-empty`. Die offenen Fragen aus S16 sind geklärt.
 - **Wer:** Person Mac schreibt den Entwurf, Person Windows prüft und mergt.
 - **Wartet auf:** Bestätigung von E36 und S16.
+- **Stand (19.11.2026, Entwurf Mac):** `TopicInfo`, `TopicClass` (mit
+  `colour` und `uncertain`), `TopicScale`/`TopicStep` (Stufen),
+  `TopicSelection` (Thema → Klassen/Stufen, zurück von der Oberfläche),
+  `PipelineResult.selected_topics`, `HarmonizedRecord.topic_classes`,
+  `TOPIC_LIMIT`, `TOPIC_CLASS_EMPTY`; in `ui_contract.py` `TOPIC_NAMES`
+  (sieben ids → Namen) und `TOPIC_LABELS`. Vorschläge zu den offenen Fragen
+  aus S16, bitte bestätigen oder ändern:
+  - Farben: Vorschlag im Katalog (`TopicClass.colour`), `map_styles.py`
+    darf sie für Schwarzplan/Graustufen ersetzen.
+  - Name: „Bebauung & Stadtstruktur“; `MVP_TOPIC_NAME` („Siedlungsstruktur“)
+    und `selected_topic` bleiben, bis W19 fertig ist.
+  - PDF je Thema oder überlagert: nicht im Vertrag, entscheidet W20.
 
 #### M25. Themenkatalog und Einordnung *(Mac)*
 

@@ -21,6 +21,27 @@ UI_LABELS = {
     "continue_incomplete": "Unvollständig fortfahren",
 }
 
+# G13 (E36): the seven general map topics, topic_id -> name in the UI.  The
+# catalog (topics_catalog.json) uses the same ids; names are only set here.
+TOPIC_NAMES = {
+    "bebauung": "Bebauung & Stadtstruktur",
+    "nutzungen": "Nutzungen",
+    "versorgung": "Versorgung & soziale Infrastruktur",
+    "freiraum": "Freiraum & öffentlicher Raum",
+    "mobilitaet": "Mobilität & Erschließung",
+    "gruen_wasser_klima": "Grün, Wasser & Klima",
+    "geschichte_stadtbild": "Geschichte & Stadtbild",
+}
+
+TOPIC_LABELS = {
+    "classes": "Klassen",
+    "scales": "Stufen",
+    "limits": "Was die Daten nicht zeigen",
+    "source_tips": "Bessere Daten",
+    "overlay": "Themen überlagern",
+    "uncertain": "vermutlich",
+}
+
 MVP_REQUIRED_TOPIC_SUGGESTIONS = (
     "Gebäude",
     "Straßen",

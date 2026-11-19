@@ -133,3 +133,85 @@ def test_duplicate_group_explains_itself():
     )
     assert group.differences[0].readable_name == "Nutzung"
     assert group.differences[0].values == ("Wohnen", "Gewerbe")
+
+
+# --- G13: Kartenthemen (E36, S16) -------------------------------------------
+
+from urban_analysis.contracts import (  # noqa: E402
+    TOPIC_CLASS_EMPTY,
+    TOPIC_GEOMETRIES,
+    TOPIC_LIMIT,
+    TopicClass,
+    TopicInfo,
+    TopicScale,
+    TopicSelection,
+    TopicStep,
+)
+from urban_analysis.data_pipeline import HarmonizedRecord  # noqa: E402
+from urban_analysis.ui_contract import TOPIC_LABELS, TOPIC_NAMES  # noqa: E402
+
+
+def test_seven_general_topics_with_readable_names():
+    assert list(TOPIC_NAMES) == [
+        "bebauung", "nutzungen", "versorgung", "freiraum",
+        "mobilitaet", "gruen_wasser_klima", "geschichte_stadtbild",
+    ]
+    assert TOPIC_NAMES["bebauung"] == "Bebauung & Stadtstruktur"
+    assert TOPIC_LABELS["uncertain"] == "vermutlich"
+    assert TOPIC_LIMIT == "topic-limit" and TOPIC_CLASS_EMPTY == "topic-class-empty"
+
+
+def test_topic_info_with_classes_scales_limits_and_tips():
+    topic = TopicInfo(
+        "nutzungen",
+        TOPIC_NAMES["nutzungen"],
+        description="Wofür Gebäude und Flächen genutzt werden.",
+        classes=(
+            TopicClass("wohnen", "Wohnen", "Fläche", colour="#e8b04b"),
+            TopicClass("eg_nutzung", "Erdgeschossnutzung", "Punkt", uncertain=True),
+        ),
+        scales=(
+            TopicScale("geschosse", "Geschosszahl", "floors", steps=(
+                TopicStep("1–2", 1, 3), TopicStep("3–5", 3, 6), TopicStep("ab 6", 6, None),
+            )),
+        ),
+        limits=("Leerstand steht kaum in OSM.",),
+        source_tips=("Gewerbemeldungen der Stadt als Eigene Datei.",),
+    )
+
+    assert topic.class_by_id("wohnen").colour == "#e8b04b"
+    assert topic.class_by_id("eg_nutzung").uncertain
+    assert topic.class_by_id("fehlt") is None
+    assert topic.scales[0].steps[2].upper is None  # open upper end
+    assert set(TOPIC_GEOMETRIES) == {"Fläche", "Linie", "Punkt"}
+
+
+def test_topic_class_rejects_unknown_geometry():
+    with pytest.raises(ValueError):
+        TopicClass("wohnen", "Wohnen", "Polygon")
+
+
+def test_topic_selection_needs_a_topic_and_one_class_or_step():
+    selection = TopicSelection("mobilitaet", class_ids=["radwege", "haltestellen"])
+    assert selection.class_ids == ("radwege", "haltestellen")
+    assert TopicSelection("bebauung", scale_ids=["geschosse"]).scale_ids == ("geschosse",)
+    with pytest.raises(ValueError):
+        TopicSelection("mobilitaet")
+    with pytest.raises(ValueError):
+        TopicSelection("", class_ids=("radwege",))
+
+
+def test_result_and_records_carry_the_chosen_topics():
+    result = PipelineResult("1.0", "EPSG:25832", "POLYGON ((0 0, 1 0, 1 1, 0 0))")
+    assert result.selected_topics == [] and result.as_summary()["selected_topics"] == []
+
+    result.selected_topics = [
+        TopicSelection("nutzungen", ("wohnen",)),
+        TopicSelection("freiraum", ("parks",)),  # overlaid in one map
+    ]
+    assert result.as_summary()["selected_topics"] == ["nutzungen", "freiraum"]
+
+    record = HarmonizedRecord("gebaeude", 1, {"category": "Gebäude"})
+    assert record.topic_classes == {}  # old code keeps working
+    cafe = HarmonizedRecord("punkte", 2, {}, topic_classes={"nutzungen": "gastronomie", "freiraum": "treffpunkte"})
+    assert cafe.topic_classes["freiraum"] == "treffpunkte"  # one object, several topics

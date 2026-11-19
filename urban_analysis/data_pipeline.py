@@ -129,6 +129,9 @@ class HarmonizedRecord:
     # S12: group of probably identical objects from different sources, set
     # by source_matching.match_sources; None = no partner in another source.
     source_match: Optional[str] = None
+    # G13 (S16): at most one class per selected topic, topic_id -> class_id,
+    # set by topics.classify_topics (M25); empty until a topic is chosen.
+    topic_classes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
