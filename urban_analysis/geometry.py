@@ -551,6 +551,27 @@ def _ring_centroid(ring: Ring) -> Tuple[Optional[Point], float]:
     return (cx / (3.0 * area), cy / (3.0 * area)), abs(area) / 2.0
 
 
+def polygon_area(geometry: Geometry) -> float:
+    """Area of all polygons in square map units (m² in a metric CRS).
+
+    Holes are subtracted; points and lines have no area.  Overlapping parts
+    of a multipolygon are counted twice, as in valid data they do not occur.
+    """
+    total = 0.0
+    for polygon in geometry.polygons:
+        if not polygon:
+            continue
+        outer = _ring_centroid(polygon[0])[1]
+        holes = sum(_ring_centroid(hole)[1] for hole in polygon[1:])
+        total += max(outer - holes, 0.0)
+    return total
+
+
+def point_in_geometry(point: Point, geometry: Geometry) -> bool:
+    """True if ``point`` lies inside one polygon of ``geometry`` (not in a hole)."""
+    return any(_point_in_polygon(point, polygon) for polygon in geometry.polygons)
+
+
 def representative_point(geometry: Geometry) -> Optional[Point]:
     """One point for distance measures (accessibility, E26).
 

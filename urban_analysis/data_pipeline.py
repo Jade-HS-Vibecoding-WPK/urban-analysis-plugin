@@ -122,6 +122,9 @@ class HarmonizedRecord:
     # from; both stay empty for a single import_file run.
     source_kind: str = ""
     source_file: str = ""
+    # S12: group of probably identical objects from different sources, set
+    # by source_matching.match_sources; None = no partner in another source.
+    source_match: Optional[str] = None
 
 
 @dataclass(frozen=True)
