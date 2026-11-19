@@ -762,7 +762,18 @@ def planned_layer_rows(flow, names, kinds=GEOMETRY_KINDS):
 SOURCE_FIELDS_HINT = "Je Datenquelle eine Angabe – sie steht bei jedem Objekt in der Spalte „Quelle“."
 TOPIC_LAYERS_TITLE = "Layer für die Karte"
 TOPIC_LAYERS_HINT = ("Nach Wichtigkeit sortiert: Bebauung zuerst, Kleinkram zuletzt. "
+                     "Angehakt ist der Vorschlag für das Thema. "
                      "Häkchen weg = der Layer kommt nicht in die Karte.")
+TOPIC_OWN_CHOICE = "eigene Auswahl"
+TOPIC_NO_MATCH_HINT = ("Für dieses Thema wurden in den Daten keine passenden Kategorien "
+                       "gefunden – bitte selbst auswählen.")
+TOPIC_NO_SUGGESTION_HINT = ("Für dieses Thema gibt es keinen Vorschlag – "
+                            "alle Layer sind angehakt. Bitte selbst anpassen.")
+
+
+def topic_item_text(name, own):
+    """Text in the theme list: 'Mobilität' or 'Mobilität – eigene Auswahl'."""
+    return f"{name} – {TOPIC_OWN_CHOICE}" if own else name
 # Step 7: groups by importance (same groups as the layer tree, #66)
 IMPORTANCE_ORDER = ("Bebauung", "Verkehr", "Grün & Wasser", "Nutzung", "Einrichtungen",
                     OTHER_LAYER_GROUP, "Sonstiges")
@@ -3504,7 +3515,6 @@ def _create_dock(plugin):
             description.setVisible(bool(text))
             QTimer.singleShot(0, dock.fit_wrapped_labels)
 
-        topic_box.currentIndexChanged.connect(show_description)
         show_description()
         topic_panel = collapsible(page, "topic_choice", UI_LABELS["topic"], opened=True)
         topic_panel.addWidget(topic_box)
@@ -3535,12 +3545,78 @@ def _create_dock(plugin):
         hint.setWordWrap(True)
         set_role(hint, "hint")
         layers_panel.addWidget(hint)
+        preset_hint = QLabel()
+        preset_hint.setWordWrap(True)
+        set_role(preset_hint, "warning")
+        preset_hint.setVisible(False)
+        layers_panel.addWidget(preset_hint)
         layers_panel.addWidget(category_list)
-        confirm_missing = QCheckBox(UI_LABELS["continue_incomplete"])
-        page.layout.addWidget(confirm_missing)
-        page.widgets.update(
-            topic=topic_box, categories=category_list, confirm_missing=confirm_missing
-        )
+
+        # W19: ticks = the theme's suggestion; own changes -> 'eigene Auswahl'
+        # (the theme stays, step 8 needs it); kept when coming back
+        state = getattr(flow, "topic_ticks", None)
+        applying = [False]
+
+        def category_items():
+            for index in range(category_list.count()):
+                item = category_list.item(index)
+                if item.data(Qt.UserRole):
+                    yield item
+
+        def show_own(own):
+            for index in range(topic_box.count()):
+                name = topic_box.itemData(index)
+                topic_box.setItemText(
+                    index, topic_item_text(name, own and index == topic_box.currentIndex())
+                )
+
+        def remember(own):
+            flow.topic_ticks = {
+                "topic": topic_box.currentData(),
+                "ticked": {i.data(Qt.UserRole) for i in category_items()
+                           if i.checkState() == Qt.Checked},
+                "own": own,
+            }
+
+        def set_ticks(ticked):
+            applying[0] = True
+            try:
+                for item in category_items():
+                    item.setCheckState(
+                        Qt.Checked if item.data(Qt.UserRole) in ticked else Qt.Unchecked
+                    )
+            finally:
+                applying[0] = False
+
+        def apply_preset(_index=None):
+            suggestion = flow.topic_preselection(topic_box.currentData())
+            if suggestion is None:
+                set_ticks(set(flow.recognized_categories()))
+                preset_hint.setText(TOPIC_NO_SUGGESTION_HINT)
+            else:
+                set_ticks(set(suggestion))
+                preset_hint.setText(TOPIC_NO_MATCH_HINT if not suggestion else "")
+            preset_hint.setVisible(bool(preset_hint.text()))
+            show_own(False)
+            remember(False)
+            QTimer.singleShot(0, dock.fit_wrapped_labels)
+
+        def ticked_by_hand(_item):
+            if applying[0]:
+                return
+            preset_hint.setVisible(False)
+            show_own(True)
+            remember(True)
+
+        if state and state.get("topic") == topic_box.currentData():
+            set_ticks(state["ticked"])
+            show_own(state.get("own", False))
+        else:
+            apply_preset()
+        category_list.itemChanged.connect(ticked_by_hand)
+        topic_box.currentIndexChanged.connect(show_description)
+        topic_box.currentIndexChanged.connect(apply_preset)
+        page.widgets.update(topic=topic_box, categories=category_list, preset_hint=preset_hint)
 
     def accent_color():
         from .theme import CLASSIC_COLORS, COLORS
@@ -3980,7 +4056,6 @@ def _create_dock(plugin):
             workflow().select_topic(
                 page.widgets["topic"].currentData() or page.widgets["topic"].currentText(),
                 selected,
-                confirm_missing=page.widgets["confirm_missing"].isChecked(),
             )
         except ValueError as error:
             return reject(str(error))
@@ -4577,6 +4652,9 @@ def _create_dock(plugin):
             grey,
         )
         output_choice(area, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
+        if dock.last_saved:
+            area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
+        area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
 
     def pdf_extent_size(draft):
         """(width, height) in m of what the PDF map shows, or None."""
@@ -4700,10 +4778,6 @@ def _create_dock(plugin):
         combo.currentIndexChanged.connect(chosen)
         refresh()
         return box, refresh
-
-        if dock.last_saved:
-            area.layout.addWidget(summary_card("Gespeicherte Dateien", saved_rows(dock.last_saved)))
-        area_button(area, area_page(area), SAVE_ACTION, save_files, SAVE_ACTION)
 
     def current_used_sources(flow):
         """The sources that really delivered objects (E28), [] if unknown."""
