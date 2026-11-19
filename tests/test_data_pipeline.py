@@ -1272,3 +1272,103 @@ def test_osm_import_has_no_false_hints(tmp_path):
     assert "uncertain-duplicate" not in codes
     assert "missing-category" not in codes
     assert "several-addresses" not in codes
+
+
+# --- M13 / S11: mehrere Quellen in einem Lauf ---------------------------------
+
+from urban_analysis.data_pipeline import SourceFile, used_sources  # noqa: E402
+
+AREA = "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))"
+
+
+def import_two(tmp_path, *extra):
+    osm_path = tmp_path / "osm.gpkg"
+    own_path = tmp_path / "eigene.gpkg"
+    make_geopackage(osm_path)
+    make_geopackage(own_path)
+    sources = [
+        SourceFile(osm_path, "OSM", licence="ODbL", attribution="© OpenStreetMap-Mitwirkende"),
+        SourceFile(own_path, "Eigene Datei", name="Kartierung"),
+        *extra,
+    ]
+    result = GeoPackageImporter().import_sources(sources, project_crs="EPSG:25832", study_area_wkt=AREA)
+    return sources, result
+
+
+def test_import_sources_combines_files_and_keeps_source_kind(tmp_path):
+    _, result = import_two(tmp_path)
+
+    assert [layer.layer_id for layer in result.layers] == ["buildings", "buildings_q2"]
+    assert [layer.source_kind for layer in result.layers] == ["OSM", "Eigene Datei"]
+    kinds = {record.layer_id: record.source_kind for record in result.harmonized_records}
+    assert kinds == {"buildings": "OSM", "buildings_q2": "Eigene Datei"}
+    assert {column.layer_id for column in result.columns} == {"buildings", "buildings_q2"}
+
+
+def test_import_sources_names_the_source_in_every_hint(tmp_path):
+    _, result = import_two(tmp_path)
+
+    duplicates = [issue for issue in result.issues if issue.code == "duplicate-row"]
+    assert [issue.message.split(" – ")[0] for issue in duplicates] == ["OSM", "Kartierung"]
+    assert {issue.layer_id for issue in duplicates} <= {"buildings", "buildings_q2", None}
+
+
+def test_import_sources_reports_unreadable_file_and_keeps_the_rest(tmp_path):
+    broken = tmp_path / "alkis.gpkg"
+    broken.write_bytes(b"kein GeoPackage")
+    _, result = import_two(tmp_path, SourceFile(broken, "ALKIS"))
+
+    errors = [issue for issue in result.issues if issue.code == "source-not-readable"]
+    assert len(errors) == 1 and errors[0].message.startswith("ALKIS: ")
+    assert len(result.harmonized_records) == 2
+
+
+def test_import_sources_rejects_unknown_kind_and_empty_list(tmp_path):
+    importer = GeoPackageImporter()
+    with pytest.raises(ValueError):
+        importer.import_sources([], project_crs="EPSG:25832", study_area_wkt=AREA)
+    with pytest.raises(ValueError, match="Unknown source kind"):
+        importer.import_sources(
+            [SourceFile(tmp_path / "x.gpkg", "WMS")], project_crs="EPSG:25832", study_area_wkt=AREA
+        )
+
+
+def test_import_sources_reports_invalid_study_area_once(tmp_path):
+    first, second = tmp_path / "a.gpkg", tmp_path / "b.gpkg"
+    make_geopackage(first)
+    make_geopackage(second)
+    result = GeoPackageImporter().import_sources(
+        [SourceFile(first, "OSM"), SourceFile(second, "ALKIS")],
+        project_crs="EPSG:25832",
+        study_area_wkt="POINT (1 1)",
+    )
+
+    assert sum(issue.code == "invalid-study-area" for issue in result.issues) == 1
+
+
+def test_import_sources_progress_rises_to_one(tmp_path):
+    first, second = tmp_path / "a.gpkg", tmp_path / "b.gpkg"
+    make_geopackage(first)
+    make_geopackage(second)
+    seen = []
+    GeoPackageImporter().import_sources(
+        [SourceFile(first, "OSM"), SourceFile(second, "ALKIS")],
+        project_crs="EPSG:25832",
+        study_area_wkt=AREA,
+        progress=seen.append,
+    )
+
+    assert seen[0] == 0.0 and seen[-1] == 1.0
+    assert seen == sorted(seen)
+
+
+def test_used_sources_lists_only_sources_with_objects(tmp_path):
+    sources, result = import_two(tmp_path)
+
+    listed = used_sources(sources, result.harmonized_records)
+    assert [(item.name, item.record_count) for item in listed] == [("OSM", 1), ("Kartierung", 1)]
+    assert listed[0].licence == "ODbL"
+    assert listed[0].attribution == "© OpenStreetMap-Mitwirkende"
+
+    only_osm = [record for record in result.harmonized_records if record.source_kind == "OSM"]
+    assert [item.source_kind for item in used_sources(sources, only_osm)] == ["OSM"]
