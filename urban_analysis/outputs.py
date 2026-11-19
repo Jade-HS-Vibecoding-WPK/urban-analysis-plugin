@@ -329,6 +329,186 @@ def write_result_geopackage(path, layers: Sequence[object]) -> str:
     return str(target)
 
 
+# --- F5 / W18: real map PDF with a QGIS print layout -------------------------
+
+PAGE_SIZES_MM = {"A4": (210, 297), "A3": (297, 420), "A2": (420, 594),
+                 "A1": (594, 841), "A0": (841, 1189)}
+SCALES = (None, 1000, 2500, 5000, 10000, 25000)  # None = fits the area
+
+
+def page_size_mm(page="A4", orientation="quer"):
+    """(width, height) in mm; 'quer' = landscape."""
+    short, long_ = PAGE_SIZES_MM.get(page, PAGE_SIZES_MM["A4"])
+    return (long_, short) if orientation == "quer" else (short, long_)
+
+
+def scale_label(scale):
+    return "passend zum Gebiet" if not scale else f"1:{int(round(scale)):,}".replace(",", ".")
+
+
+def layout_frames(width, height, orientation="quer"):
+    """Rectangles (x, y, w, h) in mm for map and side panel; panel holds
+    title, legend, north arrow, scale bar and sources."""
+    margin = max(8.0, width * 0.03)
+    if orientation == "quer":
+        panel_w = (width - 3 * margin) * 0.28
+        map_w = width - 3 * margin - panel_w
+        return {
+            "map": (margin, margin, map_w, height - 2 * margin),
+            "panel": (2 * margin + map_w, margin, panel_w, height - 2 * margin),
+        }
+    panel_h = (height - 3 * margin) * 0.26
+    map_h = height - 3 * margin - panel_h
+    return {
+        "map": (margin, margin, width - 2 * margin, map_h),
+        "panel": (margin, 2 * margin + map_h, width - 2 * margin, panel_h),
+    }
+
+
+def sources_text(data_source, day):
+    """Block 'Datenquellen und Lizenzen' (E28) with the date."""
+    return (
+        "Datenquellen und Lizenzen\n"
+        f"{data_source or '–'}\n"
+        "Daten verändert (zugeschnitten, harmonisiert) mit dem QGIS-Plugin Urban Analysis.\n"
+        f"Stand: {day.strftime('%d.%m.%Y')}"
+    )
+
+
+def export_map_pdf(path, *, layers, study_area_wkt, buffer_meters, crs_authid,
+                   title, subtitle="", data_source="", page="A4", orientation="quer",
+                   scale=None, north_arrow=True, project=None, day=None):
+    """Write the analysis map as PDF (QGIS print layout).
+
+    ``layers`` are the result layers, top-most first (as in the layer list).
+    The study area and its buffer are drawn as outlines on top."""
+    from datetime import date as _date
+
+    from qgis.core import (
+        QgsFeature, QgsFillSymbol, QgsGeometry, QgsLayerTree, QgsLayoutExporter,
+        QgsLayoutItemLabel, QgsLayoutItemLegend, QgsLayoutItemMap, QgsLayoutItemPicture,
+        QgsLayoutItemScaleBar, QgsLayoutPoint, QgsLayoutSize, QgsPrintLayout, QgsProject,
+        QgsRectangle, QgsSingleSymbolRenderer, QgsSymbolLayerUtils, QgsUnitTypes,
+        QgsVectorLayer,
+    )
+    from qgis.PyQt.QtGui import QFont
+
+    project = project or QgsProject.instance()
+    day = day or _date.today()
+    width, height = page_size_mm(page, orientation)
+    frames = layout_frames(width, height, orientation)
+    factor = (width * height / (297 * 210)) ** 0.5  # font size grows with the page
+
+    area = QgsGeometry.fromWkt(study_area_wkt or "")
+    if area is None or area.isEmpty():
+        raise ValueError("Für das PDF fehlt das Untersuchungsgebiet (Schritt 2).")
+
+    def outline_layer(geometry, name, style):
+        layer = QgsVectorLayer(f"Polygon?crs={crs_authid}", name, "memory")
+        feature = QgsFeature()
+        feature.setGeometry(geometry)
+        layer.dataProvider().addFeatures([feature])
+        layer.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple(style)))
+        return layer
+
+    area_layer = outline_layer(area, "Untersuchungsgebiet", {
+        "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.6"})
+    buffer_geometry = area.buffer(float(buffer_meters or 0), 16)
+    buffer_layer = outline_layer(buffer_geometry, f"Puffer {format_count(int(buffer_meters or 0))} m", {
+        "color": "0,0,0,0", "outline_color": "#d0473b", "outline_width": "0.3",
+        "outline_style": "dash"})
+
+    layout = QgsPrintLayout(project)
+    layout.initializeDefaults()
+    layout.setName("Urban Analysis")
+    layout.pageCollection().page(0).setPageSize(QgsLayoutSize(width, height, QgsUnitTypes.LayoutMillimeters))
+
+    def place(item, x, y, w, h):
+        layout.addLayoutItem(item)
+        item.attemptMove(QgsLayoutPoint(x, y, QgsUnitTypes.LayoutMillimeters))
+        item.attemptResize(QgsLayoutSize(w, h, QgsUnitTypes.LayoutMillimeters))
+
+    # map
+    mx, my, mw, mh = frames["map"]
+    map_item = QgsLayoutItemMap(layout)
+    map_item.setFrameEnabled(True)
+    place(map_item, mx, my, mw, mh)
+    map_item.setCrs(project.crs() if not crs_authid else area_layer.crs())
+    map_item.setLayers([area_layer, buffer_layer] + list(layers))
+    extent = QgsRectangle(buffer_geometry.boundingBox())
+    extent.scale(1.05)
+    map_item.zoomToExtent(extent)
+    if scale:
+        map_item.setScale(scale)
+
+    # side panel: title, subtitle, legend, north arrow, scale bar, sources
+    px, py, pw, ph = frames["panel"]
+    y = py
+    title_label = QgsLayoutItemLabel(layout)
+    title_label.setText(title or "Urban Analysis")
+    font = QFont()
+    font.setPointSizeF(16 * factor)
+    font.setBold(True)
+    title_label.setFont(font)
+    place(title_label, px, y, pw, 12 * factor)
+    y += 13 * factor
+    if subtitle:
+        sub = QgsLayoutItemLabel(layout)
+        sub.setText(subtitle)
+        font_sub = QFont()
+        font_sub.setPointSizeF(10 * factor)
+        sub.setFont(font_sub)
+        place(sub, px, y, pw, 7 * factor)
+        y += 8 * factor
+
+    legend = QgsLayoutItemLegend(layout)
+    legend.setTitle("Legende")
+    legend.setAutoUpdateModel(False)
+    root = QgsLayerTree()
+    for layer in [area_layer, buffer_layer] + list(layers):
+        root.addLayer(layer)
+    legend.model().setRootGroup(root)
+    legend._root = root  # keep the tree alive while the layout lives
+    legend.setLinkedMap(map_item)
+    legend.setResizeToContents(False)
+    bottom_reserved = 42 * factor
+    place(legend, px, y, pw, max(20.0, py + ph - y - bottom_reserved))
+
+    base_y = py + ph - bottom_reserved
+    if north_arrow:
+        arrow = QgsLayoutItemPicture(layout)
+        arrow.setPicturePath(QgsSymbolLayerUtils.svgSymbolNameToPath(
+            "arrows/NorthArrow_02.svg", project.pathResolver()))
+        place(arrow, px, base_y, 10 * factor, 10 * factor)
+    bar = QgsLayoutItemScaleBar(layout)
+    bar.setStyle("Single Box")
+    bar.setLinkedMap(map_item)
+    bar.setUnits(QgsUnitTypes.DistanceMeters)
+    bar.setNumberOfSegments(2)
+    bar.setNumberOfSegmentsLeft(0)
+    bar.applyDefaultSize()
+    layout.addLayoutItem(bar)
+    bar.attemptMove(QgsLayoutPoint(px + 13 * factor, base_y + 2 * factor, QgsUnitTypes.LayoutMillimeters))
+
+    info = QgsLayoutItemLabel(layout)
+    info.setText(f"Maßstab {scale_label(map_item.scale() if not scale else scale)}\n\n"
+                 + sources_text(data_source, day))
+    font_info = QFont()
+    font_info.setPointSizeF(6.5 * factor)
+    info.setFont(font_info)
+    place(info, px, base_y + 13 * factor, pw, bottom_reserved - 13 * factor)
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    result = QgsLayoutExporter(layout).exportToPdf(str(target), QgsLayoutExporter.PdfExportSettings())
+    if result != QgsLayoutExporter.Success:
+        raise RuntimeError(
+            "Das PDF konnte nicht geschrieben werden. Ist die Datei noch in einem "
+            "PDF-Programm geöffnet? Dann bitte schließen und erneut verarbeiten."
+        )
+    return str(target)
+
+
 def _pdf_escape(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 

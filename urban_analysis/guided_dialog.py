@@ -20,13 +20,17 @@ from .data_pipeline import (
     GeoPackageImportError,
     apply_data_source,
 )
+from .map_styles import DEFAULT_MAP_STYLE, MAP_STYLES, apply_style, draw_rank
 from .osm_download import DownloadCanceled, DownloadError, lonlat_box, run_download
 from .sources import plan_osm_download
 from .outputs import (
     add_result_layers,
+    PAGE_SIZES_MM,
+    SCALES,
     build_result_layers,
-    export_pdf,
+    export_map_pdf,
     format_count,
+    scale_label,
     write_result_geopackage,
     result_group_name,
     result_layer_name,
@@ -105,6 +109,10 @@ FILE_EXISTS_MESSAGE = (
     "bestätigen, dass sie ersetzt wird, oder einen anderen Namen wählen."
 )
 SIMPLE_PDF_NOTE =" (einfaches PDF ohne Karte)"
+PDF_HINT = (
+    "Karte mit Legende, Maßstab, Untersuchungsgebiet mit Puffer und dem Block "
+    "„Datenquellen und Lizenzen“."
+)
 SIMPLE_PDF_HINT = (
     "Vorerst ein einfaches PDF mit den Angaben zum Lauf. Die Karte mit Legende, "
     "Maßstab und Seitengröße folgt in einem eigenen Schritt."
@@ -405,7 +413,7 @@ def output_rows(output, paths=None):
     return (
         ("Ergebnis-Layer in QGIS", "ja"),
         ("Bereinigtes GeoPackage", chosen(output.save_cleaned_geopackage, "geopackage")),
-        ("PDF", chosen(output.create_pdf, "pdf", SIMPLE_PDF_NOTE)),
+        ("PDF", chosen(output.create_pdf, "pdf")),
     )
 
 
@@ -2244,7 +2252,7 @@ def _create_dock(plugin):
         show_output_path(page, kind)
         dock.clear_message()
 
-    def output_choice(page, kind, text, checked, hint=None):
+    def output_choice(page, kind, text, checked, hint=None, extra=()):
         box = QCheckBox(text)
         box.setChecked(checked)
         path_label = QLabel()
@@ -2253,7 +2261,7 @@ def _create_dock(plugin):
         button = QPushButton(SAVE_AS_LABEL)
         set_role(button, "secondary")
         button.setCursor(Qt.PointingHandCursor)
-        parts = [path_label, button]
+        parts = [path_label, button, *extra]
         if hint:
             note = QLabel(hint)
             note.setWordWrap(True)
@@ -2289,9 +2297,55 @@ def _create_dock(plugin):
         layers.setChecked(True)
         layers.setEnabled(False)  # always (contract: QGIS layers are mandatory)
         page.layout.addWidget(layers)
+
+        def labelled_combo(label, items, key, default):
+            """Small 'Label + choice list' block; the choice is kept in the draft."""
+            box = QWidget()
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(0, 4, 0, 0)
+            box_layout.addWidget(QLabel(label))
+            combo = QComboBox()
+            for value, text in items:
+                combo.addItem(text, value)
+            index = combo.findData(draft.setdefault(key, default))
+            combo.setCurrentIndex(max(index, 0))
+            combo.currentIndexChanged.connect(
+                lambda _i, c=combo: draft.__setitem__(key, c.currentData()))
+            box_layout.addWidget(combo)
+            return box
+
+        def labelled_line(label, key, placeholder):
+            box = QWidget()
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(0, 4, 0, 0)
+            box_layout.addWidget(QLabel(label))
+            line = QLineEdit(draft.setdefault(key, ""))
+            line.setPlaceholderText(placeholder)
+            line.textChanged.connect(lambda text: draft.__setitem__(key, text))
+            box_layout.addWidget(line)
+            return box
+
+        # map style for the result layers in QGIS and the PDF (E33)
+        page.layout.addWidget(labelled_combo(
+            "Kartenstil (Ergebnis-Layer und PDF)", list(MAP_STYLES.items()),
+            "map_style", DEFAULT_MAP_STYLE))
+
         output_choice(page, "geopackage", "Bereinigtes GeoPackage speichern",
                       draft["geopackage"])
-        output_choice(page, "pdf", "PDF erzeugen", draft["pdf"], SIMPLE_PDF_HINT)
+        topic = workflow().result.selected_topic or "Siedlungsstruktur"
+        north = QCheckBox("Nordpfeil anzeigen")
+        north.setChecked(draft.setdefault("pdf_north", True))
+        north.toggled.connect(lambda on: draft.__setitem__("pdf_north", on))
+        pdf_extra = (
+            labelled_line("Titel", "pdf_title", f"z. B. {topic} Donnerschwee"),
+            labelled_line("Name / Kurs (Untertitel)", "pdf_subtitle", "z. B. Urban Design, WS 2026/27"),
+            labelled_combo("Papierformat", [(p, p) for p in PAGE_SIZES_MM], "pdf_page", "A3"),
+            labelled_combo("Ausrichtung", [("quer", "Querformat"), ("hoch", "Hochformat")],
+                           "pdf_orientation", "quer"),
+            labelled_combo("Maßstab", [(s or 0, scale_label(s)) for s in SCALES], "pdf_scale", 0),
+            north,
+        )
+        output_choice(page, "pdf", "PDF-Karte erzeugen", draft["pdf"], PDF_HINT, pdf_extra)
         title = QLabel(UI_LABELS["data_source"])
         page.layout.addWidget(title)
         source = QLineEdit(draft["source"])
@@ -2409,6 +2463,14 @@ def _create_dock(plugin):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             layer_objects, reports = build_result_layers(flow.result, selected, readable_layer)
+            # E33: map colours per category; buildings and lines on top of areas
+            categories = {d.layer_id: d.category for d in selected}
+            style = dock.output_draft.get("map_style", DEFAULT_MAP_STYLE)
+            for layer_id, layer in layer_objects.items():
+                apply_style(layer, categories.get(layer_id), style)
+            layer_objects = dict(sorted(
+                layer_objects.items(),
+                key=lambda item: -draw_rank(categories.get(item[0]))))
             add_result_layers(layer_objects, result_group_name(flow.result.selected_topic))
         finally:
             QApplication.restoreOverrideCursor()
@@ -2441,7 +2503,24 @@ def _create_dock(plugin):
             layers = [layer_objects[d.layer_id] for d in selected if d.layer_id in layer_objects]
             jobs.append(("geopackage", lambda path: write_result_geopackage(path, layers)))
         if output.create_pdf:
-            jobs.append(("pdf", lambda path: export_pdf(path, flow.output_plan())))
+            draft = dock.output_draft
+            topic = flow.result.selected_topic or "Siedlungsstruktur"
+
+            def write_pdf(path):
+                return export_map_pdf(
+                    path, layers=list(layer_objects.values()),
+                    study_area_wkt=flow.result.study_area_wkt,
+                    buffer_meters=flow.result.buffer_meters,
+                    crs_authid=flow.result.project_crs,
+                    title=draft.get("pdf_title") or topic,
+                    subtitle=draft.get("pdf_subtitle", ""),
+                    data_source=output.data_source,
+                    page=draft.get("pdf_page", "A3"),
+                    orientation=draft.get("pdf_orientation", "quer"),
+                    scale=draft.get("pdf_scale") or None,
+                    north_arrow=draft.get("pdf_north", True))
+
+            jobs.append(("pdf", write_pdf))
         for kind, write in jobs:
             path = dock.output_paths[kind]
             QApplication.setOverrideCursor(Qt.WaitCursor)
