@@ -57,6 +57,22 @@ def test_objects_are_cut_at_the_border_for_drawing():
     assert int(fill[1:3], 16) > int(category_colors("Gebäude", "graustufen")[0][1:3], 16)  # weaker
 
 
+def test_label_click_cycles_and_preview_order():
+    from urban_analysis.guided_dialog import counts_text, next_value, preview_columns, state_of
+
+    oid, floors, other = COLUMNS
+    assert next_value("target:object_id", oid) == "keep"
+    assert next_value("keep", oid) == "drop"
+    assert next_value("drop", oid) == "target:object_id"  # back to its suggestion
+    assert state_of("target:address") == "target"
+    values = {("gebaeude", "anzahlgs"): "keep", ("gebaeude", "oid"): "target:object_id",
+              ("gebaeude", "xyz"): "drop"}
+    headers = [(h, s) for h, s, _f in preview_columns(COLUMNS, values)]
+    assert [s for _h, s in headers] == ["target", "keep"]  # core fields first
+    assert headers[1][0] == "Geschosszahl"
+    assert counts_text(COLUMNS, values) == "1 Kernfelder · 1 behalten · 1 ignoriert"
+
+
 def test_choice_values_round_trip():
     for value in ("target:address", "keep", "drop"):
         assert decision_value(decision_from_value(COLUMNS[1], value)) == value

@@ -295,10 +295,73 @@ STEP5_GUIDE = (
     "Was passiert dann? Die Ergebnis-Layer enthalten genau diese Spalten. Die "
     "Vorauswahl passt meistens – du musst nur ändern, was du anders willst.",
 )
-MORE_COLUMNS_LABEL = "Nicht geladen (nicht lesbar)"
+STEP5_SHORT_GUIDE = (
+    "So sieht deine Attributtabelle am Ende aus. Klick auf ein Etikett: "
+    "Kernfeld → Behalten → Ignoriert. Die Vorauswahl passt meistens."
+)
+MORE_COLUMNS_LABEL ="Nicht geladen (nicht lesbar)"
 COLUMN_KEEP_HELP = "Die Spalte kommt unter ihrem lesbaren Namen in die Ergebnis-Layer."
 COLUMN_DROP_HELP = "Die Spalte kommt nicht in die Ergebnis-Layer."
 COLUMNS_SAVED_TEXT = "Spaltenauswahl übernommen. Sie gilt bei „Verarbeitung starten“."
+
+
+PREVIEW_ROWS = 3
+PILL_WIDTH = 92
+PREVIEW_HEADING = "Vorschau Ergebnis-Tabelle"
+COLUMNS_HEADING = "Spalten – Klick auf das Etikett wechselt: Kernfeld → Behalten → Ignoriert"
+STATE_LEGEND = ("ⓘ Kernfeld = Pflichtfeld für Karte und Legende · Behalten = eigene "
+                "Spalte · Ignoriert = wird nicht übernommen")
+STATE_LABELS = {"target": "● Kernfeld", "keep": "● Behalten", "drop": "○ Ignoriert"}
+# (fill, border) per state – green core field, blue kept, grey ignored
+STATE_COLORS = {"target": ("#e3f2e5", "#5aa36a"), "keep": ("#e2eefa", "#4a86c5"),
+                "drop": ("#f1f2f4", "#b5bcc4")}
+
+
+def state_of(value):
+    """'target:address' -> 'target'; 'keep' / 'drop' unchanged."""
+    return "target" if (value or "").startswith("target:") else (value or "drop")
+
+
+def next_value(value, column):
+    """Click on the label: Kernfeld → Behalten → Ignoriert → Kernfeld."""
+    state = state_of(value)
+    if state == "target":
+        return "keep"
+    if state == "keep":
+        return "drop"
+    return f"target:{column.suggested_target or CORE_FIELDS[0]}"
+
+
+def core_field_name(field_name):
+    try:
+        from .mapping import readable_target_field
+    except ImportError:  # pragma: no cover
+        return field_name
+    return readable_target_field(field_name)
+
+
+def preview_columns(columns, values):
+    """Headers of the result table preview: (header, state, source field);
+    core fields first (in their fixed order), then kept columns."""
+    core, kept = [], []
+    for column in columns:
+        value = values.get((column.layer_id, column.source_field), "drop")
+        state = state_of(value)
+        if state == "target":
+            field_name = value.split(":", 1)[1]
+            core.append((CORE_FIELDS.index(field_name) if field_name in CORE_FIELDS else 99,
+                         (core_field_name(field_name), state, column.source_field)))
+        elif state == "keep":
+            kept.append((column.readable_name or column.source_field, state, column.source_field))
+    return [entry for _order, entry in sorted(core, key=lambda item: item[0])] + kept
+
+
+def counts_text(columns, values):
+    """'4 Kernfelder · 3 behalten · 8 ignoriert'."""
+    counts = {"target": 0, "keep": 0, "drop": 0}
+    for column in columns:
+        counts[state_of(values.get((column.layer_id, column.source_field), "drop"))] += 1
+    return f"{counts['target']} Kernfelder · {counts['keep']} behalten · {counts['drop']} ignoriert"
 
 
 def column_choices():
@@ -960,6 +1023,7 @@ def _create_dock(plugin):
         TITLE_ICON_PX, icon_size, layer_icon, palette_icon, title_icon, with_icon,
     )
     from qgis.PyQt.QtCore import QSize
+    from qgis.PyQt.QtGui import QColor, QIcon, QPixmap
     from .ui import style as ui_style
     from qgis.PyQt.QtWidgets import QMenu
 
@@ -969,7 +1033,10 @@ def _create_dock(plugin):
         from qgis.PyQt.QtWidgets import QAction, QActionGroup
     from qgis.PyQt.QtWidgets import (
         QWIDGETSIZE_MAX,
+        QAbstractItemView,
         QAbstractSpinBox,
+        QTableWidget,
+        QTableWidgetItem,
         QApplication,
         QButtonGroup,
         QCheckBox,
@@ -2248,11 +2315,11 @@ def _create_dock(plugin):
         if not flow.result.columns:
             return build_mapping_legacy(page)  # older pipeline result: old view
         page.widgets["columns_view"] = True
-        for line in STEP5_GUIDE:
-            label = QLabel(line)
-            label.setWordWrap(True)
-            set_role(label, "hint")
-            page.layout.addWidget(label)
+        guide = QLabel(STEP5_SHORT_GUIDE)
+        guide.setWordWrap(True)
+        set_role(guide, "info")
+        guide.setToolTip("\n".join(STEP5_GUIDE))
+        page.layout.addWidget(guide)
         names = readable_names()
         decisions = column_decisions_of(flow)
         by_layer = {}
@@ -2278,115 +2345,190 @@ def _create_dock(plugin):
 
         auto.toggled.connect(lambda on: on and mode != "auto" and switch(False))
         manual.toggled.connect(lambda on: on and mode != "manual" and switch(True))
-        page.widgets["column_inputs"] = []
-        if mode == "auto":
-            # 2: one short card per layer: core fields, kept, ignored (+ change)
-            for number, (layer_id, columns) in enumerate(by_layer.items()):
-                summary = column_summary(columns, decisions)
+        # Current choice per column as value: 'target:<field>', 'keep', 'drop'
+        values = {key: decision_value(d) for key, d in decisions.items()}
+        page.widgets["values"] = values
+        page.widgets["columns_by_layer"] = by_layer
+        page.widgets["previews"] = {}
+        records_by_layer = {}
+        for record in flow.result.harmonized_records:
+            table = record.source_layer or record.layer_id
+            rows = records_by_layer.setdefault(table, [])
+            if len(rows) < PREVIEW_ROWS:
+                rows.append(record)
+
+        for number, (layer_id, columns) in enumerate(by_layer.items()):
+            preview = QTableWidget()
+            page.widgets["previews"][layer_id] = preview
+            fill_preview(preview, columns, values, records_by_layer.get(layer_id, []))
+            if mode == "auto":
+                # 2: compact card: name, preview, "Ändern"
                 card = QFrame()
                 set_role(card, "issue-info")
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(10, 6, 8, 6)
-                title = QLabel(f"<b>{names.layer(layer_id)}</b>")
+                title = QLabel(f"<b>{names.layer(layer_id)}</b>  "
+                               f"<span style='color:gray'>{counts_text(columns, values)}</span>")
+                title.setWordWrap(True)
                 card_layout.addWidget(with_icon(layer_icon_key(flow, layer_id), title))
-                for line in summary_lines(summary):
-                    text = QLabel(line)
-                    text.setWordWrap(True)
-                    if line.startswith("Ignoriert") and summary["drop"]:
-                        text.setToolTip(", ".join(summary["drop"]))  # names on hover
-                    card_layout.addWidget(text)
-                change = QPushButton("Ändern ▸")
-                change.setFlat(True)
-                change.setCursor(Qt.PointingHandCursor)
-                change.setStyleSheet("text-align: left; padding: 0; border: none; "
-                                     "background: transparent; text-decoration: underline;")
+                card_layout.addWidget(preview)
+                change = link_button("Ändern ▸")
                 change.clicked.connect(lambda _c=False, n=number: switch(True, n))
                 card_layout.addWidget(change)
                 page.layout.addWidget(card)
-            page.widgets["auto_decisions"] = list(decisions.values())
-            return
-        inputs = []
-        for number, (layer_id, columns) in enumerate(by_layer.items()):
-            shown = [c for c in columns if c.known or c.suggested_target]
-            hidden = [c for c in columns if not (c.known or c.suggested_target)]
-            panel = collapsible(
-                page, f"cols_{number}",
-                f"{names.layer(layer_id)} ({len(columns)} Spalten)",
-                layer_icon_key(flow, layer_id))
-            counts = QLabel(column_header_text("Vorauswahl", columns, decisions))
-            counts.setWordWrap(True)
+                continue
+            panel = collapsible(page, f"cols_{number}", f"{names.layer(layer_id)} ({len(columns)} Spalten)",
+                                layer_icon_key(flow, layer_id))
+            counts = QLabel(counts_text(columns, values))
             set_role(counts, "hint")
             panel.addWidget(counts)
+            page.widgets[f"counts_{layer_id}"] = counts
+            heading = QLabel(PREVIEW_HEADING)
+            set_role(heading, "hint")
+            panel.addWidget(heading)
+            panel.addWidget(preview)
+            columns_heading = QLabel(COLUMNS_HEADING)
+            columns_heading.setWordWrap(True)
+            set_role(columns_heading, "hint")
+            panel.addWidget(columns_heading)
+            shown = [c for c in columns if c.known or c.suggested_target]
+            hidden = [c for c in columns if not (c.known or c.suggested_target)]
             for column in shown:
-                inputs.append(column_row(panel, column, decisions))
+                label_row(page, panel, column, records_by_layer.get(layer_id, []))
             if hidden:
                 more = QWidget()
                 more_layout = QVBoxLayout(more)
                 more_layout.setContentsMargins(0, 0, 0, 0)
                 more.hide()
-                toggle = QPushButton(f"{MORE_COLUMNS_LABEL} ({len(hidden)}) ▸")
-                toggle.setFlat(True)
-                toggle.setCursor(Qt.PointingHandCursor)
-                toggle.setStyleSheet("text-align: left; padding: 0; border: none; "
-                                     "background: transparent; text-decoration: underline;")
+                toggle = link_button(f"{len(hidden)} weitere ignorierte Spalten anzeigen ▸")
 
                 def flip(_c=False, box=more, button=toggle, count=len(hidden)):
                     box.setVisible(not box.isVisible())
-                    arrow = "▾" if box.isVisible() else "▸"
-                    button.setText(f"{MORE_COLUMNS_LABEL} ({count}) {arrow}")
+                    button.setText(f"{count} weitere ignorierte Spalten "
+                                   f"{'ausblenden ▾' if box.isVisible() else 'anzeigen ▸'}")
                     QTimer.singleShot(0, dock.fit_wrapped_labels)
 
                 toggle.clicked.connect(flip)
                 panel.addWidget(toggle)
                 for column in hidden:
-                    inputs.append(column_row(more_layout, column, decisions))
+                    label_row(page, more_layout, column, records_by_layer.get(layer_id, []))
                 panel.addWidget(more)
-        page.widgets["column_inputs"] = inputs
+            legend = QLabel(STATE_LEGEND)
+            legend.setWordWrap(True)
+            set_role(legend, "hint")
+            panel.addWidget(legend)
         opened = getattr(flow, "column_open_layer", None)
-        if opened is not None:
+        if opened is not None and mode != "auto":
             open_sections(page, [f"cols_{opened}"])
         guard_wheel(page.widget)
 
-    def column_row(layout, column, decisions):
-        """One column: readable name, technical name, examples and the choice."""
-        title = QLabel(f"<b>{column.readable_name or column.source_field}</b>"
-                       f"  <span style='color:gray'>({column.source_field})</span>")
-        title.setWordWrap(True)
-        layout.addWidget(title)
-        if column.examples:
-            examples = QLabel("z. B. " + ", ".join(f"„{e}“" for e in column.examples[:3]))
-            examples.setWordWrap(True)
-            set_role(examples, "hint")
-            layout.addWidget(indented(examples))
-        choice = QComboBox()
-        for value, text, help_text in column_choices():
-            choice.addItem(text, value)
-            if help_text:
-                choice.setItemData(choice.count() - 1, help_text, Qt.ToolTipRole)
-        current = decision_value(decisions.get((column.layer_id, column.source_field)))
-        choice.setCurrentIndex(max(choice.findData(current), 0))
-        info = QLabel("ⓘ")
-        info.setCursor(Qt.WhatsThisCursor)
+    def link_button(text):
+        button = QPushButton(text)
+        button.setFlat(True)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet("text-align: left; padding: 0; border: none; "
+                             "background: transparent; text-decoration: underline;")
+        return button
 
-        def explain(_i=0, combo=choice, label=info):
-            label.setToolTip(choice_help(combo.currentData()) or COLUMN_KEEP_HELP)
+    def fill_preview(table, columns, values, records):
+        """Small attribute table like in QGIS: result columns as headers
+        (coloured mark = core field / kept), up to three real rows;
+        scrolls sideways when there are many columns."""
+        shown = preview_columns(columns, values)
+        table.clear()
+        table.setColumnCount(len(shown))
+        table.setRowCount(len(records))
+        for index, (header, state, source_field) in enumerate(shown):
+            item = QTableWidgetItem(header)
+            item.setIcon(state_icon(state))
+            table.setHorizontalHeaderItem(index, item)
+            for row, record in enumerate(records):
+                value = (getattr(record, "source_attributes", None) or {}).get(source_field)
+                cell = QTableWidgetItem("–" if value in (None, "") else str(value))
+                table.setItem(row, index, cell)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.verticalHeader().setVisible(False)
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.resizeColumnsToContents()
+        height = (table.horizontalHeader().sizeHint().height()
+                  + sum(table.rowHeight(r) for r in range(table.rowCount()))
+                  + table.horizontalScrollBar().sizeHint().height() + 6)
+        table.setFixedHeight(height)
+        table.viewport().installEventFilter(wheel_guard)  # wheel scrolls the panel
 
-        choice.currentIndexChanged.connect(explain)
-        explain()
+    def state_icon(state):
+        pixmap = QPixmap(10, 10)
+        pixmap.fill(QColor(STATE_COLORS[state][0]))
+        return QIcon(pixmap)
+
+    def label_row(page, layout, column, records):
+        """One column: coloured label (click: Kernfeld → Behalten → Ignoriert),
+        readable name, core-field choice (only for Kernfeld) and an example."""
+        key = (column.layer_id, column.source_field)
+        values = page.widgets["values"]
+        pill = QPushButton()
+        pill.setCursor(Qt.PointingHandCursor)
+        pill.setFixedWidth(PILL_WIDTH)
+        name = QLabel(f"<b>{column.readable_name or column.source_field}</b>")
+        name.setToolTip(f"Spalte in den Daten: {column.source_field}")
+        name.setWordWrap(True)
+        target = QComboBox()
+        for field_name in CORE_FIELDS:
+            target.addItem(core_field_name(field_name), field_name)
+            target.setItemData(target.count() - 1, choice_help(f"target:{field_name}"), Qt.ToolTipRole)
         row = QHBoxLayout()
-        row.setContentsMargins(INDENT_PX, 0, 0, 6)
-        row.addWidget(choice, 1)
-        row.addWidget(info)
+        row.setContentsMargins(0, 2, 0, 0)
+        row.addWidget(pill)
+        row.addWidget(name, 1)
+        row.addWidget(target)
         layout.addLayout(row)
-        return column, choice
+        if column.examples:
+            example = QLabel("z. B. " + ", ".join(str(e) for e in column.examples[:3]))
+            example.setWordWrap(True)
+            set_role(example, "hint")
+            layout.addWidget(indented(example))
+
+        def show():
+            state = state_of(values[key])
+            text, colour, border = STATE_LABELS[state], *STATE_COLORS[state]
+            pill.setText(text)
+            pill.setStyleSheet(
+                f"QPushButton {{ background: {colour}; border: 1px solid {border}; "
+                f"border-radius: 10px; padding: 2px 6px; color: #1f2328; }}")
+            pill.setToolTip(choice_help(values[key]) or "")
+            target.setVisible(state == "target")
+            if state == "target":
+                target.setCurrentIndex(max(target.findData(values[key].split(":", 1)[1]), 0))
+
+        def changed():
+            fill_preview(page.widgets["previews"][column.layer_id],
+                         page.widgets["columns_by_layer"][column.layer_id], values, records)
+            counts = page.widgets.get(f"counts_{column.layer_id}")
+            if counts is not None:
+                counts.setText(counts_text(page.widgets["columns_by_layer"][column.layer_id], values))
+            dock.clear_message()
+
+        def cycle():
+            values[key] = next_value(values[key], column)
+            show()
+            changed()
+
+        def pick(_index):
+            if state_of(values[key]) == "target":
+                values[key] = f"target:{target.currentData()}"
+                changed()
+
+        pill.clicked.connect(cycle)
+        target.currentIndexChanged.connect(pick)
+        show()
 
     def validate_columns(page):
         flow = workflow()
-        if "auto_decisions" in page.widgets:  # automatic: the preselection as shown
-            decisions = page.widgets["auto_decisions"]
-        else:
-            decisions = [decision_from_value(column, combo.currentData())
-                         for column, combo in page.widgets["column_inputs"]]
+        values = page.widgets["values"]
+        by_key = {(c.layer_id, c.source_field): c for c in flow.result.columns}
+        decisions = [decision_from_value(by_key[key], value) for key, value in values.items()]
         try:
             apply_column_decisions([], flow.result.columns, decisions)  # checks doubles
         except ValueError as error:
