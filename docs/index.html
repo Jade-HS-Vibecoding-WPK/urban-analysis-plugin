@@ -151,7 +151,10 @@
       [0,1,2].map(function (i) { return '<line x1="40" y1="' + (20 + i * 55) + '" x2="460" y2="' + (20 + i * 55) + '"/>'; }).join("") +
       '</g><line x1="40" y1="150" x2="160" y2="150" stroke="var(--accent)" stroke-width="4"/><text x="40" y="167">0</text><text x="148" y="167">100 m</text>' +
       '<rect x="480" y="40" width="70" height="70" rx="6" fill="var(--accent-light)" stroke="var(--accent)"/><text x="489" y="80">EPSG:</text><text x="489" y="95">25832</text></svg>',
-    gebiet: '<svg viewBox="0 0 560 190" aria-hidden="true">' +
+    gebiet: '<svg viewBox="0 0 560 220" aria-hidden="true">' +
+      '<rect x="5" y="0" width="550" height="26" rx="5" fill="var(--accent-light)"/>' +
+      '<text x="16" y="18">ℹ  Um jedes Gebiet kann zusätzlich ein Puffer gelegt werden.</text>' +
+      '<g transform="translate(0,30)">' +
       '<g transform="translate(0,0)"><rect x="5" y="10" width="170" height="140" rx="6" fill="#f6f7f9" stroke="#c9ced6"/>' +
       '<path d="M30 40 L120 30 L150 90 L95 130 L35 110 Z" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="2"/>' +
       '<text x="20" y="175">vorhandener Layer</text></g>' +
@@ -160,20 +163,17 @@
       '<g fill="#fff" stroke="var(--accent)" stroke-width="2"><circle cx="40" cy="50" r="5"/><circle cx="110" cy="35" r="5"/><circle cx="150" cy="80" r="5"/><circle cx="120" cy="125" r="5"/><circle cx="50" cy="120" r="5"/></g>' +
       '<text x="30" y="175">Polygon zeichnen</text></g>' +
       '<g transform="translate(380,0)"><rect x="5" y="10" width="170" height="140" rx="6" fill="#f6f7f9" stroke="#c9ced6"/>' +
-      '<rect x="25" y="25" width="130" height="110" fill="none" stroke="#8a8f96" stroke-width="2" stroke-dasharray="6 5"/>' +
-      '<rect x="45" y="45" width="90" height="70" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="2"/>' +
-      '<g fill="#fff" stroke="var(--accent)" stroke-width="2"><circle cx="45" cy="45" r="5"/><circle cx="135" cy="115" r="5"/></g>' +
-      '<text x="12" y="175">Rechteck: 2 Klicks + Puffer</text></g></svg>',
-    daten: '<svg viewBox="0 0 560 170" aria-hidden="true">' +
-      ['OpenStreetMap', 'ALKIS (Land)', 'Eigene Datei'].map(function (t, i) {
-        return '<g transform="translate(' + (20 + i * 180) + ',' + (20 + i * 12) + ')"><path d="M0 40 L70 10 L160 40 L90 70 Z" fill="' + (i === 1 ? 'var(--accent-light)' : '#eef0f3') +
-          '" stroke="var(--accent)" stroke-width="2"/><path d="M0 60 L90 90 L160 60" fill="none" stroke="#c9ced6" stroke-width="2"/><text x="20" y="120">' + t + '</text></g>';
-      }).join("") + '</svg>',
-    laden: '<svg viewBox="0 0 560 170" aria-hidden="true">' +
-      [0,1,2,3,4,5,6,7].map(function (i) { var x = 120 + (i % 4) * 82, y = 15 + Math.floor(i / 4) * 70;
-        return '<rect x="' + x + '" y="' + y + '" width="76" height="64" rx="4" fill="' + (i < 5 ? 'var(--accent-light)' : '#f3f4f6') + '" stroke="' + (i < 5 ? 'var(--accent)' : '#c9ced6') + '"/>' +
-          (i < 5 ? '<path d="M' + (x + 26) + ' ' + (y + 33) + ' l9 9 l16 -18" fill="none" stroke="var(--accent)" stroke-width="3"/>' : ''); }).join("") +
-      '<text x="120" y="164">Kacheln von etwa 1 km – danach zu einem Layer zusammengefügt</text></svg>',
+      '<rect x="35" y="35" width="110" height="90" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="2"/>' +
+      '<g fill="#fff" stroke="var(--accent)" stroke-width="2"><circle cx="35" cy="35" r="5"/><circle cx="145" cy="125" r="5"/></g>' +
+      '<text x="30" y="175">Rechteck zeichnen</text></g></g></svg>',
+    daten: '<svg viewBox="0 0 560 150" aria-hidden="true">' +
+      [['OpenStreetMap', 0], ['ALKIS', 0], ['Eigene Dateien', 0], ['später: Zensus …', 1]].map(function (t, i) {
+        var plan = t[1];
+        return '<g transform="translate(' + (8 + i * 138) + ',10)"><path d="M0 35 L60 8 L125 35 L65 62 Z" fill="' + (plan ? '#fff' : 'var(--accent-light)') +
+          '" stroke="' + (plan ? '#9aa0a8' : 'var(--accent)') + '" stroke-width="2"' + (plan ? ' stroke-dasharray="5 4"' : '') + '/>' +
+          '<path d="M0 50 L65 77 L125 50" fill="none" stroke="#c9ced6" stroke-width="2"/><text x="' + (plan ? 6 : 14) + '" y="108">' + t[0] + '</text></g>';
+      }).join("") +
+      '<text x="8" y="142">Mehrere Quellen kombinieren → in den nächsten Schritten zusammengeführt</text></svg>',
     wartung: '<svg viewBox="0 0 560 160" aria-hidden="true">' +
       '<rect x="30" y="30" width="170" height="80" rx="10" fill="#f3f4f6" stroke="#c9ced6"/><text x="60" y="75">OSM-Server</text>' +
       '<path d="M170 40 l20 20 m0 -20 l-20 20" stroke="#c0392b" stroke-width="4"/>' +
@@ -184,14 +184,12 @@
 
   // Jede Seite: Plugin-Bild, Knopf unten rechts (btn), Karte oder Anleitung, Erklärung
   var PAGES = [
-    { step: 1, shot: "01-kbs", btn: "CRS übernehmen", guide: ["Was passiert in QGIS?", "Das Projekt bekommt ein Koordinatensystem in Metern. So stimmen später Abstände, Flächen und der Maßstab im PDF.", "kbs"],
-      text: "Projekt-KBS: ein Koordinatensystem in Metern wählen, z. B. EPSG:25832. Das Plugin rechnet nie heimlich um." },
-    { step: 2, shot: "02-gebiet", btn: "Gebiet übernehmen", guide: ["Was machst du in der Karte?", "Du markierst dein Untersuchungsgebiet: einen vorhandenen Layer wählen, ein Polygon zeichnen oder ein Rechteck mit zwei Klicks aufziehen. Grau gestrichelt erscheint Gebiet + Puffer – genau dieser Bereich wird geladen.", "gebiet"],
-      text: "Untersuchungsgebiet: Layer nehmen, Polygon zeichnen oder Rechteck mit zwei Klicks; dazu der Puffer. Die Größe steht sofort da." },
-    { step: 3, shot: "03-daten", btn: "Speicherort wählen", guide: ["Was kommt in die Karte?", "Noch ist die Karte leer. Gleich kommen die Daten als Layer dazu – aus OpenStreetMap, aus ALKIS deines Bundeslands und/oder aus eigenen Dateien.", "daten"],
-      text: "Daten laden: OpenStreetMap, ALKIS des Bundeslands und eigene Dateien – auch mehrere zugleich." },
-    { step: 3, shot: "03-laden", btn: "Daten laden", disabled: true, guide: ["Was passiert gerade?", "Die Daten werden in Kacheln von etwa 1 km heruntergeladen und anschließend zu einem Layer je Quelle zusammengefügt.", "laden"],
-      text: "Beim Laden zeigt das Plugin den Fortschritt – klassisch als Balken, im Pixel-Stil zieht der Hase die Angel ein." },
+    { step: 1, shot: "01-kbs", btn: "CRS übernehmen", guide: ["Was passiert in QGIS?", "Du legst einmal das Koordinatensystem (KBS) des Projekts fest. Alle Layer, die später geladen werden, kommen automatisch in dieses KBS – so gibt es keine Projektionsprobleme, und Abstände, Flächen und Maßstab stimmen.", "kbs"],
+      text: "Projekt-KBS: einmal ein Koordinatensystem in Metern wählen, z. B. EPSG:25832 – alle später geladenen Layer werden darin angezeigt." },
+    { step: 2, shot: "02-gebiet", btn: "Gebiet übernehmen", guide: ["Was machst du in der Karte?", "Du markierst dein Untersuchungsgebiet: einen vorhandenen Layer wählen, ein Polygon zeichnen oder ein Rechteck zeichnen.", "gebiet"],
+      text: "Untersuchungsgebiet: vorhandenen Layer wählen, Polygon zeichnen oder Rechteck zeichnen – auf Wunsch mit Puffer um das Gebiet." },
+    { step: 3, shot: "03-daten", btn: "Speicherort wählen", guide: ["Welche Daten möchtest du?", "Du wählst selbst, welche Daten du lädst. Direkt im Plugin gibt es OpenStreetMap und ALKIS, dazu eigene Dateien. Mehrere Quellen lassen sich kombinieren – in den nächsten Schritten werden sie zusammengeführt. Weitere Quellen wie Zensusdaten sind vorgesehen.", "daten"],
+      text: "Daten laden: selbst wählen, welche Daten – OpenStreetMap, ALKIS und eigene Dateien, auch mehrere zugleich." },
     { step: 3, shot: "03-wartung", only: "pixel", guide: ["Was passiert, wenn ein Dienst ausfällt?", "Antwortet der OSM-Server nicht, springt der Niedersachsen-Cache ein – nie still, immer mit Hinweis und Datenstand.", "wartung"],
       text: "Ehrlich statt still: Ist ein Dienst in Wartung, sagt das Plugin das und nennt einen Ausweg." },
     { step: 4, shot: "04-pruefen", btn: "Hinweise geprüft", map: { bild: "09-karte-nutzung", label: "Geladene Layer" }, note: "Alle geladenen Layer liegen jetzt in der Karte. Das Plugin prüft, was angekommen ist und was fehlt.",
