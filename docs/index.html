@@ -23,15 +23,20 @@
   [hidden] { display: none !important; }
 
   /* Kopf- und Fußzeile mit fester Höhe, damit das Plugin-Bild genau passt */
-  :root { --head: 48px; --foot: 56px; --dockhead: 26px; }
+  :root { --head: 48px; --foot: 56px; --dockhead: 26px; --vh: 100vh; }
+  @supports (height: 100dvh) { :root { --vh: 100dvh; } }
+  /* Größe des Plugin-Bildes fest ausrechnen (Bild 820 × 1100) – ohne aspect-ratio und Prozenthöhen,
+     damit Safari, Chrome und Firefox gleich rechnen: so hoch wie möglich, aber höchstens gut die halbe Breite */
+  :root { --stage: calc(var(--vh) - var(--head) - var(--foot));
+          --fw: min(calc((var(--stage) - var(--dockhead)) * 0.74545), 52vw);
+          --fh: calc(var(--fw) * 1.34146); }
   .titlebar { height: var(--head); display: flex; align-items: center; gap: 12px; padding: 0 18px; background: #2b2d31; color: #e8e9eb; }
   .titlebar h1 { flex: 1; font-size: 1rem; font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .titlebar h1 span { font-weight: 400; color: #9aa0a8; }
   .stilinfo { font-size: .82rem; color: #b9bec5; white-space: nowrap; }
 
   /* PC: links Kartenfenster, rechts das Plugin – so groß, wie die Höhe erlaubt */
-  .workspace { height: calc(100vh - var(--head) - var(--foot)); height: calc(100dvh - var(--head) - var(--foot));
-               display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .workspace { height: var(--stage); display: grid; grid-template-columns: minmax(0, 1fr) var(--fw); }
   .is-intro .workspace, .is-final .workspace { grid-template-columns: 1fr; }
   .is-intro .dock, .is-final .dock { display: none; }
 
@@ -46,10 +51,10 @@
   .final .result { position: relative; min-height: 0; background: #fff; border: 1px solid #d5d9df; border-radius: 10px; overflow: hidden; }
   .final .result img { position: absolute; inset: 44px 0 0 0; width: 100%; height: calc(100% - 44px); object-fit: contain; }
   .final .result .maptabs { left: 12px; right: 12px; justify-content: flex-start; }
-  .dock { display: flex; flex-direction: column; background: var(--dock-bg); border-left: 1px solid #c4c4c4; min-height: 0; }
-  .dockhead { height: var(--dockhead); font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 4px 10px; }
-  .frame { position: relative; container-type: inline-size; height: calc(100% - var(--dockhead)); aspect-ratio: 820 / 1100; }
-  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .dock { width: var(--fw); background: var(--dock-bg); border-left: 1px solid #c4c4c4; overflow: hidden; }
+  .dockhead { height: var(--dockhead); font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 4px 10px; box-sizing: border-box; }
+  .frame { position: relative; width: var(--fw); height: var(--fh); }
+  .frame img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
 
   /* Klickflächen im Plugin-Bild (Positionen in Prozent des Bildes) */
   .hit { position: absolute; border: 2px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; padding: 0; }
@@ -58,11 +63,12 @@
   /* Ecke unten rechts: überdeckt die macOS-Vorschau in manchen Screenshots und zeigt den echten Knopf */
   .patch { position: absolute; left: 72%; right: 0; top: 94.2%; bottom: 0; background: var(--dock-bg); }
   .patch.small { left: 82%; top: 96.2%; }
-  .pbtn { position: absolute; right: 2.4%; top: 95.1%; height: 3.3%; padding: 0 2.6cqw; white-space: nowrap; cursor: pointer;
-          background: #2f6fb0; color: #fff; border: 1px solid #1b4672; border-radius: .9cqw; font: 700 2.55cqw/1 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  .pbtn { position: absolute; right: 2.4%; top: 95.1%; height: 3.3%; padding: 0 calc(var(--fw) * .026); white-space: nowrap; cursor: pointer;
+          background: #2f6fb0; color: #fff; border: 1px solid #1b4672; border-radius: calc(var(--fw) * .009);
+          font: 700 calc(var(--fw) * .0255)/1 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           animation: glow 1.8s ease-in-out infinite; }
   [data-stil="pixel"] .pbtn { top: 95.15%; height: 2.85%; background: #E8655A; border: 0; border-radius: 0;
-          font: 400 1.6cqw/1 "JetBrains Mono", Menlo, Consolas, "Courier New", monospace; }
+          font: 400 calc(var(--fw) * .016)/1 "JetBrains Mono", Menlo, Consolas, "Courier New", monospace; }
   /* größere, unsichtbare Tippfläche für Finger (Handy) – die Optik bleibt gleich */
   .hit::after, .pbtn::after { content: ""; position: absolute; inset: -14px -10px; }
   @keyframes glow { 0%, 100% { box-shadow: 0 0 0 2px var(--accent-light), 0 0 3px 3px var(--accent); }
@@ -114,24 +120,25 @@
   /* Fußzeile: nur die Erklärung – bedient wird alles im Plugin */
   .status { height: var(--foot); display: flex; align-items: center; gap: 14px; padding: 0 18px; background: #fff; border-top: 1px solid #c4c4c4; }
   .status .step { font-weight: 700; white-space: nowrap; color: var(--accent-dark); }
-  .status p { margin: 0; flex: 1; min-width: 0; font-size: .95rem; }
+  .status p { margin: 0; flex: 1; min-width: 0; font-size: .95rem; line-height: 1.3;
+              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .status p small { color: #888; white-space: nowrap; }
 
   /* Handy: Plugin oben (passt auf den Bildschirm), Hinweis darunter */
   @media (max-width: 900px) {
-    :root { --foot: auto; }
+    :root { --fw: min(calc(100vw - 24px), calc((var(--vh) - var(--head) - 110px) * 0.74545)); }
     .titlebar { padding: 0 12px; } .titlebar h1 span, .stilinfo { display: none; }
     .workspace { height: auto; display: flex; flex-direction: column; }
-    .dock { order: 1; border-left: 0; align-items: center; padding: 10px 0; }
+    .dock { order: 1; width: auto; border-left: 0; padding: 10px 0; overflow: visible; }
     .dockhead { display: none; }
-    .frame { height: auto; width: min(calc(100vw - 24px), calc((100dvh - var(--head) - 110px) * 820 / 1100)); }
+    .frame { margin: 0 auto; }
     .canvas { order: 2; min-height: 340px; border-top: 1px solid #c4c4c4; }
     .guide, .intro { position: relative; inset: auto; padding: 14px; }
     .card { padding: 14px 16px; }
     .canvas > img { position: relative; height: 340px; }
     .note { position: relative; left: auto; bottom: auto; max-width: none; margin: 12px; }
     .status { position: sticky; bottom: 0; height: auto; flex-wrap: wrap; gap: 2px 10px; padding: 10px 12px; }
-    .status p { flex-basis: 100%; font-size: .88rem; }
+    .status p { flex-basis: 100%; font-size: .88rem; display: block; overflow: visible; }
     .final { position: relative; inset: auto; grid-template-columns: 1fr; padding: 14px; gap: 14px; }
     .final .result { height: 420px; }
     .final .result .maptabs { flex-wrap: wrap; }
