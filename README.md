@@ -70,6 +70,10 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
 | **8 · Ausgabe** | **8 · Speichern** | **Ergebnis: Schwarzplan** |
 | <img src="docs/bilder/08-ausgabe-klassisch.jpg" alt="Schritt 8: Ausgabe" width="240"> | <img src="docs/bilder/08-speichern-klassisch.jpg" alt="Schritt 8: Speichern als PDF und GeoPackage" width="240"> | <img src="docs/bilder/09-karte-schwarzplan.jpg" alt="Ergebnis-Karte als Schwarzplan" width="240"> |
 
+**Ergebnis als PDF** – mit Legende, Nordpfeil, Maßstab und Quellenangaben:
+
+<img src="docs/bilder/09-pdf.webp" alt="Beispiel-PDF: Mobilität & Erschließung, Maßstab 1:5.000, mit Legende und Quellen" width="720">
+
 Mehr Bilder, auch im Pixel-Stil, zeigt die [Live-Demo](https://jade-hs-vibecoding-wpk.github.io/urban-analysis-plugin/).
 
 ### Ergebnisse
