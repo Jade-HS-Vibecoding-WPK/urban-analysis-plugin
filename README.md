@@ -13,6 +13,15 @@ Urban Design (Wintersemester 2026/27).
 > **Stand:** experimentell (Version 0.1). Das Plugin funktioniert für ganz Deutschland,
 > getestet wurde vor allem in Oldenburg (Niedersachsen).
 
+**[⬇ Plugin herunterladen (ZIP)](https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin/releases/latest/download/urban_analysis_plugin.zip)**
+· **[Live-Demo ansehen](https://jade-hs-vibecoding-wpk.github.io/urban-analysis-plugin/)**
+
+<p>
+  <img src="docs/bilder/03-daten-klassisch.jpg" alt="Schritt 3: Daten laden aus OSM und ALKIS" width="260">
+  <img src="docs/bilder/07-thema-klassisch.jpg" alt="Schritt 7: Kartenthema mit vorausgewählten Layern" width="260">
+  <img src="docs/bilder/09-erreichbarkeit.jpg" alt="Ergebnis: Erreichbarkeit mit Ringen um die Ziele" width="300">
+</p>
+
 ---
 
 ## Unser Anspruch: nah an den Daten, fachlich sauber
@@ -52,6 +61,20 @@ Das Plugin soll nichts „schöner rechnen“, als die Daten sind:
    und lassen sich einzeln an- und abwählen (siehe unten).
 8. **Verarbeitung** – Ergebnis-Layer erzeugen, Erreichbarkeit berechnen, Quellenangabe
    je Datenquelle prüfen, speichern.
+
+#### So sieht die Bedienung aus
+
+| 2 · Gebiet wählen | 4 · Layer prüfen | 6 · Quellen abgleichen |
+| :---: | :---: | :---: |
+| <img src="docs/bilder/02-gebiet-klassisch.jpg" alt="Schritt 2: Untersuchungsgebiet" width="240"> | <img src="docs/bilder/04-pruefen-klassisch.jpg" alt="Schritt 4: Layer prüfen" width="240"> | <img src="docs/bilder/06-quellen-klassisch.jpg" alt="Schritt 6: Quellen abgleichen" width="240"> |
+| **8 · Ausgabe** | **8 · Speichern** | **Ergebnis: Schwarzplan** |
+| <img src="docs/bilder/08-ausgabe-klassisch.jpg" alt="Schritt 8: Ausgabe" width="240"> | <img src="docs/bilder/08-speichern-klassisch.jpg" alt="Schritt 8: Speichern als PDF und GeoPackage" width="240"> | <img src="docs/bilder/09-karte-schwarzplan.jpg" alt="Ergebnis-Karte als Schwarzplan" width="240"> |
+
+**Ergebnis als PDF** – mit Legende, Nordpfeil, Maßstab und Quellenangaben:
+
+<img src="docs/bilder/09-pdf.webp" alt="Beispiel-PDF: Mobilität & Erschließung, Maßstab 1:5.000, mit Legende und Quellen" width="720">
+
+Mehr Bilder, auch im Pixel-Stil, zeigt die [Live-Demo](https://jade-hs-vibecoding-wpk.github.io/urban-analysis-plugin/).
 
 ### Ergebnisse
 
@@ -111,8 +134,9 @@ Sieben allgemeine Themen, die zu jeder Analyseaufgabe und jedem Gebiet passen:
 
 Voraussetzung: **QGIS 3.44 oder neuer** (Windows oder macOS).
 
-1. Plugin-ZIP besorgen – fertig herunterladen (sobald es unter „Releases“ eines gibt)
-   oder im heruntergeladenen Repository selbst bauen:
+1. Plugin-ZIP besorgen – **[hier herunterladen](https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin/releases/latest/download/urban_analysis_plugin.zip)**
+   (immer die neueste Version, nicht entpacken) oder im heruntergeladenen Repository
+   selbst bauen:
    ```bash
    python build_plugin_zip.py
    ```

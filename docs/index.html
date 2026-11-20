@@ -4,231 +4,399 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Urban Analysis – Live-Demo</title>
-<meta name="description" content="Live-Demo des QGIS-Plugins Urban Analysis: zum Durchklicken wie in QGIS, in den Stilen Klassisch und Pixel.">
+<meta name="description" content="Live-Demo des QGIS-Plugins Urban Analysis: Schritt für Schritt durchklicken, im Stil Klassisch oder Pixel.">
 <style>
-  /* Farben wie im Plugin (urban_analysis/theme.py); der QGIS-Rahmen bleibt neutral grau */
+  /* Farben wie im Plugin (urban_analysis/theme.py) */
   :root, [data-stil="klassisch"] {
     --accent: #2f6fb0; --accent-dark: #1b4672; --accent-light: #e6f0fa;
-    --dock-bg: #f6f7f9; --dock-line: #c9ced6; --text: #1f2328; --muted: #5b6470;
-    --radius: 4px; --font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --dock-bg: #f6f7f9; --muted: #5b6470;
   }
   [data-stil="pixel"] {
     --accent: #E8655A; --accent-dark: #B8463D; --accent-light: #F9DDD9;
-    --dock-bg: #D3E6DF; --dock-line: #1E3B38; --text: #1E3B38; --muted: #4F6B66;
-    --radius: 0; --font: "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, "Courier New", monospace;
+    --dock-bg: #D3E6DF; --muted: #4F6B66;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { background: #3c3f44; color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-         display: flex; flex-direction: column; }
+  html, body { margin: 0; }
+  body { background: #e9ebee; color: #1f2328; font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   button { font: inherit; }
   button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
 
-  /* Fensterleiste und Werkzeugleiste wie in QGIS */
-  .titlebar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: #2b2d31; color: #e8e9eb; }
-  .lights { display: flex; gap: 6px; }
-  .lights i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; display: block; }
-  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
-  .titlebar h1 { flex: 1; text-align: center; font-size: .85rem; font-weight: 500; margin: 0; color: #c9ccd1; }
-  .switch { display: inline-flex; border: 1px solid #5b6068; border-radius: 6px; overflow: hidden; }
-  .switch button { padding: 4px 11px; border: 0; background: #3c3f44; color: #e8e9eb; cursor: pointer; font-size: .8rem; }
-  .switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-  .toolbar { flex: none; display: flex; gap: 4px; padding: 5px 10px; background: #ececec; border-bottom: 1px solid #c4c4c4; overflow: hidden; }
-  .toolbar span { width: 22px; height: 22px; border-radius: 3px; background: linear-gradient(#fafafa, #dedede); border: 1px solid #c8c8c8; flex: none; }
-  .toolbar span.sep { width: 1px; background: #c4c4c4; border: 0; margin: 0 4px; }
-  .toolbar span.ua { background: var(--accent); border-color: var(--accent-dark); }
+  /* Kopf- und Fußzeile mit fester Höhe, damit das Plugin-Bild genau passt */
+  :root { --head: 48px; --foot: 56px; --dockhead: 26px; }
+  .titlebar { height: var(--head); display: flex; align-items: center; gap: 12px; padding: 0 18px; background: #2b2d31; color: #e8e9eb; }
+  .titlebar h1 { flex: 1; font-size: 1rem; font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .titlebar h1 span { font-weight: 400; color: #9aa0a8; }
+  .stilinfo { font-size: .82rem; color: #b9bec5; white-space: nowrap; }
 
-  /* Arbeitsfläche: Kartenfenster links, Plugin-Dock rechts */
-  .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; background: #ececec; }
-  .canvas { position: relative; min-width: 0; display: grid; place-items: center; background: #fff; border-right: 1px solid #c4c4c4; overflow: hidden; }
-  .canvas img { max-width: 100%; max-height: 100%; display: block; object-fit: contain; }
-  .canvas .label { position: absolute; left: 10px; top: 10px; background: rgba(255,255,255,.92); border: 1px solid #c4c4c4; border-radius: 4px;
-                   padding: 3px 8px; font-size: .78rem; color: #333; }
-  .canvas .empty { color: #8a8f96; font-size: .95rem; text-align: center; padding: 20px; }
-  .canvas .empty b { display: block; font-size: 1.1rem; color: #5b6068; margin-bottom: 4px; }
-  .maptabs { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; }
-  .maptabs button { border: 1px solid #c4c4c4; background: rgba(255,255,255,.92); border-radius: 4px; padding: 3px 9px; font-size: .78rem; cursor: pointer; }
+  /* PC: links Kartenfenster, rechts das Plugin – so groß, wie die Höhe erlaubt */
+  .workspace { height: calc(100vh - var(--head) - var(--foot)); height: calc(100dvh - var(--head) - var(--foot));
+               display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .is-intro .workspace, .is-final .workspace { grid-template-columns: 1fr; }
+  .is-intro .dock, .is-final .dock { display: none; }
+
+  /* letzte Seite: Abschluss links, Ergebnisse groß rechts – ohne Plugin-Fenster */
+  .final { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 24px; padding: 24px; }
+  .final .done { align-self: center; }
+  .final .done h2 { margin: 0 0 6px; font-size: 2rem; color: var(--accent-dark); }
+  .final .done ul { margin: 0 0 18px; padding-left: 20px; }
+  .final .done li { margin: 3px 0; }
+  .final .actions { flex-direction: column; }
+  .final .actions a, .final .actions button { padding: 11px 16px; font-size: 1.05rem; text-align: center; }
+  .final .result { position: relative; min-height: 0; background: #fff; border: 1px solid #d5d9df; border-radius: 10px; overflow: hidden; }
+  .final .result img { position: absolute; inset: 44px 0 0 0; width: 100%; height: calc(100% - 44px); object-fit: contain; }
+  .final .result .maptabs { left: 12px; right: 12px; justify-content: flex-start; }
+  .dock { display: flex; flex-direction: column; background: var(--dock-bg); border-left: 1px solid #c4c4c4; min-height: 0; }
+  .dockhead { height: var(--dockhead); font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 4px 10px; }
+  .frame { position: relative; container-type: inline-size; height: calc(100% - var(--dockhead)); aspect-ratio: 820 / 1100; }
+  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* Klickflächen im Plugin-Bild (Positionen in Prozent des Bildes) */
+  .hit { position: absolute; border: 2px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; padding: 0; }
+  .hit:hover, .hit:focus-visible { border-color: var(--accent); background: rgba(255,255,255,.25); }
+  .hit.glow { border-color: transparent; animation: glow 1.8s ease-in-out infinite; }
+  /* Ecke unten rechts: überdeckt die macOS-Vorschau in manchen Screenshots und zeigt den echten Knopf */
+  .patch { position: absolute; left: 72%; right: 0; top: 94.2%; bottom: 0; background: var(--dock-bg); }
+  .patch.small { left: 82%; top: 96.2%; }
+  .pbtn { position: absolute; right: 2.4%; top: 95.1%; height: 3.3%; padding: 0 2.6cqw; white-space: nowrap; cursor: pointer;
+          background: #2f6fb0; color: #fff; border: 1px solid #1b4672; border-radius: .9cqw; font: 700 2.55cqw/1 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          animation: glow 1.8s ease-in-out infinite; }
+  [data-stil="pixel"] .pbtn { top: 95.15%; height: 2.85%; background: #E8655A; border: 0; border-radius: 0;
+          font: 400 1.6cqw/1 "JetBrains Mono", Menlo, Consolas, "Courier New", monospace; }
+  /* größere, unsichtbare Tippfläche für Finger (Handy) – die Optik bleibt gleich */
+  .hit::after, .pbtn::after { content: ""; position: absolute; inset: -14px -10px; }
+  @keyframes glow { 0%, 100% { box-shadow: 0 0 0 2px var(--accent-light), 0 0 3px 3px var(--accent); }
+                    50% { box-shadow: 0 0 0 3px var(--accent-light), 0 0 14px 7px var(--accent); } }
+  @media (prefers-reduced-motion: reduce) { .hit.glow, .pbtn { animation: none; box-shadow: 0 0 0 3px var(--accent); } }
+
+  /* linke Fläche: Hinweiskarte (bis Schritt 7) oder die echte Karte (Schritt 8) */
+  .canvas { position: relative; min-width: 0; overflow: hidden; background: #f3f4f6 radial-gradient(#d9dde3 1px, transparent 1px) 0 0 / 22px 22px; }
+  .canvas > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
+  .tag { position: absolute; left: 12px; top: 12px; background: rgba(255,255,255,.94); border: 1px solid #c4c4c4; border-radius: 5px; padding: 3px 9px; font-size: .8rem; color: #333; }
+  .maptabs { position: absolute; right: 12px; top: 12px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .maptabs button { border: 1px solid #c4c4c4; background: rgba(255,255,255,.94); border-radius: 5px; padding: 3px 9px; font-size: .8rem; cursor: pointer; }
   .maptabs button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent-dark); color: #fff; }
 
-  .dock { display: flex; flex-direction: column; min-height: 0; background: var(--dock-bg); border-left: 1px solid var(--dock-line); }
-  .dockhead { flex: none; font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 3px 8px; }
-  .shot { position: relative; flex: 1; min-height: 0; display: flex; justify-content: center; }
-  .shot img { height: 100%; max-height: calc(100vh - 130px); width: auto; display: block; }
-  /* klickbare Knöpfe im Bild: unten links „Zurück“, unten rechts der Hauptknopf */
-  .hot { position: absolute; bottom: 1.2%; height: 5.6%; border: 0; background: transparent; cursor: pointer; border-radius: var(--radius); }
-  .hot.back { left: 2%; width: 22%; }
-  .hot.next { right: 2%; width: 40%; }
-  .hot.next::after { content: ""; position: absolute; inset: -3px; border: 3px solid var(--accent); border-radius: inherit; animation: pulse 1.6s ease-out infinite; }
-  .hot:hover { background: rgba(0,0,0,.06); }
-  @keyframes pulse { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.12); } }
-  @media (prefers-reduced-motion: reduce) { .hot.next::after { animation: none; opacity: .7; } }
+  .card { background: #fff; border: 1px solid #d5d9df; border-left: 4px solid var(--accent); border-radius: 10px; padding: 20px 24px; box-shadow: 0 6px 24px rgba(0,0,0,.07); }
+  .card .kicker { display: block; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .card h3 { margin: 0 0 6px; font-size: 1.2rem; color: var(--accent-dark); }
+  .card p { margin: 0 0 14px; }
+  .card p:last-child { margin-bottom: 0; }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card svg text { font: 12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif; fill: #444; }
+  .guide .card.wide { width: min(1100px, 100%); }
+  .card .preview { width: 100%; max-height: 62vh; object-fit: contain; display: block; border: 1px solid #d5d9df; border-radius: 6px; background: #fff; }
+  .guide { position: absolute; inset: 0; display: grid; place-items: center; padding: 28px; overflow: auto; }
+  .guide .card { width: min(640px, 100%); }
+  .note { position: absolute; left: 12px; bottom: 12px; max-width: min(480px, calc(100% - 24px)); padding: 12px 16px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .actions a, .actions button { border: 1px solid #b9b9b9; background: #fafafa; border-radius: 6px; padding: 7px 14px; cursor: pointer; color: #333; text-decoration: none; }
+  .actions .go { background: var(--accent); border-color: var(--accent-dark); color: #fff; font-weight: 600; }
 
-  /* Statuszeile wie in QGIS, mit der Erklärung zum Schritt */
-  .status { flex: none; display: flex; align-items: center; gap: 12px; padding: 7px 12px; background: #ececec; border-top: 1px solid #c4c4c4; color: #333; }
+  /* Startseite: nur Einleitung und Stilwahl */
+  .intro { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; }
+  .intro .card { max-width: 600px; border-left-width: 1px; }
+  .intro h2 { font-size: 2rem; margin: 0 0 8px; }
+  .choice { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin: 16px 0 12px; }
+  .choice button { width: 220px; border: 2px solid #c4c4c4; border-radius: 10px; background: #fff; padding: 16px 12px; cursor: pointer; color: #333; }
+  .choice button:hover { border-color: #2f6fb0; }
+  .choice b { display: block; font-size: 1.1rem; margin-bottom: 4px; }
+  .choice span { display: block; font-size: .85rem; color: #666; }
+  .choice .k b { color: #1b4672; } .choice .p b { color: #B8463D; font-family: Menlo, Consolas, monospace; }
+  .intro .hint { color: #555; font-size: .92rem; }
+  .intro .ask { margin: 18px 0 0; font-size: 1.3rem; font-weight: 700; color: #1b4672; }  .intro small { display: block; color: #777; margin-top: 14px; line-height: 1.5; }
+  .intro a { color: #1b4672; }
+
+  /* Fußzeile: nur die Erklärung – bedient wird alles im Plugin */
+  .status { height: var(--foot); display: flex; align-items: center; gap: 14px; padding: 0 18px; background: #fff; border-top: 1px solid #c4c4c4; }
   .status .step { font-weight: 700; white-space: nowrap; color: var(--accent-dark); }
-  .status p { margin: 0; flex: 1; min-width: 0; }
-  .status nav { display: flex; gap: 6px; flex: none; }
-  .status nav button { border: 1px solid #b9b9b9; background: #fafafa; border-radius: 4px; padding: 3px 10px; cursor: pointer; }
-  .status nav button.go { background: var(--accent); border-color: var(--accent-dark); color: #fff; }
-  .status nav button:disabled { opacity: .4; cursor: default; }
-  .status a { color: var(--accent-dark); }
+  .status p { margin: 0; flex: 1; min-width: 0; font-size: .95rem; }
+  .status p small { color: #888; white-space: nowrap; }
 
-  /* Startbildschirm über dem Kartenfenster */
-  .intro { max-width: 520px; text-align: center; padding: 24px; color: #333; }
-  .intro h2 { font-size: 1.6rem; margin: 0 0 8px; }
-  .intro p { margin: 0 0 10px; }
-  .intro .go { margin-top: 6px; border: 0; border-radius: 6px; padding: 10px 20px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
-  .intro small { display: block; color: #777; margin-top: 14px; line-height: 1.5; }
-  .intro a { color: var(--accent-dark); }
-
-  @media (max-width: 860px) {
-    html, body { height: auto; }
-    .workspace { grid-template-columns: 1fr; }
-    .canvas { min-height: 260px; border-right: 0; border-bottom: 1px solid #c4c4c4; }
-    .shot img { height: auto; width: 100%; max-height: none; }
-    .toolbar { display: none; }
-    .status { flex-wrap: wrap; }
-    .maptabs { left: 10px; right: 10px; top: auto; bottom: 10px; flex-wrap: wrap; }
+  /* Handy: Plugin oben (passt auf den Bildschirm), Hinweis darunter */
+  @media (max-width: 900px) {
+    :root { --foot: auto; }
+    .titlebar { padding: 0 12px; } .titlebar h1 span, .stilinfo { display: none; }
+    .workspace { height: auto; display: flex; flex-direction: column; }
+    .dock { order: 1; border-left: 0; align-items: center; padding: 10px 0; }
+    .dockhead { display: none; }
+    .frame { height: auto; width: min(calc(100vw - 24px), calc((100dvh - var(--head) - 110px) * 820 / 1100)); }
+    .canvas { order: 2; min-height: 340px; border-top: 1px solid #c4c4c4; }
+    .guide, .intro { position: relative; inset: auto; padding: 14px; }
+    .card { padding: 14px 16px; }
+    .canvas > img { position: relative; height: 340px; }
+    .note { position: relative; left: auto; bottom: auto; max-width: none; margin: 12px; }
+    .status { position: sticky; bottom: 0; height: auto; flex-wrap: wrap; gap: 2px 10px; padding: 10px 12px; }
+    .status p { flex-basis: 100%; font-size: .88rem; }
+    .final { position: relative; inset: auto; grid-template-columns: 1fr; padding: 14px; gap: 14px; }
+    .final .result { height: 420px; }
+    .final .result .maptabs { flex-wrap: wrap; }
+    .final .result img { inset: 76px 0 0 0; height: calc(100% - 76px); }
   }
 </style>
 </head>
-<body>
+<body class="is-intro">
 <div class="titlebar">
-  <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
-  <h1>QGIS – Urban Analysis (Live-Demo)</h1>
-  <div class="switch" role="group" aria-label="Stil des Plugins">
-    <button type="button" data-set="klassisch" aria-pressed="true">Klassisch</button>
-    <button type="button" data-set="pixel" aria-pressed="false">Pixel</button>
-  </div>
-</div>
-<div class="toolbar" aria-hidden="true">
-  <span></span><span></span><span></span><span class="sep"></span><span></span><span></span><span></span><span></span>
-  <span class="sep"></span><span></span><span></span><span class="sep"></span><span class="ua" title="Urban Analysis"></span>
+  <h1>Urban Analysis <span>· Live-Demo des QGIS-Plugins</span></h1>
+  <span class="stilinfo" id="stilinfo"></span>
 </div>
 
 <div class="workspace">
   <section class="canvas" id="canvas" aria-label="Kartenfenster"></section>
   <aside class="dock" aria-label="Plugin Urban Analysis">
     <div class="dockhead">Urban Analysis</div>
-    <div class="shot" id="shot"></div>
+    <div class="frame" id="shot"></div>
   </aside>
 </div>
 
 <div class="status">
   <span class="step" id="stepno"></span>
   <p id="caption"></p>
-  <nav aria-label="Blättern"><button type="button" id="prev">‹ Zurück</button><button type="button" class="go" id="next">Weiter ›</button></nav>
 </div>
 
 <script>
 (function () {
   var REPO = "https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin";
-  // Jede Seite: Plugin-Bild (ohne Stil-Endung), nur-ein-Stil, Kartenfenster, Erklärung
-  var MAP = { bild: "09-karte-nutzung", label: "Kartenfenster" };
+  var DOWNLOAD = REPO + "/releases/latest/download/urban_analysis_plugin.zip";
+
+  // Schemazeichnungen (einfach, in Akzentfarbe)
+  var SVG = {
+    kbs: '<svg viewBox="0 0 560 170" aria-hidden="true"><g stroke="#c9ced6">' +
+      [0,1,2,3,4,5,6,7].map(function (i) { return '<line x1="' + (40 + i * 60) + '" y1="20" x2="' + (40 + i * 60) + '" y2="130"/>'; }).join("") +
+      [0,1,2].map(function (i) { return '<line x1="40" y1="' + (20 + i * 55) + '" x2="460" y2="' + (20 + i * 55) + '"/>'; }).join("") +
+      '</g><line x1="40" y1="150" x2="160" y2="150" stroke="var(--accent)" stroke-width="4"/><text x="40" y="167">0</text><text x="148" y="167">100 m</text>' +
+      '<rect x="480" y="40" width="70" height="70" rx="6" fill="var(--accent-light)" stroke="var(--accent)"/><text x="489" y="80">EPSG:</text><text x="489" y="95">25832</text></svg>',
+    gebiet: '<svg viewBox="0 0 560 220" aria-hidden="true">' +
+      '<rect x="5" y="0" width="550" height="26" rx="5" fill="var(--accent-light)"/>' +
+      '<text x="16" y="18">ℹ  Um jedes Gebiet kann zusätzlich ein Puffer gelegt werden.</text>' +
+      '<g transform="translate(0,30)">' +
+      '<g><rect x="5" y="10" width="170" height="140" rx="6" fill="#f6f7f9" stroke="#c9ced6"/>' +
+      '<path d="M30 40 L120 30 L150 90 L95 130 L35 110 Z" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="2"/>' +
+      '<text x="20" y="175">vorhandener Layer</text></g>' +
+      '<g transform="translate(190,0)"><rect x="5" y="10" width="170" height="140" rx="6" fill="#f6f7f9" stroke="#c9ced6"/>' +
+      '<path d="M40 50 L110 35 L150 80 L120 125 L50 120 Z" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="2"/>' +
+      '<g fill="#fff" stroke="var(--accent)" stroke-width="2"><circle cx="40" cy="50" r="5"/><circle cx="110" cy="35" r="5"/><circle cx="150" cy="80" r="5"/><circle cx="120" cy="125" r="5"/><circle cx="50" cy="120" r="5"/></g>' +
+      '<text x="30" y="175">Polygon zeichnen</text></g>' +
+      '<g transform="translate(380,0)"><rect x="5" y="10" width="170" height="140" rx="6" fill="#f6f7f9" stroke="#c9ced6"/>' +
+      '<rect x="35" y="35" width="110" height="90" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="2"/>' +
+      '<g fill="#fff" stroke="var(--accent)" stroke-width="2"><circle cx="35" cy="35" r="5"/><circle cx="145" cy="125" r="5"/></g>' +
+      '<text x="30" y="175">Rechteck zeichnen</text></g></g></svg>',
+    daten: '<svg viewBox="0 0 560 150" aria-hidden="true">' +
+      [['OpenStreetMap', 0], ['ALKIS', 0], ['Eigene Dateien', 0], ['später: Zensus …', 1]].map(function (t, i) {
+        var plan = t[1];
+        return '<g transform="translate(' + (8 + i * 138) + ',10)"><path d="M0 35 L60 8 L125 35 L65 62 Z" fill="' + (plan ? '#fff' : 'var(--accent-light)') +
+          '" stroke="' + (plan ? '#9aa0a8' : 'var(--accent)') + '" stroke-width="2"' + (plan ? ' stroke-dasharray="5 4"' : '') + '/>' +
+          '<path d="M0 50 L65 77 L125 50" fill="none" stroke="#c9ced6" stroke-width="2"/><text x="' + (plan ? 6 : 14) + '" y="108">' + t[0] + '</text></g>';
+      }).join("") +
+      '<text x="8" y="142">Mehrere Quellen kombinieren → in den nächsten Schritten zusammengeführt</text></svg>',
+    wartung: '<svg viewBox="0 0 560 140" aria-hidden="true">' +
+      '<defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="var(--accent)"/></marker></defs>' +
+      '<rect x="30" y="30" width="170" height="80" rx="10" fill="#f3f4f6" stroke="#c9ced6"/><text x="60" y="75">OSM-Server</text>' +
+      '<path d="M170 40 l20 20 m0 -20 l-20 20" stroke="#c0392b" stroke-width="4"/>' +
+      '<path d="M215 70 H330" stroke="var(--accent)" stroke-width="3" marker-end="url(#a)"/>' +
+      '<rect x="345" y="30" width="190" height="80" rx="10" fill="var(--accent-light)" stroke="var(--accent)"/><text x="365" y="66">Niedersachsen-Cache</text><text x="365" y="86">mit Hinweis + Datenstand</text></svg>',
+    pruefen: '<svg viewBox="0 0 560 150" aria-hidden="true">' +
+      [['✓', 'Was ist angekommen?', '#2e7d32'], ['!', 'Was fehlt oder ist auffällig?', '#c77c02'], ['i', 'Zahlen und Details', 'var(--accent)']].map(function (t, i) {
+        return '<g transform="translate(10,' + (8 + i * 46) + ')"><circle cx="18" cy="18" r="16" fill="#fff" stroke="' + t[2] + '" stroke-width="3"/>' +
+          '<text x="18" y="18" text-anchor="middle" dominant-baseline="central" style="font-weight:700;fill:' + t[2] + ';font-size:17px">' + t[0] + '</text>' +
+          '<text x="48" y="18" dominant-baseline="central" style="font-size:15px">' + t[1] + '</text></g>';
+      }).join("") + '</svg>',
+    erzeugen: '<svg viewBox="0 0 560 160" aria-hidden="true">' +
+      '<rect x="10" y="8" width="300" height="28" rx="5" fill="var(--accent-light)" stroke="var(--accent)"/><text x="22" y="27" style="font-weight:600">▾ Urban Analysis – Ergebnis</text>' +
+      [['Bebauung', '#b0574f'], ['Verkehr', '#8a8f96'], ['Grün & Wasser', '#4f9a5e'], ['Einrichtungen', 'var(--accent)']].map(function (t, i) {
+        return '<g transform="translate(40,' + (46 + i * 27) + ')"><rect width="18" height="18" rx="3" fill="' + t[1] + '"/><text x="28" y="14">' + t[0] + '</text></g>';
+      }).join("") +
+      '<text x="340" y="70">neue Gruppe in QGIS –</text><text x="340" y="90">Rohdaten bleiben unverändert</text></svg>',
+    quellen: '<svg viewBox="0 0 560 180" aria-hidden="true">' +
+      '<defs><marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="var(--accent)"/></marker></defs>' +
+      '<rect x="40" y="30" width="120" height="90" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="3"/>' +
+      '<rect x="56" y="44" width="116" height="86" fill="none" stroke="#7a7f87" stroke-width="3" stroke-dasharray="7 5"/>' +
+      '<text x="40" y="22" style="fill:var(--accent-dark);font-weight:600">ALKIS</text><text x="128" y="148" style="font-weight:600">OSM</text>' +
+      '<text x="20" y="172">dasselbe Gebäude, zweimal</text>' +
+      '<path d="M205 80 H310" stroke="var(--accent)" stroke-width="3" marker-end="url(#b)"/>' +
+      '<text x="200" y="66">je Kategorie</text><text x="200" y="104">Quelle wählen</text>' +
+      '<rect x="360" y="35" width="120" height="90" fill="var(--accent-light)" stroke="var(--accent)" stroke-width="3"/>' +
+      '<text x="352" y="150">ein Gebäude (z. B. ALKIS)</text></svg>'
+  };
+
+  // Klickflächen in Bildpixeln (Bild 820 × 1100): [links, oben, rechts, unten]
+  var BACK = [20, 1043, 118, 1084];
+  var HIT = {
+    erzeugen: { klassisch: [603, 750, 774, 790], pixel: [633, 771, 770, 806] },
+    tabSpeichern: { klassisch: [545, 254, 799, 302], pixel: [545, 321, 799, 362] }
+  };
+
+  // Jede Seite: Plugin-Bild; vorwärts entweder Knopf unten rechts (btn) oder Klickfläche (hit);
+  // links eine Hinweiskarte (card) bis Schritt 7, ab Schritt 8 die echte Karte (map).
   var PAGES = [
-    { step: 1, shot: "01-kbs", canvas: null, text: "Projekt-KBS: ein Koordinatensystem in Metern wählen, z. B. EPSG:25832. Das Plugin rechnet nie heimlich um." },
-    { step: 2, shot: "02-gebiet", canvas: null, text: "Untersuchungsgebiet: Layer nehmen, Polygon zeichnen oder Rechteck mit zwei Klicks; dazu der Puffer. Die Größe steht sofort da." },
-    { step: 3, shot: "03-daten", canvas: null, text: "Daten laden: OpenStreetMap, ALKIS des Bundeslands und eigene Dateien – auch mehrere zugleich." },
-    { step: 3, shot: "03-laden", canvas: null, text: "Beim Laden zeigt das Plugin den Fortschritt – klassisch als Balken, im Pixel-Stil zieht der Hase die Angel ein." },
-    { step: 3, shot: "03-wartung", only: "pixel", canvas: null, text: "Ehrlich statt still: Ist ein Dienst in Wartung, sagt das Plugin das und nennt einen Ausweg." },
-    { step: 4, shot: "04-pruefen", canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Layer prüfen: Was ist angekommen, was fehlt? Warnungen und Infos auf einen Blick." },
-    { step: 4, shot: "04-infos", canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Jeder Hinweis sagt in einem Satz, was los ist – und was zu tun ist." },
-    { step: 5, shot: "05-spalten", canvas: { bild: "09-tabelle", label: "Attributtabelle – Gebäude" }, text: "Attributzuordnung: links das Ergebnis – die aufgeräumte Attributtabelle mit lesbaren Namen, Objekt-ID vorne, Herkunft hinten." },
-    { step: 6, shot: "06-quellen", canvas: { bild: "09-karte-schwarzplan", label: "Gebäude aus ALKIS und OSM" }, text: "Harmonisierung: Dasselbe Haus aus ALKIS und OSM? Je Kategorie die Quelle wählen – danach die unsicheren Dubletten." },
-    { step: 7, shot: "07-thema", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Kartenthema: eines von sieben Themen wählen, die passenden Layer sind vorausgewählt." },
-    { step: 7, shot: "07-mobilitaet", only: "klassisch", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Anderes Thema, andere Vorauswahl: bei Mobilität & Erschließung Straßen, Wege, Bahn und Haltestellen." },
-    { step: 8, shot: "08-ausgabe", canvas: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"]], label: "Ergebnis-Layer" },
-      text: "Ausgabe: Kartenstil wählen und die Ergebnis-Layer erzeugen – oben rechts im Kartenfenster umschalten." },
-    { step: 8, shot: "08-erreichbarkeit", canvas: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, text: "Erreichbarkeit: Abstand jedes Gebäudes zum nächsten Ziel, als Luftlinie, mit Ringen um die Ziele." },
-    { step: 8, shot: "08-speichern", canvas: { tabs: [["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Karte für das PDF" },
+    { step: 1, shot: "01-kbs", btn: "CRS übernehmen",
+      card: ["Was passiert in QGIS?", "Du legst einmal das Koordinatensystem (KBS) des Projekts fest. Alle Layer, die später geladen werden, kommen automatisch in dieses KBS – so gibt es keine Projektionsprobleme, und Abstände, Flächen und Maßstab stimmen.", "kbs"],
+      text: "Projekt-KBS: einmal ein Koordinatensystem in Metern wählen, z. B. EPSG:25832." },
+    { step: 2, shot: "02-gebiet", btn: "Gebiet übernehmen",
+      card: ["Was machst du in der Karte?", "Du markierst dein Untersuchungsgebiet: einen vorhandenen Layer wählen, ein Polygon zeichnen oder ein Rechteck zeichnen.", "gebiet"],
+      text: "Untersuchungsgebiet: vorhandenen Layer wählen, Polygon zeichnen oder Rechteck zeichnen – auf Wunsch mit Puffer." },
+    { step: 3, shot: "03-daten", btn: "Speicherort wählen",
+      card: ["Welche Daten möchtest du?", "Du wählst selbst, welche Daten du lädst. Direkt im Plugin gibt es OpenStreetMap und ALKIS, dazu eigene Dateien. Mehrere Quellen lassen sich kombinieren – in den nächsten Schritten werden sie zusammengeführt. Weitere Quellen wie Zensusdaten sind vorgesehen.", "daten"],
+      text: "Daten laden: selbst wählen, welche Daten – auch mehrere Quellen zugleich." },
+    { step: 3, shot: "03-wartung", alt: { klassisch: "03-daten" }, btn: "Weiter",
+      card: ["Was passiert, wenn ein Dienst ausfällt?", "Antwortet der OSM-Server nicht, springt der Niedersachsen-Cache ein – nie still, immer mit Hinweis und Datenstand.", "wartung"],
+      text: "Ehrlich statt still: Ist ein Dienst nicht erreichbar, sagt das Plugin das und nennt einen Ausweg." },
+    { step: 4, shot: "04-pruefen", btn: "Hinweise geprüft",
+      card: ["Was passiert gerade?", "Die Daten sind im Plugin geladen – in die Karte kommen sie erst am Ende. Jetzt prüft das Plugin, was angekommen ist, was fehlt und wo es Probleme gibt.", "pruefen"],
+      text: "Layer prüfen: Was ist angekommen, was fehlt? Fehler, Warnungen und Infos auf einen Blick." },
+    { step: 4, shot: "04-hinweise", btn: "Hinweise geprüft",
+      card: ["Warnungen und Infos", "Warnungen stehen offen oben – sie solltest du dir ansehen. Infos sind darunter gesammelt, z. B. wie viele Objekte im Gebiet liegen.", "pruefen"],
+      text: "Warnungen oben, Infos darunter gesammelt." },
+    { step: 4, shot: "04-infos", btn: "Hinweise geprüft",
+      card: ["Jeder Hinweis erklärt sich", "In einem Satz steht, was los ist. Mit „Mehr erfahren“ gibt es Details – und was du tun kannst.", "pruefen"],
+      text: "Jeder Hinweis sagt in einem Satz, was los ist – und was zu tun ist." },
+    { step: 5, shot: "05-spalten", btn: "Zuordnung bestätigen",
+      card: ["Vorschau: die Attributtabelle danach", "Lesbare Spaltennamen, Objekt-ID vorne, Herkunft hinten. Essentielle Spalten sind immer dabei, alle anderen wählst du selbst.", { img: "09-tabelle", alt: "Attributtabelle Gebäude" }],
+      text: "Attributzuordnung: welche Spalten in die Ergebnis-Layer kommen – mit Vorschau und Beispielwerten." },
+    { step: 6, shot: "06-quellen", btn: "Weiter",
+      card: ["Gleiche Objekte aus zwei Quellen", "Viele Gebäude gibt es in ALKIS und in OSM. Du entscheidest je Kategorie, welche Quelle zählt – das Plugin schlägt eine vor. Unsichere Dubletten zeigt es danach einzeln.", "quellen"],
+      text: "Harmonisierung: je Kategorie die Quelle wählen, danach die unsicheren Dubletten." },
+    { step: 7, shot: "07-thema", alt: { klassisch: "07-mobilitaet" }, btn: "Thema übernehmen",
+      card: ["Vorschau: so werden die Layer sortiert", "Jedes Thema hat seine eigene Vorauswahl – bei Mobilität & Erschließung z. B. Straßen, Wege, Bahn und Haltestellen. Jeder Layer bleibt einzeln an- und abwählbar. Nur die angehakten Layer kommen später in die Karte, in Gruppen wie Bebauung, Verkehr, Grün & Wasser.", { img: "09-layer", alt: "Ebenen in Gruppen" }],
+      text: "Kartenthema: eines von sieben Themen wählen – die passenden Layer sind vorausgewählt." },
+    { step: 8, shot: "08-ausgabe", corner: "pixel", hit: "erzeugen", hitLabel: "Layer erzeugen",
+      card: ["Gleich erscheint die Karte", "Mit „Layer erzeugen“ legt das Plugin die Ergebnis-Layer als neue Gruppe in QGIS an – erst jetzt kommt alles in die Karte.", "erzeugen"],
+      text: "Ausgabe: Kartenstil wählen und die Ergebnis-Layer erzeugen." },
+    { step: 8, shot: "08-erreichbarkeit", corner: "klassisch", hit: "tabSpeichern", hitLabel: "Speichern",
+      map: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, note: "<b>Optional: Erreichbarkeit abschätzen.</b> Die Ergebnis-Layer sind fertig – wer mag, berechnet zusätzlich Abstände: zu Zielen aus den Daten (z. B. Gesundheit, Nahversorgung, Bildung) oder zu eigenen Punkten. Ergebnis: Ringe um die Ziele und der Abstand jedes Gebäudes (Luftlinie).",
+      text: "Erreichbarkeit (optional): Abstände zu Zielen aus den Daten oder zu eigenen Punkten abschätzen." },
+    { step: 8, shot: "08-speichern", corner: "pixel", btn: "Speichern",
+      map: { tabs: [["PDF (Beispiel)", "09-pdf.webp"], ["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Ergebnis als PDF" }, note: "So sieht das PDF aus: die sichtbaren Layer mit Legende, Nordpfeil, Maßstab und Quellenangaben. Oben rechts lassen sich die Kartenstile ansehen.",
       text: "Speichern: PDF von A4 bis A0 mit passendem Maßstab, dazu ein GeoPackage mit allen Ergebnis-Layern." },
-    { step: 8, shot: "08-fertig", canvas: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
-      text: "Fertig – alles gespeichert. Die Quellenvermerke stehen automatisch in Tabelle und PDF." }
+    { step: 8, shot: "08-fertig", last: true,
+      map: { tabs: [["PDF", "09-pdf.webp"], ["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
+      note: "Fertig – alles gespeichert. Oben rechts die Ergebnisse ansehen.",
+      text: "Fertig! Die Quellenvermerke stehen automatisch in Tabelle und PDF." }
   ];
   var NAMES = { klassisch: "Klassisch", pixel: "Pixel" };
-  var root = document.documentElement, canvas = document.getElementById("canvas"), shot = document.getElementById("shot");
-  var stil = "klassisch", page = -1, tab = 0;
-  try { stil = localStorage.getItem("ua-stil") || stil; } catch (e) {}
-  if (!NAMES[stil]) stil = "klassisch";
+  var root = document.documentElement, body = document.body, canvas = document.getElementById("canvas"), shot = document.getElementById("shot");
+  // Der Stil wird am Anfang gewählt und bleibt gleich – wechseln nur über das Paletten-Symbol im Plugin.
+  var stil = null, page = -1, tab = 0, pages = [];
 
-  function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + ".jpg"; }
-
-  function renderIntro() {
-    canvas.innerHTML = '<div class="intro"><h2>Urban Analysis</h2>' +
-      "<p>Ein QGIS-Plugin, das von der leeren Karte zu einer sauberen Bestandsanalyse führt – Schritt für Schritt.</p>" +
-      "<p>Klick dich durch wie im Plugin: einfach rechts im Plugin auf den <b>blau umrandeten Knopf</b> klicken. Oben wechselst du den Stil.</p>" +
-      '<button type="button" class="go" id="start">Demo starten</button>' +
-      '<small>Daten: © OpenStreetMap-Mitwirkende, ODbL · © GeoBasis-DE/LGLN 2026, CC BY 4.0 · Plugin: Apache 2.0 · ' +
-      'Mit KI-Programmierassistenten entwickelt, vom Team geprüft · <a href="' + REPO + '">Code &amp; Download</a></small></div>';
-    document.getElementById("start").addEventListener("click", forward);
-    shot.innerHTML = '<img src="' + img("01-kbs", stil) + '" alt="Das Plugin-Fenster, Stil ' + NAMES[stil] + '">' +
-                     '<button type="button" class="hot next" aria-label="Demo starten"></button>';
-    shot.querySelector(".next").addEventListener("click", forward);
-    document.getElementById("stepno").textContent = "Start";
-    document.getElementById("caption").textContent = "Eine Demo in Screenshots aus QGIS – Donnerschwee, Oldenburg.";
+  function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + (name.indexOf(".") < 0 ? ".jpg" : ""); }
+  function $(id) { return document.getElementById(id); }
+  function shotOf(p) { return (p.alt && p.alt[stil]) || p.shot; }
+  function hitStyle(r) {
+    return 'left:' + (r[0] / 8.2) + '%;top:' + (r[1] / 11) + '%;width:' + ((r[2] - r[0]) / 8.2) + '%;height:' + ((r[3] - r[1]) / 11) + '%';
   }
 
-  function renderCanvas(c) {
-    if (!c) {
-      canvas.innerHTML = '<div class="empty"><b>Kartenfenster</b>Noch keine Daten geladen – das Plugin führt dich dorthin.</div>';
+  function renderIntro() {
+    body.classList.add("is-intro");
+    root.setAttribute("data-stil", "klassisch");
+    $("stilinfo").textContent = "";
+    shot.innerHTML = "";
+    canvas.innerHTML = '<div class="intro"><div class="card"><h2>Urban Analysis</h2>' +
+      "<p>Ein QGIS-Plugin, das von der leeren Karte zu einer sauberen Bestandsanalyse führt – Schritt für Schritt.</p>" +
+      '<p class="ask">Wähle zuerst die Oberfläche:</p>' +
+      '<div class="choice"><button type="button" class="k" data-start="klassisch"><b>Klassisch</b><span>hell und neutral wie QGIS</span></button>' +
+      '<button type="button" class="p" data-start="pixel"><b>Pixel</b><span>verspielt, mit Hase und Fisch</span></button></div>' +
+      '<p class="hint">Danach führt dich der leuchtende Knopf im Plugin durch alle 8 Schritte.<br>🎨 Die Oberfläche lässt sich jederzeit im Plugin über das Paletten-Symbol oben rechts wechseln.</p>' +
+      '<small>Daten: © OpenStreetMap-Mitwirkende, ODbL · © GeoBasis-DE/LGLN 2026, CC BY 4.0 · Plugin: Apache 2.0 · ' +
+      'Mit KI-Programmierassistenten entwickelt, vom Team geprüft · <a href="' + REPO + '">Quellcode auf GitHub</a></small></div></div>';
+    canvas.querySelectorAll("[data-start]").forEach(function (b) {
+      b.addEventListener("click", function () { start(b.getAttribute("data-start")); });
+    });
+    $("stepno").textContent = "Start";
+    $("caption").textContent = "Eine Demo in Screenshots aus QGIS – Donnerschwee, Oldenburg.";
+  }
+
+  function cardHtml(c, kicker) {
+    var art = typeof c[2] === "string" ? SVG[c[2]] : '<img class="preview" src="' + img(c[2].img) + '" alt="' + c[2].alt + '">';
+    return '<div class="card' + (typeof c[2] === "string" ? "" : " wide") + '"><span class="kicker">' + kicker + "</span><h3>" + c[0] + "</h3><p>" + c[1] + "</p>" + art + "</div>";
+  }
+
+  function renderFinal(p) {
+    var t = p.map.tabs[Math.min(tab, p.map.tabs.length - 1)];
+    var tabs = p.map.tabs.map(function (x, i) { return '<button type="button" data-tab="' + i + '" aria-pressed="' + (x === t) + '">' + x[0] + "</button>"; }).join("");
+    canvas.innerHTML = '<div class="final"><div class="card done"><span class="kicker">Schritt 8 von 8 · geschafft</span><h2>Fertig!</h2>' +
+      "<p>Deine Bestandsanalyse ist gespeichert. Das hast du jetzt:</p><ul>" +
+      "<li>geordnete Ergebnis-Layer in QGIS</li><li>eine PDF-Karte mit Legende und Maßstab</li>" +
+      "<li>ein GeoPackage mit allen Daten</li><li>Quellenangaben – automatisch dabei</li></ul>" +
+      '<div class="actions"><a class="go" href="' + DOWNLOAD + '">Plugin herunterladen</a>' +
+      '<button type="button" id="restart">Demo neu starten</button><button type="button" id="finalback">‹ Zurück</button></div></div>' +
+      '<div class="result"><div class="maptabs" role="group" aria-label="Ergebnis ansehen">' + tabs + "</div>" +
+      '<img src="' + img(t[1]) + '" alt="' + t[0] + '"></div></div>';
+    canvas.querySelectorAll("[data-tab]").forEach(function (b) {
+      b.addEventListener("click", function () { tab = +b.getAttribute("data-tab"); renderFinal(p); });
+    });
+    $("restart").addEventListener("click", restart);
+    $("finalback").addEventListener("click", back);
+  }
+
+  function renderCanvas(p) {
+    if (p.last) { renderFinal(p); return; }
+    if (p.card) {
+      canvas.innerHTML = '<div class="guide">' + cardHtml(p.card, "Im Kartenfenster") + "</div>";
       return;
     }
+    var c = p.map, html;
     if (c.tabs) {
       var t = c.tabs[Math.min(tab, c.tabs.length - 1)];
-      var html = '<img src="' + img(t[1]) + '" alt="' + t[0] + '"><span class="label">' + c.label + '</span><div class="maptabs" role="group" aria-label="Ansicht im Kartenfenster">';
+      html = '<img src="' + img(t[1]) + '" alt="' + t[0] + '"><span class="tag">' + c.label + '</span><div class="maptabs" role="group" aria-label="Ansicht im Kartenfenster">';
       c.tabs.forEach(function (x, i) { html += '<button type="button" data-tab="' + i + '" aria-pressed="' + (x === t) + '">' + x[0] + "</button>"; });
-      canvas.innerHTML = html + "</div>";
-      canvas.querySelectorAll("[data-tab]").forEach(function (b) {
-        b.addEventListener("click", function () { tab = +b.getAttribute("data-tab"); renderCanvas(c); });
-      });
-      return;
+      html += "</div>";
+    } else {
+      html = '<img src="' + img(c.bild) + '" alt="' + c.label + '"><span class="tag">' + c.label + "</span>";
     }
-    canvas.innerHTML = '<img src="' + img(c.bild) + '" alt="' + c.label + '"><span class="label">' + c.label + "</span>";
+    html += '<div class="card note"><span class="kicker">Im Kartenfenster</span>' + p.note +
+      (p.last ? '<div class="actions"><a class="go" href="' + DOWNLOAD + '">Plugin herunterladen</a><button type="button" id="restart">Demo neu starten</button></div>' : "") + "</div>";
+    canvas.innerHTML = html;
+    canvas.querySelectorAll("[data-tab]").forEach(function (b) {
+      b.addEventListener("click", function () { tab = +b.getAttribute("data-tab"); renderCanvas(p); });
+    });
+    var r = $("restart");
+    if (r) r.addEventListener("click", restart);
   }
 
   function render() {
-    if (page < 0) { renderIntro(); updateButtons(); return; }
-    var p = PAGES[page], s = p.only || stil;
-    renderCanvas(p.canvas);
-    shot.innerHTML = '<img src="' + img(p.shot, s) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[s] + '">' +
-      '<button type="button" class="hot back" aria-label="Zurück"></button>' +
-      (page < PAGES.length - 1 ? '<button type="button" class="hot next" aria-label="Weiter"></button>' : "");
-    shot.querySelector(".back").addEventListener("click", back);
-    var n = shot.querySelector(".next");
-    if (n) n.addEventListener("click", forward);
-    document.getElementById("stepno").textContent = "Schritt " + p.step + " von 8";
-    document.getElementById("caption").innerHTML = p.text + (p.only && p.only !== stil ? " <i>(nur im Stil " + NAMES[p.only] + " aufgenommen)</i>" : "") +
-      (page === PAGES.length - 1 ? ' · <a href="' + REPO + '">Code &amp; Download auf GitHub</a>' : "");
-    updateButtons();
+    if (page < 0) { renderIntro(); return; }
+    body.classList.remove("is-intro");
+    var p = pages[page], other = stil === "pixel" ? "klassisch" : "pixel";
+    body.classList.toggle("is-final", !!p.last);
+    renderCanvas(p);
+    // Alles wird im Plugin bedient: Zurück, Weiter (leuchtet), Paletten-Symbol
+    var html = '<img src="' + img(shotOf(p), stil) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[stil] + '">' +
+      '<button type="button" class="hit" data-do="palette" style="left:85.6%;top:.2%;width:4.4%;height:3%" title="Oberfläche wechseln (zu ' + NAMES[other] + ')" aria-label="Oberfläche wechseln zu ' + NAMES[other] + '"></button>' +
+      '<button type="button" class="hit" data-do="back" style="' + hitStyle(BACK) + '" title="Zurück" aria-label="Zurück"></button>';
+    if (p.btn) {
+      html += '<div class="patch"></div><button type="button" class="pbtn" data-do="next" title="Weiter – hier geht’s lang">' + p.btn + "</button>";
+    } else {
+      if (p.corner === stil) html += '<div class="patch small"></div>';
+      if (p.hit) html += '<button type="button" class="hit glow" data-do="next" style="' + hitStyle(HIT[p.hit][stil]) + '" title="' + p.hitLabel + ' – hier geht’s lang" aria-label="' + p.hitLabel + '"></button>';
+    }
+    shot.innerHTML = html;
+    shot.querySelectorAll("[data-do]").forEach(function (b) {
+      var what = b.getAttribute("data-do");
+      b.addEventListener("click", what === "next" ? forward : what === "back" ? back : function () { switchStil(other); });
+    });
+    $("stepno").textContent = "Schritt " + p.step + " von 8";
+    $("caption").innerHTML = p.text + " <small>· Bild " + (page + 1) + " von " + pages.length + "</small>";
   }
 
-  function updateButtons() {
-    document.getElementById("prev").disabled = page < 0;
-    document.getElementById("next").disabled = page >= PAGES.length - 1;
+  function useStil(s) {
+    stil = s;
+    root.setAttribute("data-stil", s);
+    $("stilinfo").textContent = "Oberfläche: " + NAMES[s] + " · wechseln über das Paletten-Symbol im Plugin";
+    // alle Seiten in beiden Stilen – fehlt ein Screenshot, nimmt die Seite ein passendes Ersatzbild (alt)
+    pages = PAGES;
+    pages.forEach(function (p) { new Image().src = img(shotOf(p), s); });
   }
-  function forward() { if (page < PAGES.length - 1) { page++; tab = 0; render(); } }
-  function back() { if (page >= 0) { page--; tab = 0; render(); } }
+  function start(s) { useStil(s); page = 0; tab = 0; render(); }
+  // Paletten-Symbol: nur der Stil wechselt, die Seite bleibt dieselbe
+  function switchStil(s) { useStil(s); render(); }
+  function restart() { stil = null; page = -1; tab = 0; body.classList.remove("is-final"); render(); }
+  function forward() { if (page >= 0 && page < pages.length - 1) { page++; tab = 0; render(); } }
+  function back() { if (page > 0) { page--; tab = 0; render(); } else if (page === 0) { restart(); } }
 
-  function setStil(s) {
-    stil = s; root.setAttribute("data-stil", s);
-    document.querySelectorAll(".switch button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-set") === s)); });
-    try { localStorage.setItem("ua-stil", s); } catch (e) {}
-    render();
-  }
-
-  document.querySelectorAll(".switch button").forEach(function (b) { b.addEventListener("click", function () { setStil(b.getAttribute("data-set")); }); });
-  document.getElementById("prev").addEventListener("click", back);
-  document.getElementById("next").addEventListener("click", forward);
   document.addEventListener("keydown", function (e) {
     if (e.key === "ArrowRight") forward();
     if (e.key === "ArrowLeft") back();
   });
-  window.addEventListener("load", function () {
-    PAGES.forEach(function (p) { [p.only || "klassisch", p.only ? null : "pixel"].forEach(function (s) { if (s) new Image().src = img(p.shot, s); }); });
-  });
-
-  root.setAttribute("data-stil", stil);
-  document.querySelectorAll(".switch button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-set") === stil)); });
   render();
 })();
 </script>
