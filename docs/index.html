@@ -104,6 +104,10 @@
   .choice span { display: block; font-size: .85rem; color: #666; }
   .choice .k b { color: #1b4672; } .choice .p b { color: #B8463D; font-family: Menlo, Consolas, monospace; }
   .intro .hint { color: #555; font-size: .92rem; }
+  .intro .get { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid #e3e6ea; }
+  .intro .get > a { display: inline-block; padding: 8px 16px; border: 2px solid #1b4672; border-radius: 8px; color: #1b4672; font-weight: 700; text-decoration: none; }
+  .intro .get > a:hover { background: #e6f0fa; }
+  .intro .get span { display: block; margin-top: 6px; font-size: .82rem; color: #777; }
   .intro .ask { margin: 18px 0 0; font-size: 1.3rem; font-weight: 700; color: #1b4672; }  .intro small { display: block; color: #777; margin-top: 14px; line-height: 1.5; }
   .intro a { color: #1b4672; }
 
@@ -296,6 +300,7 @@
       '<div class="choice"><button type="button" class="k" data-start="klassisch"><b>Klassisch</b><span>hell und neutral wie QGIS</span></button>' +
       '<button type="button" class="p" data-start="pixel"><b>Pixel</b><span>verspielt, mit Hase und Fisch</span></button></div>' +
       '<p class="hint">Danach führt dich der leuchtende Knopf im Plugin durch alle 8 Schritte.<br>🎨 Die Oberfläche lässt sich jederzeit im Plugin über das Paletten-Symbol oben rechts wechseln.</p>' +
+      '<p class="get"><a href="' + DOWNLOAD + '">⬇ Plugin herunterladen</a><span>ZIP für QGIS 3.44 am Rechner · <a href="' + REPO + '#installation">Anleitung</a></span></p>' +
       '<small>Daten: © OpenStreetMap-Mitwirkende, ODbL · © GeoBasis-DE/LGLN 2026, CC BY 4.0 · Plugin: Apache 2.0 · ' +
       'Mit KI-Programmierassistenten entwickelt, vom Team geprüft · <a href="' + REPO + '">Quellcode auf GitHub</a></small></div></div>';
     canvas.querySelectorAll("[data-start]").forEach(function (b) {
