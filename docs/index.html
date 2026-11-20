@@ -70,7 +70,8 @@
   .card p:last-child { margin-bottom: 0; }
   .card svg { width: 100%; height: auto; display: block; }
   .card svg text { font: 12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif; fill: #444; }
-  .card .preview { width: 100%; max-height: 42vh; object-fit: contain; display: block; border: 1px solid #d5d9df; border-radius: 6px; background: #fff; }
+  .guide .card.wide { width: min(1100px, 100%); }
+  .card .preview { width: 100%; max-height: 62vh; object-fit: contain; display: block; border: 1px solid #d5d9df; border-radius: 6px; background: #fff; }
   .guide { position: absolute; inset: 0; display: grid; place-items: center; padding: 28px; overflow: auto; }
   .guide .card { width: min(640px, 100%); }
   .note { position: absolute; left: 12px; bottom: 12px; max-width: min(480px, calc(100% - 24px)); padding: 12px 16px; }
@@ -179,7 +180,8 @@
     pruefen: '<svg viewBox="0 0 560 150" aria-hidden="true">' +
       [['✓', 'Was ist angekommen?', '#2e7d32'], ['!', 'Was fehlt oder ist auffällig?', '#c77c02'], ['i', 'Zahlen und Details', 'var(--accent)']].map(function (t, i) {
         return '<g transform="translate(10,' + (8 + i * 46) + ')"><circle cx="18" cy="18" r="16" fill="#fff" stroke="' + t[2] + '" stroke-width="3"/>' +
-          '<text x="12" y="24" style="font-weight:700;fill:' + t[2] + ';font-size:16px">' + t[0] + '</text><text x="48" y="23" style="font-size:15px">' + t[1] + '</text></g>';
+          '<text x="18" y="18" text-anchor="middle" dominant-baseline="central" style="font-weight:700;fill:' + t[2] + ';font-size:17px">' + t[0] + '</text>' +
+          '<text x="48" y="18" dominant-baseline="central" style="font-size:15px">' + t[1] + '</text></g>';
       }).join("") + '</svg>',
     erzeugen: '<svg viewBox="0 0 560 160" aria-hidden="true">' +
       '<rect x="10" y="8" width="300" height="28" rx="5" fill="var(--accent-light)" stroke="var(--accent)"/><text x="22" y="27" style="font-weight:600">▾ Urban Analysis – Ergebnis</text>' +
@@ -218,7 +220,7 @@
     { step: 3, shot: "03-daten", btn: "Speicherort wählen",
       card: ["Welche Daten möchtest du?", "Du wählst selbst, welche Daten du lädst. Direkt im Plugin gibt es OpenStreetMap und ALKIS, dazu eigene Dateien. Mehrere Quellen lassen sich kombinieren – in den nächsten Schritten werden sie zusammengeführt. Weitere Quellen wie Zensusdaten sind vorgesehen.", "daten"],
       text: "Daten laden: selbst wählen, welche Daten – auch mehrere Quellen zugleich." },
-    { step: 3, shot: "03-wartung", only: "pixel", btn: "Weiter",
+    { step: 3, shot: "03-wartung", alt: { klassisch: "03-daten" }, btn: "Weiter",
       card: ["Was passiert, wenn ein Dienst ausfällt?", "Antwortet der OSM-Server nicht, springt der Niedersachsen-Cache ein – nie still, immer mit Hinweis und Datenstand.", "wartung"],
       text: "Ehrlich statt still: Ist ein Dienst nicht erreichbar, sagt das Plugin das und nennt einen Ausweg." },
     { step: 4, shot: "04-pruefen", btn: "Hinweise geprüft",
@@ -239,15 +241,15 @@
     { step: 7, shot: "07-thema", btn: "Thema übernehmen",
       card: ["Vorschau: so werden die Layer sortiert", "Nur die angehakten Layer kommen später in die Karte – in Gruppen wie Bebauung, Verkehr, Grün & Wasser.", { img: "09-layer", alt: "Ebenen in Gruppen" }],
       text: "Kartenthema: eines von sieben Themen wählen, die passenden Layer sind vorausgewählt." },
-    { step: 7, shot: "07-mobilitaet", only: "klassisch", btn: "Thema übernehmen",
+    { step: 7, shot: "07-mobilitaet", alt: { pixel: "07-thema" }, btn: "Thema übernehmen",
       card: ["Anderes Thema, andere Vorauswahl", "Bei Mobilität & Erschließung sind Straßen, Wege, Bahn und Haltestellen angehakt. Jeder Layer bleibt einzeln an- und abwählbar.", { img: "09-layer", alt: "Ebenen in Gruppen" }],
       text: "Anderes Thema, andere Vorauswahl – z. B. Mobilität & Erschließung." },
     { step: 8, shot: "08-ausgabe", corner: "pixel", hit: "erzeugen", hitLabel: "Layer erzeugen",
       card: ["Gleich erscheint die Karte", "Mit „Layer erzeugen“ legt das Plugin die Ergebnis-Layer als neue Gruppe in QGIS an – erst jetzt kommt alles in die Karte.", "erzeugen"],
       text: "Ausgabe: Kartenstil wählen und die Ergebnis-Layer erzeugen." },
     { step: 8, shot: "08-erreichbarkeit", corner: "klassisch", hit: "tabSpeichern", hitLabel: "Speichern",
-      map: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, note: "Die Ergebnis-Layer liegen jetzt in der Karte. Jedes Gebäude bekommt den Abstand zum nächsten Ziel (Luftlinie).",
-      text: "Erreichbarkeit: Abstand jedes Gebäudes zum nächsten Ziel, mit Ringen um die Ziele." },
+      map: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, note: "<b>Optional: Erreichbarkeit abschätzen.</b> Die Ergebnis-Layer sind fertig – wer mag, berechnet zusätzlich Abstände: zu Zielen aus den Daten (z. B. Gesundheit, Nahversorgung, Bildung) oder zu eigenen Punkten. Ergebnis: Ringe um die Ziele und der Abstand jedes Gebäudes (Luftlinie).",
+      text: "Erreichbarkeit (optional): Abstände zu Zielen aus den Daten oder zu eigenen Punkten abschätzen." },
     { step: 8, shot: "08-speichern", corner: "pixel", btn: "Speichern",
       map: { tabs: [["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Karte für das PDF" }, note: "Das PDF zeigt die sichtbaren Layer – mit Legende, Nordpfeil, Maßstab und Quellen. Oben rechts den Kartenstil umschalten.",
       text: "Speichern: PDF von A4 bis A0 mit passendem Maßstab, dazu ein GeoPackage mit allen Ergebnis-Layern." },
@@ -263,6 +265,7 @@
 
   function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + ".jpg"; }
   function $(id) { return document.getElementById(id); }
+  function shotOf(p) { return (p.alt && p.alt[stil]) || p.shot; }
   function hitStyle(r) {
     return 'left:' + (r[0] / 8.2) + '%;top:' + (r[1] / 11) + '%;width:' + ((r[2] - r[0]) / 8.2) + '%;height:' + ((r[3] - r[1]) / 11) + '%';
   }
@@ -289,7 +292,7 @@
 
   function cardHtml(c, kicker) {
     var art = typeof c[2] === "string" ? SVG[c[2]] : '<img class="preview" src="' + img(c[2].img) + '" alt="' + c[2].alt + '">';
-    return '<div class="card"><span class="kicker">' + kicker + "</span><h3>" + c[0] + "</h3><p>" + c[1] + "</p>" + art + "</div>";
+    return '<div class="card' + (typeof c[2] === "string" ? "" : " wide") + '"><span class="kicker">' + kicker + "</span><h3>" + c[0] + "</h3><p>" + c[1] + "</p>" + art + "</div>";
   }
 
   function renderCanvas(p) {
@@ -322,7 +325,7 @@
     var p = pages[page], other = stil === "pixel" ? "klassisch" : "pixel";
     renderCanvas(p);
     // Alles wird im Plugin bedient: Zurück, Weiter (leuchtet), Paletten-Symbol
-    var html = '<img src="' + img(p.shot, stil) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[stil] + '">' +
+    var html = '<img src="' + img(shotOf(p), stil) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[stil] + '">' +
       '<button type="button" class="hit" data-do="palette" style="left:85.6%;top:.2%;width:4.4%;height:3%" title="Oberfläche wechseln (zu ' + NAMES[other] + ')" aria-label="Oberfläche wechseln zu ' + NAMES[other] + '"></button>' +
       '<button type="button" class="hit" data-do="back" style="' + hitStyle(BACK) + '" title="Zurück" aria-label="Zurück"></button>';
     if (p.btn) {
@@ -344,17 +347,13 @@
     stil = s;
     root.setAttribute("data-stil", s);
     $("stilinfo").textContent = "Oberfläche: " + NAMES[s] + " · wechseln über das Paletten-Symbol im Plugin";
-    pages = PAGES.filter(function (p) { return !p.only || p.only === s; });
-    pages.forEach(function (p) { new Image().src = img(p.shot, s); });
+    // alle Seiten in beiden Stilen – fehlt ein Screenshot, nimmt die Seite ein passendes Ersatzbild (alt)
+    pages = PAGES;
+    pages.forEach(function (p) { new Image().src = img(shotOf(p), s); });
   }
   function start(s) { useStil(s); page = 0; tab = 0; render(); }
-  function switchStil(s) {
-    var here = PAGES.indexOf(pages[page]);
-    useStil(s);
-    page = 0;
-    pages.forEach(function (p, i) { if (PAGES.indexOf(p) <= here) page = i; });
-    render();
-  }
+  // Paletten-Symbol: nur der Stil wechselt, die Seite bleibt dieselbe
+  function switchStil(s) { useStil(s); render(); }
   function restart() { stil = null; page = -1; tab = 0; render(); }
   function forward() { if (page >= 0 && page < pages.length - 1) { page++; tab = 0; render(); } }
   function back() { if (page > 0) { page--; tab = 0; render(); } else if (page === 0) { restart(); } }
