@@ -48,9 +48,21 @@
 
   .dock { display: flex; flex-direction: column; min-height: 0; background: var(--dock-bg); border-left: 1px solid var(--dock-line); }
   .dockhead { flex: none; font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 3px 8px; }
-  .shot { position: relative; flex: 1; min-height: 0; }
-  /* Screenshot ist nur Bild: immer gleich groß, oben ausgerichtet, nicht klickbar */
-  .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: top center; display: block; }
+  .shot { position: relative; flex: 1; min-height: 0; overflow-y: auto; }
+  /* Screenshot in fester Breite (kein Springen); nur das Paletten-Symbol ist klickbar – wie im Plugin */
+  .frame { position: relative; }
+  .frame img { width: 100%; height: auto; display: block; }
+  .palette { position: absolute; left: 85.6%; top: .2%; width: 4.4%; height: 3%; border: 2px solid transparent; border-radius: 6px;
+             background: transparent; cursor: pointer; padding: 0; }
+  .palette:hover, .palette:focus-visible { border-color: var(--accent); background: rgba(255,255,255,.25); }
+  /* „Hier geht's lang“: der Hauptknopf im Bild leuchtet und ist der Weiter-Knopf (nur Leuchten, keine Bewegung) */
+  .hot { position: absolute; left: 72.5%; top: 94.8%; width: 25.3%; height: 3.6%; border: 0; padding: 0; background: transparent;
+         cursor: pointer; border-radius: 6px; animation: glow 1.8s ease-in-out infinite; }
+  .hot:hover, .hot:focus-visible { background: rgba(255,255,255,.18); }
+  .status nav .go.glow { animation: glow 1.8s ease-in-out infinite; }
+  @keyframes glow { 0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 4px 2px var(--accent); }
+                    50% { box-shadow: 0 0 0 3px var(--accent), 0 0 16px 6px var(--accent); } }
+  @media (prefers-reduced-motion: reduce) { .hot, .status nav .go.glow { animation: none; box-shadow: 0 0 0 3px var(--accent); } }
 
   /* Fußzeile: Erklärung zum Schritt + die einzige Blätter-Navigation */
   .status { flex: none; display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: #fff; border-top: 1px solid #c4c4c4; color: #333; min-height: 58px; }
@@ -66,7 +78,12 @@
   .intro { max-width: 520px; text-align: center; padding: 24px; color: #333; }
   .intro h2 { font-size: 1.6rem; margin: 0 0 8px; }
   .intro p { margin: 0 0 10px; }
-  .intro .go { margin-top: 6px; border: 0; border-radius: 6px; padding: 10px 20px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
+  .intro .choice { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  .intro .choice button { width: 210px; border: 2px solid #c4c4c4; border-radius: 8px; background: #fff; padding: 14px 12px; cursor: pointer; text-align: center; color: #333; }
+  .intro .choice button:hover { border-color: #2f6fb0; }
+  .intro .choice b { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+  .intro .choice span { display: block; font-size: .82rem; color: #666; }
+  .intro .choice .k b { color: #1b4672; } .intro .choice .p b { color: #B8463D; font-family: Menlo, Consolas, monospace; }
   .intro small { display: block; color: #777; margin-top: 14px; line-height: 1.5; }
   .intro a { color: var(--accent-dark); }
 
@@ -85,12 +102,7 @@
 <body>
 <div class="titlebar">
   <h1>Urban Analysis <span>· Live-Demo des QGIS-Plugins</span></h1>
-  <div class="switch">Oberfläche:
-    <div role="group" aria-label="Oberflächen-Stil des Plugins">
-      <button type="button" data-set="klassisch" aria-pressed="true">Klassisch</button>
-      <button type="button" data-set="pixel" aria-pressed="false">Pixel</button>
-    </div>
-  </div>
+  <span class="switch" id="stilinfo"></span>
 </div>
 
 <div class="workspace">
@@ -107,6 +119,7 @@
   <nav aria-label="Blättern">
     <button type="button" id="prev">‹ Zurück</button>
     <button type="button" class="go" id="next">Weiter ›</button>
+    <button type="button" id="restart" hidden>Neu starten</button>
     <a class="go" id="download" hidden href="https://github.com/Jade-HS-Vibecoding-WPK/urban-analysis-plugin/releases/latest/download/urban_analysis_plugin.zip">Plugin herunterladen</a>
   </nav>
 </div>
@@ -117,17 +130,18 @@
   // Jede Seite: Plugin-Bild (ohne Stil-Endung), nur-ein-Stil, Kartenfenster, Erklärung
   var MAP = { bild: "09-karte-nutzung", label: "Kartenfenster" };
   var PAGES = [
-    { step: 1, shot: "01-kbs", canvas: null, text: "Projekt-KBS: ein Koordinatensystem in Metern wählen, z. B. EPSG:25832. Das Plugin rechnet nie heimlich um." },
-    { step: 2, shot: "02-gebiet", canvas: null, text: "Untersuchungsgebiet: Layer nehmen, Polygon zeichnen oder Rechteck mit zwei Klicks; dazu der Puffer. Die Größe steht sofort da." },
-    { step: 3, shot: "03-daten", canvas: null, text: "Daten laden: OpenStreetMap, ALKIS des Bundeslands und eigene Dateien – auch mehrere zugleich." },
+    { step: 1, shot: "01-kbs", hot: true, canvas: null, text: "Projekt-KBS: ein Koordinatensystem in Metern wählen, z. B. EPSG:25832. Das Plugin rechnet nie heimlich um." },
+    { step: 2, shot: "02-gebiet", hot: true, canvas: null, text: "Untersuchungsgebiet: Layer nehmen, Polygon zeichnen oder Rechteck mit zwei Klicks; dazu der Puffer. Die Größe steht sofort da." },
+    { step: 3, shot: "03-daten", hot: true, canvas: null, text: "Daten laden: OpenStreetMap, ALKIS des Bundeslands und eigene Dateien – auch mehrere zugleich." },
     { step: 3, shot: "03-laden", canvas: null, text: "Beim Laden zeigt das Plugin den Fortschritt – klassisch als Balken, im Pixel-Stil zieht der Hase die Angel ein." },
     { step: 3, shot: "03-wartung", only: "pixel", canvas: null, text: "Ehrlich statt still: Ist ein Dienst in Wartung, sagt das Plugin das und nennt einen Ausweg." },
-    { step: 4, shot: "04-pruefen", canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Layer prüfen: Was ist angekommen, was fehlt? Warnungen und Infos auf einen Blick." },
-    { step: 4, shot: "04-infos", canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Jeder Hinweis sagt in einem Satz, was los ist – und was zu tun ist." },
-    { step: 5, shot: "05-spalten", canvas: { bild: "09-tabelle", label: "Attributtabelle – Gebäude" }, text: "Attributzuordnung: links das Ergebnis – die aufgeräumte Attributtabelle mit lesbaren Namen, Objekt-ID vorne, Herkunft hinten." },
-    { step: 6, shot: "06-quellen", canvas: { bild: "09-karte-schwarzplan", label: "Gebäude aus ALKIS und OSM" }, text: "Harmonisierung: Dasselbe Haus aus ALKIS und OSM? Je Kategorie die Quelle wählen – danach die unsicheren Dubletten." },
-    { step: 7, shot: "07-thema", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Kartenthema: eines von sieben Themen wählen, die passenden Layer sind vorausgewählt." },
-    { step: 7, shot: "07-mobilitaet", only: "klassisch", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Anderes Thema, andere Vorauswahl: bei Mobilität & Erschließung Straßen, Wege, Bahn und Haltestellen." },
+    { step: 4, shot: "04-pruefen", hot: true, canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Layer prüfen: Was ist angekommen, was fehlt? Warnungen und Infos auf einen Blick." },
+    { step: 4, shot: "04-hinweise", hot: true, canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Warnungen stehen offen oben, Infos sind darunter gesammelt – z. B. wie viele Objekte im Gebiet liegen." },
+    { step: 4, shot: "04-infos", hot: true, canvas: { bild: "09-karte-nutzung", label: "Geladene Layer" }, text: "Jeder Hinweis sagt in einem Satz, was los ist – und was zu tun ist." },
+    { step: 5, shot: "05-spalten", hot: true, canvas: { bild: "09-tabelle", label: "Attributtabelle – Gebäude" }, text: "Attributzuordnung: links das Ergebnis – die aufgeräumte Attributtabelle mit lesbaren Namen, Objekt-ID vorne, Herkunft hinten." },
+    { step: 6, shot: "06-quellen", hot: true, canvas: { bild: "09-karte-schwarzplan", label: "Gebäude aus ALKIS und OSM" }, text: "Harmonisierung: Dasselbe Haus aus ALKIS und OSM? Je Kategorie die Quelle wählen – danach die unsicheren Dubletten." },
+    { step: 7, shot: "07-thema", hot: true, canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Kartenthema: eines von sieben Themen wählen, die passenden Layer sind vorausgewählt." },
+    { step: 7, shot: "07-mobilitaet", hot: true, only: "klassisch", canvas: { bild: "09-layer", label: "Ebenen – Ergebnis in Gruppen" }, text: "Anderes Thema, andere Vorauswahl: bei Mobilität & Erschließung Straßen, Wege, Bahn und Haltestellen." },
     { step: 8, shot: "08-ausgabe", canvas: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"]], label: "Ergebnis-Layer" },
       text: "Ausgabe: Kartenstil wählen und die Ergebnis-Layer erzeugen – oben rechts im Kartenfenster umschalten." },
     { step: 8, shot: "08-erreichbarkeit", canvas: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, text: "Erreichbarkeit: Abstand jedes Gebäudes zum nächsten Ziel, als Luftlinie, mit Ringen um die Ziele." },
@@ -138,24 +152,52 @@
   ];
   var NAMES = { klassisch: "Klassisch", pixel: "Pixel" };
   var root = document.documentElement, canvas = document.getElementById("canvas"), shot = document.getElementById("shot");
-  var stil = "klassisch", page = -1, tab = 0;
-  try { stil = localStorage.getItem("ua-stil") || stil; } catch (e) {}
-  if (!NAMES[stil]) stil = "klassisch";
+  // Der Stil wird am Anfang einmal gewählt und bleibt für den ganzen Durchlauf gleich.
+  var stil = null, page = -1, tab = 0, pages = [];
 
   function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + ".jpg"; }
 
   function renderIntro() {
+    root.setAttribute("data-stil", "klassisch");
+    document.getElementById("stilinfo").textContent = "";
     canvas.innerHTML = '<div class="intro"><h2>Urban Analysis</h2>' +
       "<p>Ein QGIS-Plugin, das von der leeren Karte zu einer sauberen Bestandsanalyse führt – Schritt für Schritt.</p>" +
-      "<p>Rechts siehst du das Plugin-Fenster, links das Kartenfenster von QGIS. Mit „Weiter“ gehst du die 8 Schritte durch; oben rechts wechselst du die Oberfläche.</p>" +
-      '<button type="button" class="go" id="start">Demo starten</button>' +
+      "<p>Rechts siehst du das Plugin-Fenster, links das Kartenfenster von QGIS. Wähle zuerst die Oberfläche, dann geht es mit „Weiter“ durch alle 8 Schritte.</p>" +
+      '<div class="choice">' +
+      '<button type="button" class="k" data-start="klassisch"><b>Klassisch</b><span>hell und neutral wie QGIS</span></button>' +
+      '<button type="button" class="p" data-start="pixel"><b>Pixel</b><span>verspielt, mit Hase und Fisch</span></button>' +
+      "</div>" +
       '<small>Daten: © OpenStreetMap-Mitwirkende, ODbL · © GeoBasis-DE/LGLN 2026, CC BY 4.0 · Plugin: Apache 2.0 · ' +
       'Mit KI-Programmierassistenten entwickelt, vom Team geprüft · <a href="' + REPO + '">Quellcode auf GitHub</a></small></div>';
-    document.getElementById("start").addEventListener("click", forward);
-    shot.innerHTML = '<img src="' + img("01-kbs", stil) + '" alt="Das Plugin-Fenster, Stil ' + NAMES[stil] + '">';
+    canvas.querySelectorAll("[data-start]").forEach(function (b) {
+      b.addEventListener("click", function () { start(b.getAttribute("data-start")); });
+    });
+    shot.innerHTML = '<div class="frame"><img src="' + img("01-kbs", "klassisch") + '" alt="Das Plugin-Fenster"></div>';
     document.getElementById("stepno").textContent = "Start";
     document.getElementById("caption").textContent = "Eine Demo in Screenshots aus QGIS – Donnerschwee, Oldenburg.";
   }
+
+  function useStil(s) {
+    stil = s;
+    root.setAttribute("data-stil", s);
+    document.getElementById("stilinfo").textContent = "Oberfläche: " + NAMES[s] + " – wechseln über das Paletten-Symbol im Plugin";
+    // nur Seiten, die es in diesem Stil gibt – nie ein Bild im anderen Stil
+    pages = PAGES.filter(function (p) { return !p.only || p.only === s; });
+    pages.forEach(function (p) { new Image().src = img(p.shot, s); });
+  }
+
+  function start(s) { useStil(s); page = 0; tab = 0; render(); }
+
+  // Paletten-Symbol: Stil wechseln und auf demselben Schritt bleiben
+  function switchStil(s) {
+    var here = PAGES.indexOf(pages[page]);
+    useStil(s);
+    page = 0;
+    pages.forEach(function (p, i) { if (PAGES.indexOf(p) <= here) page = i; });
+    render();
+  }
+
+  function restart() { stil = null; page = -1; tab = 0; render(); }
 
   function renderCanvas(c) {
     if (!c) {
@@ -177,44 +219,40 @@
 
   function render() {
     if (page < 0) { renderIntro(); updateButtons(); return; }
-    var p = PAGES[page], s = p.only || stil;
+    var p = pages[page];
     renderCanvas(p.canvas);
-    shot.innerHTML = '<img src="' + img(p.shot, s) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[s] + '">';
+    var other = stil === "pixel" ? "klassisch" : "pixel";
+    shot.innerHTML = '<div class="frame"><img src="' + img(p.shot, stil) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[stil] + '">' +
+      '<button type="button" class="palette" title="Oberfläche wechseln (zu ' + NAMES[other] + ')" aria-label="Oberfläche wechseln zu ' + NAMES[other] + '"></button>' +
+      (p.hot ? '<button type="button" class="hot" title="Weiter – hier geht’s lang" aria-label="Weiter"></button>' : "") + "</div>";
+    shot.querySelector(".palette").addEventListener("click", function () { switchStil(other); });
+    if (p.hot) shot.querySelector(".hot").addEventListener("click", forward);
     document.getElementById("stepno").textContent = "Schritt " + p.step + " von 8";
-    document.getElementById("caption").innerHTML = p.text + (p.only && p.only !== stil ? " <i>(nur im Stil " + NAMES[p.only] + " aufgenommen)</i>" : "");
+    document.getElementById("caption").textContent = p.text + "  (Bild " + (page + 1) + " von " + pages.length + ")";
     updateButtons();
   }
 
-  // je Funktion genau ein Knopf: Start nur im Startbild, am Ende „Plugin herunterladen“ statt „Weiter“
+  // je Funktion genau ein Knopf: Stilwahl nur am Start; am Ende „Neu starten“ und „Plugin herunterladen“
   function updateButtons() {
-    var last = page >= PAGES.length - 1;
+    var last = page >= 0 && page >= pages.length - 1;
+    var inImage = page >= 0 && pages[page].hot;  // dann ist der leuchtende Knopf im Bild das „Weiter“
     document.getElementById("prev").hidden = page < 0;
-    document.getElementById("next").hidden = page < 0 || last;
+    document.getElementById("next").hidden = page < 0 || last || inImage;
+    document.getElementById("next").classList.add("glow");
+    document.getElementById("restart").hidden = !last;
     document.getElementById("download").hidden = !last;
   }
-  function forward() { if (page < PAGES.length - 1) { page++; tab = 0; render(); } }
-  function back() { if (page >= 0) { page--; tab = 0; render(); } }
+  function forward() { if (page >= 0 && page < pages.length - 1) { page++; tab = 0; render(); } }
+  function back() { if (page > 0) { page--; tab = 0; render(); } else if (page === 0) { restart(); } }
 
-  function setStil(s) {
-    stil = s; root.setAttribute("data-stil", s);
-    document.querySelectorAll(".switch button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-set") === s)); });
-    try { localStorage.setItem("ua-stil", s); } catch (e) {}
-    render();
-  }
-
-  document.querySelectorAll(".switch button").forEach(function (b) { b.addEventListener("click", function () { setStil(b.getAttribute("data-set")); }); });
   document.getElementById("prev").addEventListener("click", back);
   document.getElementById("next").addEventListener("click", forward);
+  document.getElementById("restart").addEventListener("click", restart);
   document.addEventListener("keydown", function (e) {
     if (e.key === "ArrowRight") forward();
     if (e.key === "ArrowLeft") back();
   });
-  window.addEventListener("load", function () {
-    PAGES.forEach(function (p) { [p.only || "klassisch", p.only ? null : "pixel"].forEach(function (s) { if (s) new Image().src = img(p.shot, s); }); });
-  });
 
-  root.setAttribute("data-stil", stil);
-  document.querySelectorAll(".switch button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-set") === stil)); });
   render();
 })();
 </script>
