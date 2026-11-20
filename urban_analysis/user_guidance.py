@@ -477,13 +477,6 @@ class GuidedWorkflow:
                 categories.append(layer.category)
         return tuple(categories)
 
-    def category_suggestions(self) -> Dict[str, Tuple[LayerDescriptor, ...]]:
-        """Group recognized categories and their candidate layers."""
-        return {
-            category: tuple(layer for layer in self.result.layers if layer.category == category)
-            for category in self.recognized_categories()
-        }
-
     def select_topic(
         self,
         topic: str,
