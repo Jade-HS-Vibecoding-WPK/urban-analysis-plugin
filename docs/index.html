@@ -89,6 +89,9 @@
   .choice span { display: block; font-size: .85rem; color: #666; }
   .choice .k b { color: #1b4672; } .choice .p b { color: #B8463D; font-family: Menlo, Consolas, monospace; }
   .intro .hint { color: #555; font-size: .92rem; }
+  .intro .ask { margin: 18px 0 0; font-size: 1.3rem; font-weight: 700; color: #1b4672; }
+  .choice button { animation: glow 1.8s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .choice button { animation: none; } }
   .intro small { display: block; color: #777; margin-top: 14px; line-height: 1.5; }
   .intro a { color: #1b4672; }
 
@@ -274,10 +277,10 @@
     shot.innerHTML = "";
     canvas.innerHTML = '<div class="intro"><div class="card"><h2>Urban Analysis</h2>' +
       "<p>Ein QGIS-Plugin, das von der leeren Karte zu einer sauberen Bestandsanalyse führt – Schritt für Schritt.</p>" +
-      "<p>Wähle die Oberfläche. Danach führt dich der leuchtende Knopf im Plugin durch alle 8 Schritte.</p>" +
+      '<p class="ask">👇 Wähle zuerst die Oberfläche:</p>' +
       '<div class="choice"><button type="button" class="k" data-start="klassisch"><b>Klassisch</b><span>hell und neutral wie QGIS</span></button>' +
       '<button type="button" class="p" data-start="pixel"><b>Pixel</b><span>verspielt, mit Hase und Fisch</span></button></div>' +
-      '<p class="hint">🎨 Die Oberfläche lässt sich jederzeit im Plugin über das Paletten-Symbol oben rechts wechseln.</p>' +
+      '<p class="hint">Danach führt dich der leuchtende Knopf im Plugin durch alle 8 Schritte.<br>🎨 Die Oberfläche lässt sich jederzeit im Plugin über das Paletten-Symbol oben rechts wechseln.</p>' +
       '<small>Daten: © OpenStreetMap-Mitwirkende, ODbL · © GeoBasis-DE/LGLN 2026, CC BY 4.0 · Plugin: Apache 2.0 · ' +
       'Mit KI-Programmierassistenten entwickelt, vom Team geprüft · <a href="' + REPO + '">Quellcode auf GitHub</a></small></div></div>';
     canvas.querySelectorAll("[data-start]").forEach(function (b) {
