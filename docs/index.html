@@ -32,8 +32,20 @@
   /* PC: links Kartenfenster, rechts das Plugin – so groß, wie die Höhe erlaubt */
   .workspace { height: calc(100vh - var(--head) - var(--foot)); height: calc(100dvh - var(--head) - var(--foot));
                display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .is-intro .workspace { grid-template-columns: 1fr; }
-  .is-intro .dock { display: none; }
+  .is-intro .workspace, .is-final .workspace { grid-template-columns: 1fr; }
+  .is-intro .dock, .is-final .dock { display: none; }
+
+  /* letzte Seite: Abschluss links, Ergebnisse groß rechts – ohne Plugin-Fenster */
+  .final { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 24px; padding: 24px; }
+  .final .done { align-self: center; }
+  .final .done h2 { margin: 0 0 6px; font-size: 2rem; color: var(--accent-dark); }
+  .final .done ul { margin: 0 0 18px; padding-left: 20px; }
+  .final .done li { margin: 3px 0; }
+  .final .actions { flex-direction: column; }
+  .final .actions a, .final .actions button { padding: 11px 16px; font-size: 1.05rem; text-align: center; }
+  .final .result { position: relative; min-height: 0; background: #fff; border: 1px solid #d5d9df; border-radius: 10px; overflow: hidden; }
+  .final .result img { position: absolute; inset: 44px 0 0 0; width: 100%; height: calc(100% - 44px); object-fit: contain; }
+  .final .result .maptabs { left: 12px; right: 12px; justify-content: flex-start; }
   .dock { display: flex; flex-direction: column; background: var(--dock-bg); border-left: 1px solid #c4c4c4; min-height: 0; }
   .dockhead { height: var(--dockhead); font-size: .75rem; color: #555; background: #e3e3e3; border-bottom: 1px solid #c4c4c4; padding: 4px 10px; }
   .frame { position: relative; container-type: inline-size; height: calc(100% - var(--dockhead)); aspect-ratio: 820 / 1100; }
@@ -116,6 +128,10 @@
     .note { position: relative; left: auto; bottom: auto; max-width: none; margin: 12px; }
     .status { position: sticky; bottom: 0; height: auto; flex-wrap: wrap; gap: 2px 10px; padding: 10px 12px; }
     .status p { flex-basis: 100%; font-size: .88rem; }
+    .final { position: relative; inset: auto; grid-template-columns: 1fr; padding: 14px; gap: 14px; }
+    .final .result { height: 420px; }
+    .final .result .maptabs { flex-wrap: wrap; }
+    .final .result img { inset: 76px 0 0 0; height: calc(100% - 76px); }
   }
 </style>
 </head>
@@ -253,7 +269,7 @@
       map: { tabs: [["PDF (Beispiel)", "09-pdf.webp"], ["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Ergebnis als PDF" }, note: "So sieht das PDF aus: die sichtbaren Layer mit Legende, Nordpfeil, Maßstab und Quellenangaben. Oben rechts lassen sich die Kartenstile ansehen.",
       text: "Speichern: PDF von A4 bis A0 mit passendem Maßstab, dazu ein GeoPackage mit allen Ergebnis-Layern." },
     { step: 8, shot: "08-fertig", last: true,
-      map: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["PDF", "09-pdf.webp"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
+      map: { tabs: [["PDF", "09-pdf.webp"], ["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
       note: "Fertig – alles gespeichert. Oben rechts die Ergebnisse ansehen.",
       text: "Fertig! Die Quellenvermerke stehen automatisch in Tabelle und PDF." }
   ];
@@ -294,7 +310,26 @@
     return '<div class="card' + (typeof c[2] === "string" ? "" : " wide") + '"><span class="kicker">' + kicker + "</span><h3>" + c[0] + "</h3><p>" + c[1] + "</p>" + art + "</div>";
   }
 
+  function renderFinal(p) {
+    var t = p.map.tabs[Math.min(tab, p.map.tabs.length - 1)];
+    var tabs = p.map.tabs.map(function (x, i) { return '<button type="button" data-tab="' + i + '" aria-pressed="' + (x === t) + '">' + x[0] + "</button>"; }).join("");
+    canvas.innerHTML = '<div class="final"><div class="card done"><span class="kicker">Schritt 8 von 8 · geschafft</span><h2>Fertig!</h2>' +
+      "<p>Deine Bestandsanalyse ist gespeichert. Das hast du jetzt:</p><ul>" +
+      "<li>geordnete Ergebnis-Layer in QGIS</li><li>eine PDF-Karte mit Legende und Maßstab</li>" +
+      "<li>ein GeoPackage mit allen Daten</li><li>Quellenangaben – automatisch dabei</li></ul>" +
+      '<div class="actions"><a class="go" href="' + DOWNLOAD + '">Plugin herunterladen</a>' +
+      '<button type="button" id="restart">Demo neu starten</button><button type="button" id="finalback">‹ Zurück</button></div></div>' +
+      '<div class="result"><div class="maptabs" role="group" aria-label="Ergebnis ansehen">' + tabs + "</div>" +
+      '<img src="' + img(t[1]) + '" alt="' + t[0] + '"></div></div>';
+    canvas.querySelectorAll("[data-tab]").forEach(function (b) {
+      b.addEventListener("click", function () { tab = +b.getAttribute("data-tab"); renderFinal(p); });
+    });
+    $("restart").addEventListener("click", restart);
+    $("finalback").addEventListener("click", back);
+  }
+
   function renderCanvas(p) {
+    if (p.last) { renderFinal(p); return; }
     if (p.card) {
       canvas.innerHTML = '<div class="guide">' + cardHtml(p.card, "Im Kartenfenster") + "</div>";
       return;
@@ -322,6 +357,7 @@
     if (page < 0) { renderIntro(); return; }
     body.classList.remove("is-intro");
     var p = pages[page], other = stil === "pixel" ? "klassisch" : "pixel";
+    body.classList.toggle("is-final", !!p.last);
     renderCanvas(p);
     // Alles wird im Plugin bedient: Zurück, Weiter (leuchtet), Paletten-Symbol
     var html = '<img src="' + img(shotOf(p), stil) + '" alt="Plugin, Schritt ' + p.step + ', Stil ' + NAMES[stil] + '">' +
@@ -353,7 +389,7 @@
   function start(s) { useStil(s); page = 0; tab = 0; render(); }
   // Paletten-Symbol: nur der Stil wechselt, die Seite bleibt dieselbe
   function switchStil(s) { useStil(s); render(); }
-  function restart() { stil = null; page = -1; tab = 0; render(); }
+  function restart() { stil = null; page = -1; tab = 0; body.classList.remove("is-final"); render(); }
   function forward() { if (page >= 0 && page < pages.length - 1) { page++; tab = 0; render(); } }
   function back() { if (page > 0) { page--; tab = 0; render(); } else if (page === 0) { restart(); } }
 
