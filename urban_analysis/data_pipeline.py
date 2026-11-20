@@ -1030,13 +1030,17 @@ class GeoPackageImporter:
         profile: Optional[LayerProfile],
         records: Sequence[HarmonizedRecord],
     ) -> List[LayerDescriptor]:
-        """One descriptor per layer, or per category for layers a profile splits."""
+        """One descriptor per layer, or per category for layers a profile splits.
+
+        A generic type such as ``GEOMETRY`` (ALKIS exports and downloads) is
+        replaced by the type the objects really have (see
+        ``_geometry_type_from_records``)."""
         if profile is None or not profile.splits_layer or not records:
             return [
                 LayerDescriptor(
                     layer_id=layer.table_name,
                     name=layer.table_name,
-                    geometry_type=layer.geometry_type,
+                    geometry_type=_geometry_type_from_records(layer.geometry_type, records),
                     source_name=file_path.name,
                     category=category,
                 )
@@ -1054,7 +1058,9 @@ class GeoPackageImporter:
                     LayerDescriptor(
                         layer_id=layer_id,
                         name=f"{layer.table_name} – {rule_category}",
-                        geometry_type=layer.geometry_type,
+                        geometry_type=_geometry_type_from_records(
+                            layer.geometry_type,
+                            [record for record in records if record.layer_id == layer_id]),
                         source_name=file_path.name,
                         category=rule_category,
                     )
@@ -1657,6 +1663,40 @@ def _geometry_kind(geometry_type: Optional[str]) -> str:
         if key in text:
             return kind
     return _normalized(text) or "geometrie"
+
+
+_GEOMETRY_KIND_TYPES = {"punkte": "MULTIPOINT", "linien": "MULTILINESTRING", "flaechen": "MULTIPOLYGON"}
+
+
+def _geometry_type_from_records(geometry_type: Optional[str], records: Sequence[HarmonizedRecord]) -> Optional[str]:
+    """Geometry type for a layer whose GeoPackage only says ``GEOMETRY``.
+
+    Some files (ALKIS exports such as ``…_kon.gpkg`` and the ALKIS download)
+    store every table with the generic type ``GEOMETRY``.  Then the layer is
+    neither points, lines nor areas, so the same category from ALKIS and OSM
+    was not combined into one result layer and got no geometry word.  If all
+    readable objects of the layer are of one kind, that kind is used
+    (``MULTIPOLYGON`` etc.); mixed or unreadable layers keep the original type.
+    """
+    if _geometry_kind(geometry_type) in _GEOMETRY_KIND_TYPES:
+        return geometry_type
+    kinds = set()
+    for record in records:
+        try:
+            geometry = read_geometry(record.geometry)
+        except GeometryError:
+            continue
+        if geometry is None or geometry.is_empty:
+            continue
+        if geometry.points:
+            kinds.add("punkte")
+        if geometry.lines:
+            kinds.add("linien")
+        if geometry.polygons:
+            kinds.add("flaechen")
+        if len(kinds) > 1:
+            return geometry_type
+    return _GEOMETRY_KIND_TYPES[kinds.pop()] if kinds else geometry_type
 
 
 def combine_source_layers(

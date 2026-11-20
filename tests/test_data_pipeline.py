@@ -1471,3 +1471,64 @@ def test_combine_source_layers_keeps_layers_of_one_source_apart():
     records = [harmonized("gebaeude", "OSM"), harmonized("gebaeude_2", "OSM")]
 
     assert combine_source_layers(layers, records) == (layers, records)
+
+
+# --- Geometrietyp „GEOMETRY“ (QGIS-Test 20.11.: ALKIS als eigene Datei + OSM blieben getrennt) ---
+
+
+def make_generic_buildings(path):
+    """Like an ALKIS export: the table is stored with type GEOMETRY, all objects are areas."""
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT, srs_id INTEGER PRIMARY KEY,
+                organization TEXT, organization_coordsys_id INTEGER, definition TEXT
+            );
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT, column_name TEXT, geometry_type_name TEXT,
+                srs_id INTEGER
+            );
+            CREATE TABLE gebaeude (fid INTEGER PRIMARY KEY, geom BLOB, gebaeudefunktion TEXT);
+            """
+        )
+        connection.execute(
+            "INSERT INTO gpkg_spatial_ref_sys VALUES ('ETRS89 / UTM zone 32N', 25832, 'EPSG', 25832, 'undefined')")
+        connection.execute("INSERT INTO gpkg_geometry_columns VALUES ('gebaeude', 'geom', 'GEOMETRY', 25832)")
+        connection.executemany(
+            "INSERT INTO gebaeude VALUES (?, ?, ?)",
+            [(1, gpkg_polygon([(10, 10), (20, 10), (20, 20), (10, 20), (10, 10)]), "Wohnhaus"),
+             (2, gpkg_polygon([(30, 10), (40, 10), (40, 20), (30, 20), (30, 10)]), "Garage")],
+        )
+
+
+def test_generic_geometry_type_becomes_the_real_type(tmp_path):
+    path = tmp_path / "alkis_export.gpkg"
+    make_generic_buildings(path)
+
+    result = import_places(path)
+
+    assert [layer.geometry_type for layer in result.layers] == ["MULTIPOLYGON"]
+
+
+def test_mixed_generic_layer_keeps_its_type(tmp_path):
+    path = tmp_path / "places.gpkg"
+    make_clipping_geopackage(path)
+
+    result = import_places(path)
+
+    assert [layer.geometry_type for layer in result.layers] == ["GEOMETRY"]
+
+
+def test_generic_alkis_buildings_and_osm_buildings_become_one_layer(tmp_path):
+    path = tmp_path / "alkis_export.gpkg"
+    make_generic_buildings(path)
+    own = import_places(path)
+    alkis = replace(own.layers[0], category="Gebäude", source_kind="Eigene Datei")
+    osm = descriptor("multipolygons_gebaeude", "OSM")
+    records = [replace(record, layer_id=alkis.layer_id) for record in own.harmonized_records]
+    records.append(harmonized("multipolygons_gebaeude", "OSM"))
+
+    layers, _ = combine_source_layers([alkis, osm], records)
+
+    assert [layer.layer_id for layer in layers] == ["gebaeude_flaechen_quellen"]
