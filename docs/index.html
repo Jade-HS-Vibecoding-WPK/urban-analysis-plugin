@@ -250,10 +250,10 @@
       map: { bild: "09-erreichbarkeit", label: "Erreichbarkeit – Ringe 300 / 500 m" }, note: "<b>Optional: Erreichbarkeit abschätzen.</b> Die Ergebnis-Layer sind fertig – wer mag, berechnet zusätzlich Abstände: zu Zielen aus den Daten (z. B. Gesundheit, Nahversorgung, Bildung) oder zu eigenen Punkten. Ergebnis: Ringe um die Ziele und der Abstand jedes Gebäudes (Luftlinie).",
       text: "Erreichbarkeit (optional): Abstände zu Zielen aus den Daten oder zu eigenen Punkten abschätzen." },
     { step: 8, shot: "08-speichern", corner: "pixel", btn: "Speichern",
-      map: { tabs: [["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Karte für das PDF" }, note: "Das PDF zeigt die sichtbaren Layer – mit Legende, Nordpfeil, Maßstab und Quellen. Oben rechts den Kartenstil umschalten.",
+      map: { tabs: [["PDF (Beispiel)", "09-pdf.webp"], ["Schwarzplan", "09-karte-schwarzplan"], ["Nutzungskarte", "09-karte-nutzung"]], label: "Ergebnis als PDF" }, note: "So sieht das PDF aus: die sichtbaren Layer mit Legende, Nordpfeil, Maßstab und Quellenangaben. Oben rechts lassen sich die Kartenstile ansehen.",
       text: "Speichern: PDF von A4 bis A0 mit passendem Maßstab, dazu ein GeoPackage mit allen Ergebnis-Layern." },
     { step: 8, shot: "08-fertig", last: true,
-      map: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
+      map: { tabs: [["Nutzungskarte", "09-karte-nutzung"], ["Schwarzplan", "09-karte-schwarzplan"], ["PDF", "09-pdf.webp"], ["Erreichbarkeit", "09-erreichbarkeit"], ["Tabelle", "09-tabelle"], ["Ebenen", "09-layer"]], label: "Ergebnis" },
       note: "Fertig – alles gespeichert. Oben rechts die Ergebnisse ansehen.",
       text: "Fertig! Die Quellenvermerke stehen automatisch in Tabelle und PDF." }
   ];
@@ -262,7 +262,7 @@
   // Der Stil wird am Anfang gewählt und bleibt gleich – wechseln nur über das Paletten-Symbol im Plugin.
   var stil = null, page = -1, tab = 0, pages = [];
 
-  function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + ".jpg"; }
+  function img(name, s) { return "bilder/" + name + (s ? "-" + s : "") + (name.indexOf(".") < 0 ? ".jpg" : ""); }
   function $(id) { return document.getElementById(id); }
   function shotOf(p) { return (p.alt && p.alt[stil]) || p.shot; }
   function hitStyle(r) {
